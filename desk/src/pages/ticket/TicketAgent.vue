@@ -154,6 +154,12 @@ onMounted(() => {
       reloadTicket(props.ticketId);
     }
   });
+
+  $socket.on("helpdesk:whatsapp-message", (data: { ticket: string }) => {
+    if (data.ticket == props.ticketId) {
+      // WhatsAppChatTab handles its own refresh via its own socket listener
+    }
+  });
 });
 
 onBeforeUnmount(() => {
@@ -164,6 +170,7 @@ onBeforeUnmount(() => {
   $socket.off("ticket_update");
   $socket.off("helpdesk:ticket-comment");
   $socket.off("helpdesk:ticket-update");
+  $socket.off("helpdesk:whatsapp-message");
 });
 
 usePageMeta(() => {

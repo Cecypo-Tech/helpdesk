@@ -6,34 +6,41 @@
     class="[&_[role='tab']]:px-0 [&_[role='tablist']]:px-5 [&_[role='tablist']]:gap-7.5 [&_[role='tablist']]:flex-shrink-0"
   >
     <template #tab-panel="{ tab }">
-      <TicketAgentActivities
-        v-if="Boolean(activities.data)"
-        ref="ticketAgentActivitiesRef"
-        :activities="filterActivities(tab.name as TicketTab)"
-        :title="tab.label"
-        :ticket-status="ticket.doc.status"
-        @email:reply="
-          (e) => {
-            communicationAreaRef.replyToEmail(e);
-          }
-        "
-        @update="
-          () => {
-            activities.reload();
-            ticketAgentActivitiesRef.scrollToLatestActivity();
-          }
-        "
+      <WhatsAppChatTab
+        v-if="tab.name === 'whatsapp'"
+        :ticketId="String(ticket.doc?.name)"
       />
-      <div v-else class="flex items-center justify-center flex-col mt-20">
-        <LoadingIndicator :scale="8" class="text-ink-gray-5" />
-        <p class="text-xl font-medium text-ink-gray-5 absolute top-[50%]">
-          Loading...
-        </p>
-      </div>
+      <template v-else>
+        <TicketAgentActivities
+          v-if="Boolean(activities.data)"
+          ref="ticketAgentActivitiesRef"
+          :activities="filterActivities(tab.name as TicketTab)"
+          :title="tab.label"
+          :ticket-status="ticket.doc.status"
+          @email:reply="
+            (e) => {
+              communicationAreaRef.replyToEmail(e);
+            }
+          "
+          @update="
+            () => {
+              activities.reload();
+              ticketAgentActivitiesRef.scrollToLatestActivity();
+            }
+          "
+        />
+        <div v-else class="flex items-center justify-center flex-col mt-20">
+          <LoadingIndicator :scale="8" class="text-ink-gray-5" />
+          <p class="text-xl font-medium text-ink-gray-5 absolute top-[50%]">
+            Loading...
+          </p>
+        </div>
+      </template>
     </template>
   </Tabs>
   <!-- Comm Area -->
   <CommunicationArea
+    v-if="activeTabName !== 'whatsapp'"
     ref="communicationAreaRef"
     :ticketId="String(ticket.doc?.name)"
     :to-emails="[ticket.doc?.raised_by]"
@@ -55,7 +62,9 @@ import {
   CommentIcon,
   EmailIcon,
   PhoneIcon,
+  WhatsAppIcon,
 } from "@/components/icons";
+import WhatsAppChatTab from "@/components/whatsapp/WhatsAppChatTab.vue";
 import { useActiveTabManager } from "@/composables/useActiveTabManager";
 import { useTelephonyStore } from "@/stores/telephony";
 import {
@@ -81,6 +90,8 @@ const ticketAgentActivitiesRef = ref(null);
 const communicationAreaRef = ref(null);
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
+
+const hasWhatsApp = true;
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [
@@ -108,10 +119,24 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
       icon: PhoneIcon,
     });
   }
+
+  if (hasWhatsApp) {
+    _tabs.push({
+      name: "whatsapp",
+      label: "WhatsApp",
+      icon: WhatsAppIcon,
+    });
+  }
+
   return _tabs;
 });
 
 const { tabIndex, changeTabTo } = useActiveTabManager(tabs);
+
+const activeTabName = computed(() => {
+  const currentTabs = tabs.value;
+  return currentTabs[tabIndex.value]?.name || "activity";
+});
 
 // TODO: refactor for pagination
 // can be done once we sort out the backend

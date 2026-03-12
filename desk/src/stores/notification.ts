@@ -67,6 +67,18 @@ export const useNotificationStore = defineStore("notification", () => {
     resource.reload();
   });
 
+  $socket.on("helpdesk:whatsapp-message", (data: { is_incoming: boolean }) => {
+    if (isCustomerPortal.value) return;
+    if (data.is_incoming) {
+      resource.reload();
+      try {
+        const audio = new Audio("/assets/frappe/sounds/alert.mp3");
+        audio.volume = 0.4;
+        audio.play();
+      } catch (_) {}
+    }
+  });
+
   return {
     clear,
     data,

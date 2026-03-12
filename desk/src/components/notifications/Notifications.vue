@@ -48,7 +48,10 @@
           }
         "
       >
-        <UserAvatar :name="n.user_from" />
+        <div v-if="n.notification_type === 'WhatsApp'" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-600">
+          <WhatsAppIcon class="h-4 w-4" />
+        </div>
+        <UserAvatar v-else :name="n.user_from" />
         <span>
           <div class="mb-2 leading-5">
             <span class="space-x-1 text-gray-700">
@@ -56,7 +59,7 @@
                 class="font-medium text-gray-900"
                 v-if="n.notification_type !== 'Reaction' || !n.message"
               >
-                {{ n.user_from }}
+                {{ n.notification_type === 'WhatsApp' ? '' : n.user_from }}
               </span>
               <span v-if="n.notification_type === 'Mention'"
                 >mentioned you in ticket</span
@@ -66,6 +69,9 @@
               >
               <span v-if="n.notification_type === 'Reaction'">
                 {{ n.message || "has reopened the ticket" }}
+              </span>
+              <span v-if="n.notification_type === 'WhatsApp'" class="text-sm text-gray-600">
+                {{ n.message }}
               </span>
             </span>
             <span class="font-medium text-gray-900"
@@ -93,6 +99,7 @@
 
 <script setup lang="ts">
 import { UserAvatar } from "@/components";
+import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import { dayjs } from "@/dayjs";
 import { useNotificationStore } from "@/stores/notification";
 import { useSidebarStore } from "@/stores/sidebar";
@@ -147,6 +154,13 @@ function getRoute(n: Notification) {
         hash: n.reference_comment
           ? "#comment-" + n.reference_comment
           : undefined,
+      };
+    case "WhatsApp":
+      return {
+        name: "TicketAgent",
+        params: {
+          ticketId: n.reference_ticket,
+        },
       };
   }
 }
