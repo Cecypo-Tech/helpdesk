@@ -14,14 +14,28 @@
         </p>
       </div>
       <div class="px-5 text-ink-gray-5 pb-2">
+        <!-- Company -->
+        <div class="flex gap-2 items-center p-1.5" v-if="contact.data.company_name">
+          <LucideBuilding2 class="size-4 shrink-0" />
+          <p class="text-p-sm text-ink-gray-6 truncate">
+            {{ contact.data.company_name }}
+          </p>
+        </div>
+        <!-- Designation -->
+        <div class="flex gap-2 items-center p-1.5" v-if="contact.data.designation">
+          <LucideBriefcase class="size-4 shrink-0" />
+          <p class="text-p-sm text-ink-gray-6 truncate">
+            {{ contact.data.designation }}
+          </p>
+        </div>
         <!-- Email Id -->
         <div class="flex gap-2 items-center p-1.5">
-          <EmailIcon class="size-4" />
-          <p class="text-p-sm text-ink-gray-6 hover:underline cursor-pointer">
+          <EmailIcon class="size-4 shrink-0" />
+          <p class="text-p-sm text-ink-gray-6 truncate">
             {{ contact.data.email_id }}
           </p>
           <CopyIcon
-            class="size-4 cursor-pointer"
+            class="size-4 shrink-0 cursor-pointer"
             @click="
               copyToClipboard(
                 contact.data.email_id,
@@ -33,23 +47,18 @@
         <!-- Mobile Number -->
         <div
           class="flex gap-2 items-center p-1.5"
-          v-if="
-            isCallingEnabled && (contact.data.mobile_no || contact.data.phone)
-          "
+          v-if="contact.data.mobile_no || contact.data.phone"
         >
-          <PhoneIcon class="size-4" />
-          <p class="text-p-sm text-ink-gray-6 hover:underline cursor-pointer">
+          <PhoneIcon class="size-4 shrink-0" />
+          <p class="text-p-sm text-ink-gray-6 truncate">
             {{ contact.data.mobile_no || contact.data.phone }}
           </p>
           <CopyIcon
-            class="size-4 cursor-pointer"
-            v-if="contact.data.mobile_no || contact.data.phone"
+            class="size-4 shrink-0 cursor-pointer"
             @click="
               copyToClipboard(
                 contact.data.mobile_no || contact.data.phone,
-                `'${
-                  contact.data.mobile_no || contact.data.phone
-                }' copied to clipboard`
+                `'${contact.data.mobile_no || contact.data.phone}' copied to clipboard`
               )
             "
           />
