@@ -1,0 +1,87 @@
+{
+ "actions": [],
+ "creation": "2026-03-11 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "unknown_contact_action",
+  "new_conversation_timeout_hours",
+  "default_ticket_type",
+  "default_team",
+  "placeholder_email_domain",
+  "customer_reply_status",
+  "agent_reply_status"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "Skip Ticket Creation",
+   "fieldname": "unknown_contact_action",
+   "fieldtype": "Select",
+   "label": "Unknown Contact Action",
+   "options": "Skip Ticket Creation\nCreate Ticket Only\nCreate Contact and Ticket"
+  },
+  {
+   "default": "24",
+   "fieldname": "new_conversation_timeout_hours",
+   "fieldtype": "Int",
+   "label": "New Conversation Timeout (Hours)"
+  },
+  {
+   "fieldname": "default_ticket_type",
+   "fieldtype": "Link",
+   "label": "Default Ticket Type",
+   "options": "HD Ticket Type"
+  },
+  {
+   "fieldname": "default_team",
+   "fieldtype": "Link",
+   "label": "Default Team",
+   "options": "HD Team"
+  },
+  {
+   "default": "whatsapp.placeholder.local",
+   "fieldname": "placeholder_email_domain",
+   "fieldtype": "Data",
+   "label": "Placeholder Email Domain"
+  },
+  {
+   "fieldname": "customer_reply_status",
+   "fieldtype": "Link",
+   "label": "Status on Customer Reply",
+   "options": "HD Ticket Status",
+   "description": "Set ticket to this status when a customer sends a WhatsApp message"
+  },
+  {
+   "fieldname": "agent_reply_status",
+   "fieldtype": "Link",
+   "label": "Status on Agent Reply",
+   "options": "HD Ticket Status",
+   "description": "Set ticket to this status when an agent sends a WhatsApp reply"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-03-11 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "WhatsApp Helpdesk Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

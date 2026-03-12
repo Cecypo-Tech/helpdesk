@@ -159,7 +159,7 @@ function onPaste(e: ClipboardEvent) {
 }
 
 const sendReply = createResource({
-  url: "whatsapp_chat.api.helpdesk.send_whatsapp_reply",
+  url: "helpdesk.integrations.whatsapp.send_whatsapp_reply",
   onSuccess() {
     text.value = "";
     sending.value = false;

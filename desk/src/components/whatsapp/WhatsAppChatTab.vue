@@ -92,19 +92,19 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const pickingUp = ref(false);
 
 const messages = createResource({
-  url: "whatsapp_chat.api.helpdesk.get_whatsapp_messages",
+  url: "helpdesk.integrations.whatsapp.get_whatsapp_messages",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const ticketInfo = createResource({
-  url: "whatsapp_chat.api.helpdesk.get_ticket_whatsapp_info",
+  url: "helpdesk.integrations.whatsapp.get_ticket_whatsapp_info",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const markReadResource = createResource({
-  url: "whatsapp_chat.api.helpdesk.mark_messages_read",
+  url: "helpdesk.integrations.whatsapp.mark_messages_read",
 });
 
 function markAsRead() {
@@ -112,7 +112,7 @@ function markAsRead() {
 }
 
 const pickUpResource = createResource({
-  url: "whatsapp_chat.api.helpdesk.pickup_ticket",
+  url: "helpdesk.integrations.whatsapp.pickup_ticket",
   onSuccess() {
     pickingUp.value = false;
     ticketInfo.reload();
