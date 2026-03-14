@@ -176,6 +176,25 @@ def _notify_assigned_agents(ticket_name: str, message: str | None, sender_name: 
 			pass
 
 
+def _send_auto_reply(phone: str, ticket_name: str, template_name: str, contact_name: str) -> None:
+	"""Send a template-based auto-reply when a new ticket is created. Swallows errors."""
+	try:
+		import json as _json
+		frappe.get_doc({
+			"doctype": "WhatsApp Message",
+			"type": "Outgoing",
+			"to": phone,
+			"content_type": "text",
+			"use_template": 1,
+			"template": template_name,
+			"body_param": _json.dumps({"1": contact_name, "2": ticket_name}),
+			"reference_doctype": "HD Ticket",
+			"reference_name": ticket_name,
+		}).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "WhatsApp Auto-Reply Failed")
+
+
 def _publish_whatsapp_message(ticket_name: str, is_incoming: bool) -> None:
 	"""Publish a realtime event to all System Users.
 
@@ -449,6 +468,7 @@ def on_whatsapp_message_insert(doc, method=None):
 			"raised_by": email,
 			"description": doc.message or "",
 			"via_customer_portal": 0,
+			"ticket_channel": "WhatsApp",
 		}
 		if contact_name:
 			ticket_data["contact"] = contact_name
@@ -470,3 +490,6 @@ def on_whatsapp_message_insert(doc, method=None):
 
 		_notify_assigned_agents(ticket_doc.name, doc.message, profile_name)
 		_publish_whatsapp_message(ticket_doc.name, is_incoming=True)
+
+		if settings.send_initial_message and settings.initial_message_template:
+			_send_auto_reply(phone, ticket_doc.name, settings.initial_message_template, profile_name)

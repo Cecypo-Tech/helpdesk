@@ -1,0 +1,41 @@
+[
+  {
+    "doctype": "WhatsApp Templates",
+    "template_name": "hd_tech_support_welcome",
+    "template": "Hello {{1}},\n\nThank you for reaching out! Your support ticket #{{2}} has been created and our team will get back to you shortly.\n\nWhich of our products does this issue relate to?",
+    "category": "UTILITY",
+    "header_type": "TEXT",
+    "header": "Tech Support",
+    "footer": "Reply STOP to unsubscribe",
+    "buttons": [
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Product A", "sequence": 1},
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Product B", "sequence": 2},
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Other", "sequence": 3}
+    ]
+  },
+  {
+    "doctype": "WhatsApp Templates",
+    "template_name": "hd_service_rating",
+    "template": "Hello {{1}},\n\nYour support ticket #{{2}} has been resolved. We'd love to hear your feedback!\n\nHow would you rate our support?",
+    "category": "UTILITY",
+    "header_type": "TEXT",
+    "header": "Rate Our Service",
+    "buttons": [
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Excellent", "sequence": 1},
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Good", "sequence": 2},
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Poor", "sequence": 3}
+    ]
+  },
+  {
+    "doctype": "WhatsApp Templates",
+    "template_name": "hd_tech_support_followup",
+    "template": "Hello {{1}},\n\nThis is a follow-up on your support ticket #{{2}}. Is your issue resolved?\n\nPlease let us know and we'll be happy to help further.",
+    "category": "UTILITY",
+    "header_type": "TEXT",
+    "header": "Ticket Follow-Up",
+    "buttons": [
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "Yes, resolved", "sequence": 1},
+      {"doctype": "WhatsApp Button", "button_type": "Quick Reply", "button_label": "No, still open", "sequence": 2}
+    ]
+  }
+]

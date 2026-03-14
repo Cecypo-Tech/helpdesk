@@ -92,6 +92,10 @@ export interface HDTicket extends DocType {
   email_account?: string;
   /** Via Customer Portal: Check */
   via_customer_portal: 0 | 1;
+  /** Channel: Select */
+  ticket_channel?: string;
+  /** Product: Select */
+  product?: string;
   /** Attachment: Attach */
   attachment?: any;
   /** Content Type: Data */

@@ -11,7 +11,8 @@
   "template_name",
   "about",
   "fields",
-  "description_template"
+  "description_template",
+  "custom_related_to"
  ],
  "fields": [
   {
@@ -36,13 +37,20 @@
    "fieldname": "description_template",
    "fieldtype": "Text Editor",
    "label": "Description Template"
+  },
+  {
+   "fieldname": "custom_related_to",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Related to",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-13 16:38:21.075242",
- "modified_by": "Administrator",
+ "modified": "2026-03-14 12:54:11.044508",
+ "modified_by": "kushal@cecypo.tech",
  "module": "Helpdesk",
  "name": "HD Ticket Template",
  "naming_rule": "By fieldname",

@@ -74,6 +74,8 @@ class HDTicket(Document):
 
     def before_insert(self):
         self.generate_key()
+        if not self.ticket_channel:
+            self.ticket_channel = "Portal" if self.via_customer_portal else "Email"
 
     def before_validate(self):
         self.check_update_perms()

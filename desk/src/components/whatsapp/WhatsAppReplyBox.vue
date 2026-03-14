@@ -51,6 +51,15 @@
         @change="onFileSelected"
       />
 
+      <!-- Saved Replies button -->
+      <button
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        title="Saved Replies"
+        @click="showSavedReplies = true"
+      >
+        <SavedReplyIcon class="h-4 w-4" />
+      </button>
+
       <textarea
         ref="textareaRef"
         v-model="text"
@@ -77,11 +86,21 @@
     </div>
     <p v-if="dragging" class="mt-1 text-center text-xs text-blue-500">Drop file to attach</p>
   </div>
+
+  <SavedRepliesSelectorModal
+    v-if="showSavedReplies"
+    v-model="showSavedReplies"
+    doctype="HD Ticket"
+    :ticketId="ticketId"
+    @apply="applySavedReply"
+  />
 </template>
 
 <script setup lang="ts">
 import { createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick } from "vue";
+import SavedReplyIcon from "@/components/icons/SavedReplyIcon.vue";
+import SavedRepliesSelectorModal from "@/components/SavedRepliesSelectorModal.vue";
 
 const props = defineProps<{
   ticketId: string;
@@ -94,6 +113,7 @@ const emit = defineEmits<{
 const text = ref("");
 const sending = ref(false);
 const dragging = ref(false);
+const showSavedReplies = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -218,6 +238,18 @@ async function send() {
     sending.value = false;
     toast.error("Failed to upload file");
   }
+}
+
+function stripHtml(html: string): string {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return (tmp.textContent || tmp.innerText || "").trim();
+}
+
+function applySavedReply(content: string) {
+  text.value = stripHtml(content);
+  showSavedReplies.value = false;
+  nextTick(() => autoResize());
 }
 
 function autoResize() {

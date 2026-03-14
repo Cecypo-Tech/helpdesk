@@ -11,7 +11,9 @@
   "default_team",
   "placeholder_email_domain",
   "customer_reply_status",
-  "agent_reply_status"
+  "agent_reply_status",
+  "send_initial_message",
+  "initial_message_template"
  ],
  "fields": [
   {
@@ -64,6 +66,20 @@
    "label": "Status on Agent Reply",
    "options": "HD Ticket Status",
    "description": "Set ticket to this status when an agent sends a WhatsApp reply"
+  },
+  {
+   "default": "0",
+   "fieldname": "send_initial_message",
+   "fieldtype": "Check",
+   "label": "Send Initial Message on New Ticket"
+  },
+  {
+   "fieldname": "initial_message_template",
+   "fieldtype": "Link",
+   "label": "Initial Message Template",
+   "options": "WhatsApp Templates",
+   "depends_on": "send_initial_message",
+   "description": "WhatsApp Template to send on new ticket. Template variables: {{1}} = contact name, {{2}} = ticket ID. Must be approved by Meta."
   }
  ],
  "issingle": 1,

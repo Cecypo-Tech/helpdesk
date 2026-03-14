@@ -165,7 +165,7 @@ const sections = computed(() => [
   },
   {
     label: "Source",
-    value: props.ticket.via_customer_portal ? "Portal" : "Mail",
+    value: props.ticket.ticket_channel || (props.ticket.via_customer_portal ? "Portal" : "Email"),
   },
 ]);
 

@@ -69,7 +69,11 @@
             class="[&_[role='tab']]:px-0 [&_[role='tablist']]:px-5 [&_[role='tablist']]:gap-7.5"
           >
             <template #tab-panel="{ tab }">
-              <div v-if="tab.name === 'details'">
+              <WhatsAppChatTab
+                v-if="tab.name === 'whatsapp'"
+                :ticketId="String(ticket.data?.name)"
+              />
+              <div v-else-if="tab.name === 'details'">
                 <!-- ticket contact info -->
                 <TicketAgentContact
                   :contact="ticket.data.contact"
@@ -119,6 +123,7 @@
             </template>
           </Tabs>
           <CommunicationArea
+            v-if="activeTabName !== 'whatsapp'"
             class="sticky bottom-0 z-50 bg-white"
             ref="communicationAreaRef"
             v-model="ticket.data"
@@ -228,8 +233,10 @@ import {
   EmailIcon,
   IndicatorIcon,
   PhoneIcon,
+  WhatsAppIcon,
 } from "@/components/icons";
 import { TicketAgentActivities } from "@/components/ticket";
+import WhatsAppChatTab from "@/components/whatsapp/WhatsAppChatTab.vue";
 
 import TicketAgentDetails from "@/components/ticket/TicketAgentDetails.vue";
 import TicketAgentFields from "@/components/ticket/TicketAgentFields.vue";
@@ -378,10 +385,17 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
       icon: PhoneIcon,
     });
   }
+  _tabs.push({
+    name: "whatsapp",
+    label: __("WhatsApp"),
+    icon: WhatsAppIcon,
+  });
   return _tabs;
 });
 
 const { tabIndex, changeTabTo } = useActiveTabManager(tabs);
+
+const activeTabName = computed(() => tabs.value[tabIndex.value]?.name || "activity");
 
 const activities = computed(() => {
   const emailProps = ticket.data.communications.map((email, idx: number) => {

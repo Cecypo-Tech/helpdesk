@@ -105,3 +105,7 @@ setup_wizard_complete = "helpdesk.setup.setup_wizard.setup_complete"
 
 before_tests = "helpdesk.test_utils.before_tests"
 auth_hooks = ["helpdesk.auth.authenticate"]
+
+fixtures = [
+    {"dt": "WhatsApp Templates", "filters": [["template_name", "like", "hd_%"]]}
+]
