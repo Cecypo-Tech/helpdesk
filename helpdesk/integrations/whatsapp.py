@@ -183,9 +183,9 @@ def _send_auto_reply(phone: str, ticket_name: str, template_name: str, contact_n
 		frappe.get_doc({
 			"doctype": "WhatsApp Message",
 			"type": "Outgoing",
+			"message_type": "Template",
 			"to": phone,
 			"content_type": "text",
-			"use_template": 1,
 			"template": template_name,
 			"body_param": _json.dumps({"1": contact_name, "2": ticket_name}),
 			"reference_doctype": "HD Ticket",
