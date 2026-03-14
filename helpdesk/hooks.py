@@ -106,6 +106,6 @@ setup_wizard_complete = "helpdesk.setup.setup_wizard.setup_complete"
 before_tests = "helpdesk.test_utils.before_tests"
 auth_hooks = ["helpdesk.auth.authenticate"]
 
-fixtures = [
-    {"dt": "WhatsApp Templates", "filters": [["template_name", "like", "hd_%"]]}
-]
+# WhatsApp Templates are seeded via a patch (seed_whatsapp_templates) instead of
+# fixtures because WhatsAppTemplates.after_insert() immediately POSTs to Meta's API,
+# which breaks fixture import. The patch uses db_insert() to bypass that hook.

@@ -343,6 +343,13 @@ def get_ticket_whatsapp_info(ticket: str) -> dict:
 	}
 
 
+@frappe.whitelist()
+def get_product_options() -> list[str]:
+	"""Return the product list from WhatsApp Helpdesk Settings as an array."""
+	raw = frappe.db.get_single_value("WhatsApp Helpdesk Settings", "product_list") or ""
+	return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
 def on_whatsapp_message_update(doc, method=None):
 	"""Hook fired on WhatsApp Message on_update — publishes status changes to the helpdesk tab."""
 	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:

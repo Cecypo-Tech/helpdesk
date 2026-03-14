@@ -13,7 +13,8 @@
   "customer_reply_status",
   "agent_reply_status",
   "send_initial_message",
-  "initial_message_template"
+  "initial_message_template",
+  "product_list"
  ],
  "fields": [
   {
@@ -72,6 +73,12 @@
    "fieldname": "send_initial_message",
    "fieldtype": "Check",
    "label": "Send Initial Message on New Ticket"
+  },
+  {
+   "fieldname": "product_list",
+   "fieldtype": "Small Text",
+   "label": "Product List",
+   "description": "One product per line. Used to populate the Product field on tickets. Update this list before submitting the welcome template to WhatsApp."
   },
   {
    "fieldname": "initial_message_template",
