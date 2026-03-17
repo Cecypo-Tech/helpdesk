@@ -1,6 +1,8 @@
+import json
 import re
 
 import frappe
+import requests as _requests
 from frappe import _
 from frappe.utils import now_datetime, time_diff_in_hours
 
@@ -176,18 +178,31 @@ def _notify_assigned_agents(ticket_name: str, message: str | None, sender_name: 
 			pass
 
 
+def _render_template_message(template_name: str, params: dict) -> str:
+	"""Render a WhatsApp template body by substituting {{1}}, {{2}}… placeholders."""
+	try:
+		body = frappe.db.get_value("WhatsApp Templates", template_name, "template") or ""
+		for key, val in params.items():
+			body = body.replace(f"{{{{{key}}}}}", str(val or ""))
+		return body
+	except Exception:
+		return ""
+
+
 def _send_auto_reply(phone: str, ticket_name: str, template_name: str, contact_name: str) -> None:
 	"""Send a template-based auto-reply when a new ticket is created. Swallows errors."""
 	try:
-		import json as _json
+		body_param = {"1": contact_name, "2": ticket_name}
+		rendered = _render_template_message(template_name, body_param)
 		frappe.get_doc({
 			"doctype": "WhatsApp Message",
 			"type": "Outgoing",
 			"message_type": "Template",
+			"message": rendered,
 			"to": phone,
 			"content_type": "text",
 			"template": template_name,
-			"body_param": _json.dumps({"1": contact_name, "2": ticket_name}),
+			"body_param": json.dumps(body_param),
 			"reference_doctype": "HD Ticket",
 			"reference_name": ticket_name,
 		}).insert(ignore_permissions=True)
@@ -217,21 +232,46 @@ def get_whatsapp_messages(ticket: str) -> list[dict]:
 	from frappe.query_builder import DocType
 
 	WM = DocType("WhatsApp Message")
+	User = DocType("User")
 	messages = (
 		frappe.qb.from_(WM)
+		.left_join(User).on(User.name == WM.owner)
 		.select(
 			WM.name, WM.creation, WM.type, WM.message, WM.content_type,
 			WM.attach, WM.status, WM.profile_name, WM["from"], WM["to"],
+			WM.owner, User.full_name.as_("sender_full_name"),
+			WM.template, WM.template_parameters,
 		)
 		.where(WM.reference_doctype == "HD Ticket")
 		.where(WM.reference_name == ticket)
 		.orderby(WM.creation)
 		.run(as_dict=True)
 	)
-	# Ensure datetime fields are serialized as strings
+
+	# Cache template bodies for any template messages with empty message field
+	template_cache: dict[str, str] = {}
 	for m in messages:
 		if m.get("creation") and not isinstance(m["creation"], str):
 			m["creation"] = str(m["creation"])
+
+		if not m.get("message") and m.get("template"):
+			tpl_name = m["template"]
+			if tpl_name not in template_cache:
+				template_cache[tpl_name] = (
+					frappe.db.get_value("WhatsApp Templates", tpl_name, "template") or ""
+				)
+			body = template_cache[tpl_name]
+			# template_parameters is a JSON list ["val1", "val2", ...]
+			# where index 0 → {{1}}, index 1 → {{2}}, etc.
+			if body and m.get("template_parameters"):
+				try:
+					params = json.loads(m["template_parameters"])
+					for i, val in enumerate(params, start=1):
+						body = body.replace(f"{{{{{i}}}}}", str(val or ""))
+				except Exception:
+					pass
+			m["message"] = body
+
 	return messages
 
 
@@ -274,6 +314,114 @@ def send_whatsapp_reply(
 		_set_ticket_status(ticket, settings.agent_reply_status)
 
 	return {"name": msg_doc.name, "status": msg_doc.status}
+
+
+@frappe.whitelist(allow_guest=False)
+def send_whatsapp_media(ticket: str, message: str = "", content_type: str = "document") -> dict:
+	"""Upload a file directly to WhatsApp Media API and send — no Frappe File storage."""
+	from frappe_whatsapp.utils import get_whatsapp_account, format_number
+
+	phone = get_contact_phone(ticket)
+	if not phone:
+		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+
+	file_obj = frappe.request.files.get("file")
+	if not file_obj:
+		frappe.throw(_("No file provided."))
+
+	filename = file_obj.filename or "attachment"
+	mime_type = file_obj.content_type or "application/octet-stream"
+	file_data = file_obj.read()
+
+	# Derive content_type from mime if not specified by caller
+	if content_type == "document":
+		if mime_type.startswith("image/"):
+			content_type = "image"
+		elif mime_type.startswith("video/"):
+			content_type = "video"
+		elif mime_type.startswith("audio/"):
+			content_type = "audio"
+
+	account = get_whatsapp_account(account_type="outgoing")
+	if not account:
+		frappe.throw(_("No default outgoing WhatsApp Account configured."))
+
+	token = account.get_password("token")
+	base_url = f"{account.url}/{account.version}/{account.phone_id}"
+	auth_headers = {"Authorization": f"Bearer {token}"}
+
+	# 1. Upload media to WhatsApp
+	media_resp = _requests.post(
+		f"{base_url}/media",
+		headers=auth_headers,
+		files={
+			"file": (filename, file_data, mime_type),
+			"messaging_product": (None, "whatsapp"),
+			"type": (None, mime_type),
+		},
+	)
+	if not media_resp.ok:
+		frappe.throw(f"WhatsApp media upload failed: {media_resp.text}")
+
+	media_id = media_resp.json().get("id")
+	if not media_id:
+		frappe.throw("WhatsApp did not return a media ID.")
+
+	# 2. Send the message using media_id (no public URL needed)
+	media_payload: dict = {"id": media_id}
+	if content_type in ("image", "video", "document") and message:
+		media_payload["caption"] = message
+	if content_type == "document":
+		media_payload["filename"] = filename
+
+	send_resp = _requests.post(
+		f"{base_url}/messages",
+		headers={**auth_headers, "Content-Type": "application/json"},
+		data=json.dumps({
+			"messaging_product": "whatsapp",
+			"to": format_number(phone),
+			"type": content_type,
+			content_type: media_payload,
+		}),
+	)
+	if not send_resp.ok:
+		frappe.throw(f"WhatsApp send failed: {send_resp.text}")
+
+	wm_id = send_resp.json()["messages"][0]["id"]
+
+	# 3. Record the message in DB.
+	# Set message_type="Template" + message_id=<sent_id> so frappe_whatsapp's
+	# before_insert skips its own send logic (both branches check these conditions).
+	msg_doc = frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"message": message,
+		"content_type": content_type,
+		"message_type": "Template",   # prevents before_insert from re-sending
+		"message_id": wm_id,          # prevents template branch from firing
+		"status": "Success",
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+		# attach intentionally left blank — file is hosted by WhatsApp, not ERPNext
+	})
+	msg_doc.insert(ignore_permissions=True)
+
+	# Auto-assign replying agent if unassigned
+	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+	if not frappe.parse_json(assign_json):
+		try:
+			ticket_doc = frappe.get_doc("HD Ticket", ticket)
+			ticket_doc.assign_agent(frappe.session.user)
+		except Exception:
+			pass
+
+	return {
+		"name": msg_doc.name,
+		"status": "Success",
+		"content_type": content_type,
+		"filename": filename,
+	}
 
 
 @frappe.whitelist()
@@ -334,13 +482,50 @@ def get_ticket_whatsapp_info(ticket: str) -> dict:
 			hours_since = time_diff_in_hours(now_datetime(), last_incoming[0].creation)
 			reply_window_open = hours_since < 24
 
+	settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
 	return {
 		"phone": phone,
 		"is_assigned": is_assigned,
 		"assignees": assigned_users,
 		"has_whatsapp": bool(phone),
 		"reply_window_open": reply_window_open,
+		"allow_template_outside_window": bool(settings.allow_template_outside_window),
 	}
+
+
+@frappe.whitelist()
+def get_outgoing_templates() -> list[dict]:
+	"""Return all WhatsApp Templates available for outgoing agent messages."""
+	templates = frappe.get_all(
+		"WhatsApp Templates",
+		fields=["name", "template_name", "template", "actual_name"],
+		order_by="template_name asc",
+	)
+	return templates
+
+
+@frappe.whitelist()
+def send_template_to_ticket(ticket: str, template_name: str) -> dict:
+	"""Send an approved template message to reopen/start a conversation outside the 24h window.
+
+	Template variables follow the same convention as the initial message:
+	  {{1}} = contact full name, {{2}} = ticket name (HD-XXXX).
+	"""
+	contact_name_field = frappe.db.get_value("HD Ticket", ticket, "contact")
+	if contact_name_field:
+		contact_display = frappe.db.get_value(
+			"Contact", contact_name_field, "full_name"
+		) or contact_name_field
+	else:
+		contact_display = "Customer"
+
+	_send_auto_reply(
+		phone=get_contact_phone(ticket) or frappe.throw(_("No phone number on this ticket.")),
+		ticket_name=ticket,
+		template_name=template_name,
+		contact_name=contact_display,
+	)
+	return {"status": "sent"}
 
 
 @frappe.whitelist()

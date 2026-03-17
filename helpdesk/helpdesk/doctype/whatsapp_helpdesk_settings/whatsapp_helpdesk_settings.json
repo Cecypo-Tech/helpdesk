@@ -14,6 +14,7 @@
   "agent_reply_status",
   "send_initial_message",
   "initial_message_template",
+  "allow_template_outside_window",
   "product_list"
  ],
  "fields": [
@@ -87,6 +88,13 @@
    "options": "WhatsApp Templates",
    "depends_on": "send_initial_message",
    "description": "WhatsApp Template to send on new ticket. Template variables: {{1}} = contact name, {{2}} = ticket ID. Must be approved by Meta."
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_template_outside_window",
+   "fieldtype": "Check",
+   "label": "Allow Template Messages After 24h Window",
+   "description": "When the 24-hour customer service window expires, agents can still send approved WhatsApp templates to restart the conversation. These are billed by Meta as business-initiated conversations."
   }
  ],
  "issingle": 1,

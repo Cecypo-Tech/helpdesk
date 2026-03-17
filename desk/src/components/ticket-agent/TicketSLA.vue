@@ -17,20 +17,26 @@
         >
           #{{ ticket.doc.name }}
         </p>
-        <!-- Via Email -->
+        <!-- Via WhatsApp -->
         <div
-          v-if="!ticket.doc.via_customer_portal"
+          v-if="ticket.doc.ticket_channel === 'WhatsApp'"
           class="text-ink-gray-4 flex items-center"
         >
           <span class="text-ink-gray-4 mr-[6px]">via</span>
-          <EmailIcon class="size-4 inline-block mr-1" />
-          <span class="">Email</span>
+          <WhatsAppIcon class="size-4 inline-block mr-1 text-green-600" />
+          <span class="">WhatsApp</span>
         </div>
         <!-- Via Portal -->
-        <div v-else class="text-ink-gray-4 flex items-center">
+        <div v-else-if="ticket.doc.via_customer_portal" class="text-ink-gray-4 flex items-center">
           <span class="text-ink-gray-4 mr-[6px]">via</span>
           <GlobeIcon class="size-4 inline-block mr-1" />
           <span class="font-medium">Portal</span>
+        </div>
+        <!-- Via Email -->
+        <div v-else class="text-ink-gray-4 flex items-center">
+          <span class="text-ink-gray-4 mr-[6px]">via</span>
+          <EmailIcon class="size-4 inline-block mr-1" />
+          <span class="">Email</span>
         </div>
       </div>
       <!-- divider -->

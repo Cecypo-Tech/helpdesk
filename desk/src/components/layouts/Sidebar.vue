@@ -128,6 +128,13 @@
       />
 
       <SidebarLink
+        :icon="isDark ? LucideSun : LucideMoon"
+        :is-active="false"
+        :is-expanded="isExpanded"
+        :label="isDark ? __('Light mode') : __('Dark mode')"
+        :on-click="toggleDark"
+      />
+      <SidebarLink
         :icon="isExpanded ? LucideArrowLeftFromLine : LucideArrowRightFromLine"
         :is-active="false"
         :is-expanded="isExpanded"
@@ -211,6 +218,8 @@ import { useTelephonyStore } from "@/stores/telephony";
 import { __ } from "@/translation";
 import LucideArrowLeftFromLine from "~icons/lucide/arrow-left-from-line";
 import LucideArrowRightFromLine from "~icons/lucide/arrow-right-from-line";
+import LucideMoon from "~icons/lucide/moon";
+import LucideSun from "~icons/lucide/sun";
 import LucideBell from "~icons/lucide/bell";
 import FileText from "~icons/lucide/file-text";
 import Globe from "~icons/lucide/globe";
@@ -225,12 +234,24 @@ import Timer from "~icons/lucide/timer";
 import UserPen from "~icons/lucide/user-pen";
 import LucideUserPlus from "~icons/lucide/user-plus";
 
+import { useStorage } from "@vueuse/core";
 import {
   setActiveSettingsTab,
   showSettingsModal,
 } from "../Settings/settingsModal";
 
 const { isMobileView } = useScreenSize();
+
+// Dark mode — persisted in localStorage, applied via data-theme on <html>
+const isDark = useStorage("hd-dark-mode", false);
+function applyTheme(dark: boolean) {
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+}
+applyTheme(isDark.value);
+function toggleDark() {
+  isDark.value = !isDark.value;
+  applyTheme(isDark.value);
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -641,6 +662,7 @@ async function getGeneralCategory() {
 function setUpOnboarding() {
   if (!authStore.isManager) return;
   setUp(steps);
+  showHelpModal.value = false; // don't auto-open on every load
   useShortcut({ key: "h", meta: true }, () => {
     showHelpModal.value = !showHelpModal.value;
   });

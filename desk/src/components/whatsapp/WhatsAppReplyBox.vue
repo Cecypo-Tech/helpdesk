@@ -195,59 +195,53 @@ const sendReply = createResource({
   },
 });
 
-async function uploadFile(file: File): Promise<string> {
-  const formData = new FormData();
-  formData.append("file", file, file.name);
-  formData.append("is_private", "0");
-  formData.append("doctype", "WhatsApp Message");
-  formData.append("fieldname", "attach");
-
-  const response = await fetch("/api/method/upload_file", {
-    method: "POST",
-    headers: {
-      "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "",
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error("File upload failed");
-  }
-
-  const data = await response.json();
-  return data.message.file_url as string;
-}
-
 async function send() {
   if ((!text.value.trim() && !attachment.value) || sending.value) return;
   sending.value = true;
 
   try {
-    let fileUrl: string | null = null;
     if (attachment.value) {
-      fileUrl = await uploadFile(attachment.value);
-    }
+      // Send file directly to WhatsApp via our backend — no ERPNext file storage
+      const formData = new FormData();
+      formData.append("file", attachment.value, attachment.value.name);
+      formData.append("ticket", props.ticketId);
+      formData.append("message", text.value.trim());
+      formData.append("content_type", contentType.value);
 
-    sendReply.submit({
-      ticket: props.ticketId,
-      message: text.value.trim(),
-      content_type: fileUrl ? contentType.value : "text",
-      attachment: fileUrl ?? undefined,
-    });
-  } catch {
+      const response = await fetch(
+        "/api/method/helpdesk.integrations.whatsapp.send_whatsapp_media",
+        {
+          method: "POST",
+          headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.exc_type || "Media send failed");
+      }
+
+      text.value = "";
+      sending.value = false;
+      clearAttachment();
+      if (textareaRef.value) textareaRef.value.style.height = "auto";
+      emit("sent");
+    } else {
+      sendReply.submit({
+        ticket: props.ticketId,
+        message: text.value.trim(),
+        content_type: "text",
+      });
+    }
+  } catch (e: any) {
     sending.value = false;
-    toast.error("Failed to upload file");
+    toast.error(e?.message || "Failed to send");
   }
 }
 
-function stripHtml(html: string): string {
-  const tmp = document.createElement("div");
-  tmp.innerHTML = html;
-  return (tmp.textContent || tmp.innerText || "").trim();
-}
-
 function applySavedReply(content: string) {
-  text.value = stripHtml(content);
+  text.value = content;
   showSavedReplies.value = false;
   nextTick(() => autoResize());
 }
