@@ -4,20 +4,35 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "section_general",
   "enabled",
   "unknown_contact_action",
   "new_conversation_timeout_hours",
+  "section_ticket_defaults",
   "default_ticket_type",
+  "col_break_ticket",
   "default_team",
+  "col_break_email",
   "placeholder_email_domain",
+  "section_status_automation",
   "customer_reply_status",
+  "col_break_status",
   "agent_reply_status",
+  "section_initial_message",
   "send_initial_message",
   "initial_message_template",
+  "section_template_window",
   "allow_template_outside_window",
+  "allowed_templates",
+  "section_products",
   "product_list"
  ],
  "fields": [
+  {
+   "fieldname": "section_general",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
   {
    "default": "0",
    "fieldname": "enabled",
@@ -35,7 +50,13 @@
    "default": "24",
    "fieldname": "new_conversation_timeout_hours",
    "fieldtype": "Int",
-   "label": "New Conversation Timeout (Hours)"
+   "label": "New Conversation Timeout (Hours)",
+   "description": "After this many hours of no new incoming message, a reply starts a new ticket instead of continuing the old one."
+  },
+  {
+   "fieldname": "section_ticket_defaults",
+   "fieldtype": "Section Break",
+   "label": "Ticket Defaults"
   },
   {
    "fieldname": "default_ticket_type",
@@ -44,30 +65,53 @@
    "options": "HD Ticket Type"
   },
   {
+   "fieldname": "col_break_ticket",
+   "fieldtype": "Column Break"
+  },
+  {
    "fieldname": "default_team",
    "fieldtype": "Link",
    "label": "Default Team",
    "options": "HD Team"
   },
   {
+   "fieldname": "col_break_email",
+   "fieldtype": "Column Break"
+  },
+  {
    "default": "whatsapp.placeholder.local",
    "fieldname": "placeholder_email_domain",
    "fieldtype": "Data",
-   "label": "Placeholder Email Domain"
+   "label": "Placeholder Email Domain",
+   "description": "Domain used for auto-generated email addresses when a WhatsApp contact has no email."
+  },
+  {
+   "fieldname": "section_status_automation",
+   "fieldtype": "Section Break",
+   "label": "Status Automation"
   },
   {
    "fieldname": "customer_reply_status",
    "fieldtype": "Link",
    "label": "Status on Customer Reply",
    "options": "HD Ticket Status",
-   "description": "Set ticket to this status when a customer sends a WhatsApp message"
+   "description": "Set ticket to this status when a customer sends a WhatsApp message."
+  },
+  {
+   "fieldname": "col_break_status",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "agent_reply_status",
    "fieldtype": "Link",
    "label": "Status on Agent Reply",
    "options": "HD Ticket Status",
-   "description": "Set ticket to this status when an agent sends a WhatsApp reply"
+   "description": "Set ticket to this status when an agent sends a WhatsApp reply."
+  },
+  {
+   "fieldname": "section_initial_message",
+   "fieldtype": "Section Break",
+   "label": "Initial Message"
   },
   {
    "default": "0",
@@ -76,30 +120,48 @@
    "label": "Send Initial Message on New Ticket"
   },
   {
-   "fieldname": "product_list",
-   "fieldtype": "Small Text",
-   "label": "Product List",
-   "description": "One product per line. Used to populate the Product field on tickets. Update this list before submitting the welcome template to WhatsApp."
-  },
-  {
    "fieldname": "initial_message_template",
    "fieldtype": "Link",
    "label": "Initial Message Template",
    "options": "WhatsApp Templates",
    "depends_on": "send_initial_message",
-   "description": "WhatsApp Template to send on new ticket. Template variables: {{1}} = contact name, {{2}} = ticket ID. Must be approved by Meta."
+   "description": "WhatsApp Template sent automatically when a new ticket is created. Variables: {{1}} = contact name, {{2}} = ticket ID."
+  },
+  {
+   "fieldname": "section_template_window",
+   "fieldtype": "Section Break",
+   "label": "Template Messages After 24h Window"
   },
   {
    "default": "0",
    "fieldname": "allow_template_outside_window",
    "fieldtype": "Check",
    "label": "Allow Template Messages After 24h Window",
-   "description": "When the 24-hour customer service window expires, agents can still send approved WhatsApp templates to restart the conversation. These are billed by Meta as business-initiated conversations."
+   "description": "When the 24-hour customer service window expires, agents can send approved WhatsApp templates to restart the conversation. These are billed by Meta as business-initiated conversations."
+  },
+  {
+   "fieldname": "allowed_templates",
+   "fieldtype": "Table",
+   "label": "Allowed Templates",
+   "options": "WhatsApp Helpdesk Allowed Template",
+   "depends_on": "allow_template_outside_window",
+   "description": "Restrict agents to only these templates when the 24h window is expired. Leave empty to allow all templates."
+  },
+  {
+   "fieldname": "section_products",
+   "fieldtype": "Section Break",
+   "label": "Products"
+  },
+  {
+   "fieldname": "product_list",
+   "fieldtype": "Small Text",
+   "label": "Product List",
+   "description": "One product per line. Used to populate the Product field on tickets via the welcome template."
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-03-11 10:00:00.000000",
+ "modified": "2026-03-17 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "WhatsApp Helpdesk Settings",

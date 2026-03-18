@@ -241,6 +241,7 @@ def get_whatsapp_messages(ticket: str) -> list[dict]:
 			WM.attach, WM.status, WM.profile_name, WM["from"], WM["to"],
 			WM.owner, User.full_name.as_("sender_full_name"),
 			WM.template, WM.template_parameters,
+			WM.message_id, WM.is_reply, WM.reply_to_message_id,
 		)
 		.where(WM.reference_doctype == "HD Ticket")
 		.where(WM.reference_name == ticket)
@@ -281,6 +282,7 @@ def send_whatsapp_reply(
 	message: str,
 	content_type: str = "text",
 	attachment: str | None = None,
+	reply_to_message_id: str | None = None,
 ) -> dict:
 	"""Send a WhatsApp reply from the agent on this ticket."""
 	phone = get_contact_phone(ticket)
@@ -294,6 +296,8 @@ def send_whatsapp_reply(
 		"message": message,
 		"content_type": content_type,
 		"attach": attachment,
+		"is_reply": 1 if reply_to_message_id else 0,
+		"reply_to_message_id": reply_to_message_id or "",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
 	})
@@ -317,7 +321,12 @@ def send_whatsapp_reply(
 
 
 @frappe.whitelist(allow_guest=False)
-def send_whatsapp_media(ticket: str, message: str = "", content_type: str = "document") -> dict:
+def send_whatsapp_media(
+	ticket: str,
+	message: str = "",
+	content_type: str = "document",
+	reply_to_message_id: str = "",
+) -> dict:
 	"""Upload a file directly to WhatsApp Media API and send — no Frappe File storage."""
 	from frappe_whatsapp.utils import get_whatsapp_account, format_number
 
@@ -374,22 +383,42 @@ def send_whatsapp_media(ticket: str, message: str = "", content_type: str = "doc
 	if content_type == "document":
 		media_payload["filename"] = filename
 
+	msg_payload: dict = {
+		"messaging_product": "whatsapp",
+		"to": format_number(phone),
+		"type": content_type,
+		content_type: media_payload,
+	}
+	if reply_to_message_id:
+		msg_payload["context"] = {"message_id": reply_to_message_id}
+
 	send_resp = _requests.post(
 		f"{base_url}/messages",
 		headers={**auth_headers, "Content-Type": "application/json"},
-		data=json.dumps({
-			"messaging_product": "whatsapp",
-			"to": format_number(phone),
-			"type": content_type,
-			content_type: media_payload,
-		}),
+		data=json.dumps(msg_payload),
 	)
 	if not send_resp.ok:
 		frappe.throw(f"WhatsApp send failed: {send_resp.text}")
 
 	wm_id = send_resp.json()["messages"][0]["id"]
 
-	# 3. Record the message in DB.
+	# 3. Save file to Frappe storage so agents can preview it in the chat.
+	#    We only do this for images/videos — documents are downloaded via WhatsApp CDN.
+	attach_url = None
+	if content_type in ("image", "video"):
+		try:
+			file_doc = frappe.get_doc({
+				"doctype": "File",
+				"file_name": filename,
+				"content": file_data,
+				"is_private": 0,
+			})
+			file_doc.insert(ignore_permissions=True)
+			attach_url = file_doc.file_url
+		except Exception:
+			pass  # preview unavailable, not a hard failure
+
+	# 4. Record the message in DB.
 	# Set message_type="Template" + message_id=<sent_id> so frappe_whatsapp's
 	# before_insert skips its own send logic (both branches check these conditions).
 	msg_doc = frappe.get_doc({
@@ -401,9 +430,11 @@ def send_whatsapp_media(ticket: str, message: str = "", content_type: str = "doc
 		"message_type": "Template",   # prevents before_insert from re-sending
 		"message_id": wm_id,          # prevents template branch from firing
 		"status": "Success",
+		"attach": attach_url,         # URL for in-chat preview (images/videos only)
+		"is_reply": 1 if reply_to_message_id else 0,
+		"reply_to_message_id": reply_to_message_id or "",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
-		# attach intentionally left blank — file is hosted by WhatsApp, not ERPNext
 	})
 	msg_doc.insert(ignore_permissions=True)
 
@@ -495,9 +526,23 @@ def get_ticket_whatsapp_info(ticket: str) -> dict:
 
 @frappe.whitelist()
 def get_outgoing_templates() -> list[dict]:
-	"""Return all WhatsApp Templates available for outgoing agent messages."""
+	"""Return WhatsApp Templates available for outgoing agent messages.
+
+	If the admin has configured an allowed list in WhatsApp Helpdesk Settings,
+	only those templates are returned. Otherwise all templates are returned.
+	"""
+	settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+	allowed_rows = settings.get("allowed_templates") or []
+
+	filters: dict = {}
+	if allowed_rows:
+		allowed_names = [row.template for row in allowed_rows if row.template]
+		if allowed_names:
+			filters["name"] = ["in", allowed_names]
+
 	templates = frappe.get_all(
 		"WhatsApp Templates",
+		filters=filters,
 		fields=["name", "template_name", "template", "actual_name"],
 		order_by="template_name asc",
 	)
@@ -525,6 +570,27 @@ def send_template_to_ticket(ticket: str, template_name: str) -> dict:
 		template_name=template_name,
 		contact_name=contact_display,
 	)
+	return {"status": "sent"}
+
+
+@frappe.whitelist()
+def send_whatsapp_reaction(ticket: str, target_message_id: str, emoji: str) -> dict:
+	"""Send an emoji reaction to a specific WhatsApp message on this ticket."""
+	phone = get_contact_phone(ticket)
+	if not phone:
+		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+
+	msg_doc = frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"content_type": "reaction",
+		"message": emoji,
+		"reply_to_message_id": target_message_id,
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	})
+	msg_doc.insert(ignore_permissions=True)
 	return {"status": "sent"}
 
 
@@ -572,7 +638,8 @@ def on_whatsapp_message_insert(doc, method=None):
 	# Outgoing messages: if already linked to a ticket, publish realtime + update status
 	if doc.type != "Incoming":
 		if doc.reference_doctype == "HD Ticket" and doc.reference_name:
-			if settings.agent_reply_status:
+			# Emoji reactions don't count as agent replies for status purposes
+			if doc.content_type != "reaction" and settings.agent_reply_status:
 				_set_ticket_status(doc.reference_name, settings.agent_reply_status)
 			_publish_whatsapp_message(doc.reference_name, is_incoming=False)
 		return

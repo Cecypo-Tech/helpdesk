@@ -12,23 +12,26 @@
         v-else-if="!messageList.length"
         class="flex flex-col items-center justify-center py-16 text-ink-gray-5"
       >
-        <WhatsAppIcon class="h-10 w-10 mb-3 text-ink-gray-4" />
+        <WhatsAppIcon class="mb-3 h-10 w-10 text-ink-gray-4" />
         <p class="text-sm">No WhatsApp messages</p>
       </div>
 
       <!-- Messages -->
       <div v-else class="space-y-3">
-        <!-- Date separators and messages -->
         <template v-for="(group, dateKey) in groupedMessages" :key="dateKey">
-          <div class="flex items-center gap-3 my-4">
+          <div class="my-4 flex items-center gap-3">
             <div class="flex-1 border-t border-outline-gray-2" />
-            <span class="text-[11px] text-ink-gray-5 font-medium">{{ dateKey }}</span>
+            <span class="text-[11px] font-medium text-ink-gray-5">{{ dateKey }}</span>
             <div class="flex-1 border-t border-outline-gray-2" />
           </div>
           <WhatsAppBubble
             v-for="msg in group"
             :key="msg.name"
             :message="msg"
+            :reactions="reactionsMap[msg.message_id] || []"
+            :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
+            @reply="startReply"
+            @react="sendReaction"
           />
         </template>
       </div>
@@ -39,7 +42,7 @@
       <!-- Assign-to-self banner (non-blocking) -->
       <div
         v-if="!ticketInfo.data.is_assigned"
-        class="flex items-center justify-between border-t border-outline-gray-2 px-4 py-2 bg-surface-gray-1"
+        class="flex items-center justify-between border-t border-outline-gray-2 bg-surface-gray-1 px-4 py-2"
       >
         <span class="text-xs text-ink-gray-5">Not assigned to you</span>
         <button
@@ -55,7 +58,9 @@
       <WhatsAppReplyBox
         v-if="ticketInfo.data.reply_window_open"
         :ticketId="ticketId"
+        :replyTo="replyingTo"
         @sent="onMessageSent"
+        @clearReply="replyingTo = null"
       />
       <!-- Window expired — template sender -->
       <div v-else class="border-t border-outline-gray-2 px-4 py-3">
@@ -115,6 +120,7 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const pickingUp = ref(false);
 const selectedTemplate = ref("");
 const sendingTemplate = ref(false);
+const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
   url: "helpdesk.integrations.whatsapp.get_whatsapp_messages",
@@ -153,6 +159,13 @@ const sendTemplateResource = createResource({
   },
 });
 
+const sendReactionResource = createResource({
+  url: "helpdesk.integrations.whatsapp.send_whatsapp_reaction",
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to send reaction");
+  },
+});
+
 function markAsRead() {
   markReadResource.submit({ ticket: props.ticketId });
 }
@@ -170,7 +183,34 @@ const pickUpResource = createResource({
   },
 });
 
-const messageList = computed(() => messages.data || []);
+// All messages (including reactions)
+const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+
+// Main message list — reactions are displayed as badges on bubbles, not as standalone items
+const messageList = computed(() =>
+  allMessages.value.filter((m) => m.content_type !== "reaction")
+);
+
+// Map WhatsApp message_id → message object (for reply context lookups)
+const messageByMsgId = computed(() => {
+  const map: Record<string, Record<string, any>> = {};
+  for (const m of allMessages.value) {
+    if (m.message_id) map[m.message_id] = m;
+  }
+  return map;
+});
+
+// Map WhatsApp message_id → array of reactions
+const reactionsMap = computed(() => {
+  const map: Record<string, Array<{ emoji: string; type: string }>> = {};
+  for (const m of allMessages.value) {
+    if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
+      if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
+      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type });
+    }
+  }
+  return map;
+});
 
 const groupedMessages = computed(() => {
   const groups: Record<string, any[]> = {};
@@ -199,7 +239,24 @@ function pickUp() {
   pickUpResource.submit({ ticket: props.ticketId });
 }
 
+function startReply(message: Record<string, any>) {
+  replyingTo.value = message;
+}
+
+function sendReaction(emoji: string, targetMessageId: string) {
+  if (!targetMessageId) {
+    toast.error("Cannot react: message has no WhatsApp ID yet");
+    return;
+  }
+  sendReactionResource.submit({
+    ticket: props.ticketId,
+    target_message_id: targetMessageId,
+    emoji,
+  });
+}
+
 function onMessageSent() {
+  replyingTo.value = null;
   messages.reload();
   ticketInfo.reload();
   scrollToBottom();
@@ -218,7 +275,7 @@ function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
   if (String(data.ticket) === String(props.ticketId)) {
     messages.reload();
     ticketInfo.reload();
-    scrollToBottom();
+    if (data.is_incoming) scrollToBottom();
     markAsRead();
   }
 }
@@ -239,7 +296,6 @@ onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
   $socket.on("helpdesk:whatsapp-status-update", handleStatusUpdate);
   scrollToBottom();
-  // Mark all visible incoming messages as read when the tab opens
   markAsRead();
 });
 

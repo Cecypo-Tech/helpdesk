@@ -6,6 +6,24 @@
     @drop.prevent="onDrop"
     :class="{ 'bg-blue-50 ring-2 ring-inset ring-blue-400': dragging }"
   >
+    <!-- Reply-to banner -->
+    <div
+      v-if="replyTo"
+      class="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-blue-400 bg-surface-gray-1 px-3 py-1.5"
+    >
+      <div class="min-w-0 flex-1">
+        <p class="text-xs font-medium text-blue-600">
+          {{ replyTo.type === 'Outgoing' ? (replyTo.sender_full_name || 'You') : (replyTo.profile_name || 'Customer') }}
+        </p>
+        <p class="truncate text-xs text-ink-gray-5">{{ replyPreview }}</p>
+      </div>
+      <button class="shrink-0 text-ink-gray-4 hover:text-ink-gray-7" @click="$emit('clearReply')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
     <!-- Attachment preview -->
     <div v-if="attachment" class="mb-2 flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-3 py-2">
       <img
@@ -73,7 +91,7 @@
       />
       <button
         :disabled="(!text.trim() && !attachment) || sending"
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
         @click="send"
       >
         <svg v-if="!sending" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -104,10 +122,12 @@ import SavedRepliesSelectorModal from "@/components/SavedRepliesSelectorModal.vu
 
 const props = defineProps<{
   ticketId: string;
+  replyTo?: Record<string, any> | null;
 }>();
 
 const emit = defineEmits<{
   (e: "sent"): void;
+  (e: "clearReply"): void;
 }>();
 
 const text = ref("");
@@ -132,6 +152,17 @@ const contentType = computed(() => {
 });
 
 const isImage = computed(() => contentType.value === "image");
+
+// Preview of the message being replied to
+const replyPreview = computed(() => {
+  const m = props.replyTo;
+  if (!m) return "";
+  if (m.content_type === "image") return "📷 Photo";
+  if (m.content_type === "video") return "🎥 Video";
+  if (m.content_type === "audio") return "🎤 Audio";
+  if (m.content_type === "document") return "📎 Document";
+  return (m.message || "").slice(0, 80) || "Message";
+});
 
 function setFile(file: File) {
   attachment.value = file;
@@ -199,14 +230,16 @@ async function send() {
   if ((!text.value.trim() && !attachment.value) || sending.value) return;
   sending.value = true;
 
+  const replyToMsgId = props.replyTo?.message_id || "";
+
   try {
     if (attachment.value) {
-      // Send file directly to WhatsApp via our backend — no ERPNext file storage
       const formData = new FormData();
       formData.append("file", attachment.value, attachment.value.name);
       formData.append("ticket", props.ticketId);
       formData.append("message", text.value.trim());
       formData.append("content_type", contentType.value);
+      if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
 
       const response = await fetch(
         "/api/method/helpdesk.integrations.whatsapp.send_whatsapp_media",
@@ -228,11 +261,13 @@ async function send() {
       if (textareaRef.value) textareaRef.value.style.height = "auto";
       emit("sent");
     } else {
-      sendReply.submit({
+      const args: Record<string, any> = {
         ticket: props.ticketId,
         message: text.value.trim(),
         content_type: "text",
-      });
+      };
+      if (replyToMsgId) args.reply_to_message_id = replyToMsgId;
+      sendReply.submit(args);
     }
   } catch (e: any) {
     sending.value = false;
