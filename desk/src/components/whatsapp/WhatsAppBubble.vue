@@ -33,19 +33,13 @@
         </button>
       </div>
 
-      <!-- Emoji picker panel -->
-      <Teleport to="body">
-        <div
-          v-if="showEmojiPicker"
-          class="fixed inset-0 z-40"
-          @click="showEmojiPicker = false"
-        />
-      </Teleport>
+      <!-- Emoji picker panel — no backdrop, uses document click listener to close -->
       <div
         v-if="showEmojiPicker"
-        class="absolute bottom-full z-50 mb-9 flex items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-2 py-1 shadow-lg"
+        ref="emojiPickerRef"
+        class="absolute bottom-full mb-9 flex items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-2 py-1 shadow-lg"
         :class="isOutgoing ? 'right-0' : 'left-0'"
-        @click.stop
+        style="z-index: 9990;"
       >
         <button
           v-for="emoji in REACTION_EMOJIS"
@@ -221,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -239,6 +233,26 @@ const emit = defineEmits<{
 const isOutgoing = computed(() => props.message.type === "Outgoing");
 
 const showEmojiPicker = ref(false);
+const emojiPickerRef = ref<HTMLElement | null>(null);
+
+function onDocumentClick(e: MouseEvent) {
+  if (emojiPickerRef.value && !emojiPickerRef.value.contains(e.target as Node)) {
+    showEmojiPicker.value = false;
+  }
+}
+
+watch(showEmojiPicker, (val) => {
+  if (val) {
+    // Defer so the click that opened the picker doesn't immediately close it
+    setTimeout(() => document.addEventListener("click", onDocumentClick), 0);
+  } else {
+    document.removeEventListener("click", onDocumentClick);
+  }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocumentClick);
+});
 
 function toggleEmojiPicker() {
   showEmojiPicker.value = !showEmojiPicker.value;

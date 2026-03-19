@@ -178,6 +178,19 @@ def _notify_assigned_agents(ticket_name: str, message: str | None, sender_name: 
 			pass
 
 
+def _reopen_ticket(ticket_name: str, settings) -> None:
+	"""Reopen a resolved/closed ticket when the customer messages again via WhatsApp.
+
+	Uses customer_reply_status if configured, otherwise falls back to the first
+	status in the "Open" category.
+	"""
+	target_status = settings.customer_reply_status
+	if not target_status:
+		target_status = frappe.db.get_value("HD Ticket Status", {"status_category": "Open"}, "name")
+	if target_status:
+		_set_ticket_status(ticket_name, target_status)
+
+
 def _render_template_message(template_name: str, params: dict) -> str:
 	"""Render a WhatsApp template body by substituting {{1}}, {{2}}… placeholders."""
 	try:
@@ -705,12 +718,18 @@ def on_whatsapp_message_insert(doc, method=None):
 	if linked_messages:
 		candidate = linked_messages[0].reference_name
 		if candidate:
-			status_category = frappe.db.get_value("HD Ticket", candidate, "status_category")
-			if status_category and status_category != "Resolved":
-				hours_since = time_diff_in_hours(now_datetime(), linked_messages[0].creation)
-				timeout = settings.new_conversation_timeout_hours or 24
-				if hours_since < timeout:
+			hours_since = time_diff_in_hours(now_datetime(), linked_messages[0].creation)
+			timeout = settings.new_conversation_timeout_hours or 24
+			if hours_since < timeout:
+				status_category = frappe.db.get_value("HD Ticket", candidate, "status_category")
+				if status_category == "Closed":
+					# Agent deliberately closed — start a fresh ticket
+					pass
+				else:
+					# Open, Pending, or Resolved → reuse and reopen if needed
 					existing_ticket = candidate
+					if status_category == "Resolved":
+						_reopen_ticket(candidate, settings)
 
 	if existing_ticket:
 		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
