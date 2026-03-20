@@ -49,6 +49,8 @@ class HDNotification(Document):
             }
 
     def after_insert(self):
+        self._send_push_notification()
+
         if self.notification_type == "Mention":
             skip_email_workflow = frappe.db.get_single_value(
                 "HD Settings", "skip_email_workflow"
@@ -64,3 +66,30 @@ class HDNotification(Document):
                 template="notification",
                 args=self.get_args(),
             )
+
+    def _send_push_notification(self):
+        from helpdesk.helpdesk.api.push_notifications import send_push_to_user
+
+        title = "Helpdesk"
+        body = self.message or ""
+
+        if self.notification_type == "Mention":
+            title = self.format_message() or "You were mentioned"
+        elif self.notification_type == "Assignment":
+            title = "Ticket assigned to you"
+        elif self.notification_type == "WhatsApp":
+            title = "New WhatsApp message"
+        elif self.notification_type == "Reaction":
+            title = "New reaction on your comment"
+
+        url = f"/helpdesk/tickets/{self.reference_ticket}" if self.reference_ticket else "/helpdesk"
+        if self.reference_comment:
+            url += f"#{self.reference_comment}"
+
+        send_push_to_user(
+            user=self.user_to,
+            title=title,
+            body=body,
+            url=url,
+            tag=f"helpdesk-{self.reference_ticket or 'general'}",
+        )

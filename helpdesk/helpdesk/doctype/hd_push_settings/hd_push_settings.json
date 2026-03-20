@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-03-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_vapid",
+  "vapid_email",
+  "col_break_vapid",
+  "vapid_public_key",
+  "vapid_private_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_vapid",
+   "fieldtype": "Section Break",
+   "label": "Web Push (VAPID)"
+  },
+  {
+   "fieldname": "vapid_email",
+   "fieldtype": "Data",
+   "label": "Contact Email",
+   "description": "Email used in VAPID claims, e.g. admin@yourdomain.com. Required for Web Push to work."
+  },
+  {
+   "fieldname": "col_break_vapid",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "vapid_public_key",
+   "fieldtype": "Small Text",
+   "label": "VAPID Public Key",
+   "read_only": 1,
+   "description": "Auto-generated. Paste this in browser subscription requests."
+  },
+  {
+   "fieldname": "vapid_private_key",
+   "fieldtype": "Password",
+   "label": "VAPID Private Key",
+   "read_only": 1,
+   "description": "Auto-generated. Keep secret."
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-03-20 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Push Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
