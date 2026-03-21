@@ -27,11 +27,13 @@
           <WhatsAppBubble
             v-for="msg in group"
             :key="msg.name"
+            :data-msg-id="msg.message_id"
             :message="msg"
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             @reply="startReply"
             @react="sendReaction"
+            @scrollToReply="scrollToMessage"
           />
         </template>
       </div>
@@ -232,6 +234,17 @@ function scrollToBottom() {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
     }
   });
+}
+
+function scrollToMessage(messageId: string) {
+  if (!messageId || !messagesContainer.value) return;
+  const el = messagesContainer.value.querySelector(`[data-msg-id="${messageId}"]`) as HTMLElement | null;
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Flash highlight
+  el.style.transition = "background 0.2s";
+  el.style.background = "rgba(99,178,115,0.25)";
+  setTimeout(() => { el.style.background = ""; }, 1200);
 }
 
 function pickUp() {

@@ -76,15 +76,32 @@
         <!-- Reply context block -->
         <div
           v-if="message.is_reply"
-          class="mb-2 cursor-default rounded border-l-2 px-2 py-1 text-xs"
+          class="mb-2 cursor-pointer overflow-hidden rounded border-l-2 text-xs transition-opacity hover:opacity-80"
+          @click.stop="$emit('scrollToReply', message.reply_to_message_id)"
           :class="isOutgoing
             ? 'border-green-500 bg-green-50 dark:border-green-400 dark:bg-green-800/50'
             : 'border-blue-400 bg-surface-gray-1'"
         >
-          <div class="mb-0.5 font-medium" :class="isOutgoing ? 'text-green-700 dark:text-green-400' : 'text-blue-600'">
-            {{ replyToSenderName }}
+          <!-- Image reply: show thumbnail on right -->
+          <div v-if="replyToMessage?.content_type === 'image' && replyToMessage?.attach" class="flex items-stretch">
+            <div class="flex-1 px-2 py-1">
+              <div class="mb-0.5 font-medium" :class="isOutgoing ? 'text-green-700 dark:text-green-400' : 'text-blue-600'">
+                {{ replyToSenderName }}
+              </div>
+              <div class="flex items-center gap-1 text-ink-gray-5">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Photo
+              </div>
+            </div>
+            <img :src="replyToMessage.attach" class="h-14 w-14 shrink-0 object-cover" />
           </div>
-          <div class="truncate text-ink-gray-5">{{ replyPreview }}</div>
+          <!-- Default: text preview -->
+          <div v-else class="px-2 py-1">
+            <div class="mb-0.5 font-medium" :class="isOutgoing ? 'text-green-700 dark:text-green-400' : 'text-blue-600'">
+              {{ replyToSenderName }}
+            </div>
+            <div class="truncate text-ink-gray-5">{{ replyPreview }}</div>
+          </div>
         </div>
 
         <!-- Image attachment -->
@@ -228,6 +245,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
   (e: "react", emoji: string, targetMessageId: string): void;
+  (e: "scrollToReply", messageId: string): void;
 }>();
 
 const isOutgoing = computed(() => props.message.type === "Outgoing");

@@ -9,15 +9,25 @@
     <!-- Reply-to banner -->
     <div
       v-if="replyTo"
-      class="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-blue-400 bg-surface-gray-1 px-3 py-1.5"
+      class="mb-2 flex items-stretch overflow-hidden rounded-lg border-l-2 border-blue-400 bg-surface-gray-1"
     >
-      <div class="min-w-0 flex-1">
+      <div class="min-w-0 flex-1 px-3 py-1.5">
         <p class="text-xs font-medium text-blue-600">
           {{ replyTo.type === 'Outgoing' ? (replyTo.sender_full_name || 'You') : (replyTo.profile_name || 'Customer') }}
         </p>
-        <p class="truncate text-xs text-ink-gray-5">{{ replyPreview }}</p>
+        <p v-if="replyTo.content_type === 'image' && replyTo.attach" class="flex items-center gap-1 text-xs text-ink-gray-5">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Photo
+        </p>
+        <p v-else class="truncate text-xs text-ink-gray-5">{{ replyPreview }}</p>
       </div>
-      <button class="shrink-0 text-ink-gray-4 hover:text-ink-gray-7" @click="$emit('clearReply')">
+      <!-- Image thumbnail -->
+      <img
+        v-if="replyTo.content_type === 'image' && replyTo.attach"
+        :src="replyTo.attach"
+        class="h-14 w-14 shrink-0 object-cover"
+      />
+      <button class="shrink-0 px-2 text-ink-gray-4 hover:text-ink-gray-7" @click="$emit('clearReply')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
@@ -211,67 +221,63 @@ function onPaste(e: ClipboardEvent) {
 
 const sendReply = createResource({
   url: "helpdesk.integrations.whatsapp.send_whatsapp_reply",
-  onSuccess() {
-    text.value = "";
-    sending.value = false;
-    clearAttachment();
-    if (textareaRef.value) {
-      textareaRef.value.style.height = "auto";
-    }
-    emit("sent");
-  },
   onError(e: any) {
-    sending.value = false;
     toast.error(e?.messages?.[0] || "Failed to send message");
   },
 });
 
 async function send() {
   if ((!text.value.trim() && !attachment.value) || sending.value) return;
-  sending.value = true;
 
   const replyToMsgId = props.replyTo?.message_id || "";
 
-  try {
-    if (attachment.value) {
-      const formData = new FormData();
-      formData.append("file", attachment.value, attachment.value.name);
-      formData.append("ticket", props.ticketId);
-      formData.append("message", text.value.trim());
-      formData.append("content_type", contentType.value);
-      if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
+  if (attachment.value) {
+    // For media: show a brief "uploading" lock only until the request is fired,
+    // then restore the input so the agent can keep typing.
+    sending.value = true;
+    const formData = new FormData();
+    formData.append("file", attachment.value, attachment.value.name);
+    formData.append("ticket", props.ticketId);
+    formData.append("message", text.value.trim());
+    formData.append("content_type", contentType.value);
+    if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
 
-      const response = await fetch(
-        "/api/method/helpdesk.integrations.whatsapp.send_whatsapp_media",
-        {
-          method: "POST",
-          headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
-          body: formData,
-        }
-      );
+    // Clear input immediately so agent can start typing next message
+    text.value = "";
+    clearAttachment();
+    if (textareaRef.value) textareaRef.value.style.height = "auto";
+    sending.value = false;
+    emit("sent");
 
+    // Fire upload in background
+    fetch("/api/method/helpdesk.integrations.whatsapp.send_whatsapp_media", {
+      method: "POST",
+      headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
+      body: formData,
+    }).then(async (response) => {
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err?.exc_type || "Media send failed");
+        toast.error(err?.exc_type || "Media send failed");
       }
+    }).catch(() => {
+      toast.error("Media send failed");
+    });
+  } else {
+    // Text: clear immediately, fire API in background
+    const msgText = text.value.trim();
+    const args: Record<string, any> = {
+      ticket: props.ticketId,
+      message: msgText,
+      content_type: "text",
+    };
+    if (replyToMsgId) args.reply_to_message_id = replyToMsgId;
 
-      text.value = "";
-      sending.value = false;
-      clearAttachment();
-      if (textareaRef.value) textareaRef.value.style.height = "auto";
-      emit("sent");
-    } else {
-      const args: Record<string, any> = {
-        ticket: props.ticketId,
-        message: text.value.trim(),
-        content_type: "text",
-      };
-      if (replyToMsgId) args.reply_to_message_id = replyToMsgId;
-      sendReply.submit(args);
-    }
-  } catch (e: any) {
-    sending.value = false;
-    toast.error(e?.message || "Failed to send");
+    text.value = "";
+    if (textareaRef.value) textareaRef.value.style.height = "auto";
+    emit("sent");
+
+    // Submit without awaiting — errors surface via onError toast
+    sendReply.submit(args);
   }
 }
 
