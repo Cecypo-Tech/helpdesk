@@ -195,7 +195,7 @@ import {
 } from "frappe-ui";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
-import { computed, nextTick, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 const dateFormat = (window as any).date_format?.toUpperCase() || "DD-MM-YYYY";
@@ -259,6 +259,10 @@ const task = createDocumentResource({
     emit("close");
   },
 });
+
+// auto:true on createDocumentResource doesn't reliably trigger on SPA navigation;
+// explicit reload on mount guarantees data is always fetched.
+onMounted(() => task.reload());
 
 const doneCount = computed(() => form.subtasks.filter((s) => s.status === "Done").length);
 const progressPct = computed(() =>
