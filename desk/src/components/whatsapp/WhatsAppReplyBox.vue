@@ -94,7 +94,7 @@
         :disabled="sending"
         :placeholder="attachment ? 'Add a caption (optional)...' : 'Type a message...'"
         rows="1"
-        class="flex-1 resize-none rounded-lg border border-outline-gray-3 px-3 py-2 text-sm focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
+        class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
         @input="autoResize"
         @keydown.enter.exact.prevent="send"
         @paste="onPaste"
