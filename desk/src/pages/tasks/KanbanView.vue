@@ -6,7 +6,7 @@
       <div
         v-for="col in columns"
         :key="col.status"
-        class="flex flex-col w-72 flex-shrink-0 rounded-lg bg-surface-gray-1 transition-all"
+        class="flex flex-col w-72 flex-shrink-0 rounded-lg bg-surface-gray-1 border border-outline-gray-2 transition-all"
         :class="hoveredColumn === col.status ? 'ring-2 ring-ink-blue-3 ring-offset-1' : ''"
         @dragover.prevent="onDragOver(col.status)"
         @dragleave="onDragLeave"
@@ -238,12 +238,12 @@ function createTask(status: string) {
 
 function priorityClass(priority: string) {
   const map: Record<string, string> = {
-    Urgent: "bg-red-100 text-red-700",
+    Urgent: "bg-surface-red-2 text-ink-red-3",
     High: "bg-orange-100 text-orange-700",
-    Medium: "bg-yellow-100 text-yellow-700",
-    Low: "bg-green-100 text-green-700",
+    Medium: "bg-amber-100 text-amber-700",
+    Low: "bg-surface-green-1 text-ink-green-3",
   };
-  return map[priority] ?? "bg-gray-100 text-gray-600";
+  return map[priority] ?? "bg-surface-gray-2 text-ink-gray-6";
 }
 
 function formatDate(d: string) {

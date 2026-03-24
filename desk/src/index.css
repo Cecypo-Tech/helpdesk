@@ -17,3 +17,8 @@ html,
 body {
   color: var(--ink-gray-9);
 }
+
+/* Make list-view row dividers visible in both light and dark modes */
+.list-rows .h-px.border-t {
+  border-color: var(--outline-gray-2) !important;
+}

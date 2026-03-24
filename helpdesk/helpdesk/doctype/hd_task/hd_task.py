@@ -8,6 +8,10 @@ ALLOWED_FIELDS = {
 
 
 class HDTask(Document):
+	def validate(self):
+		if self.assigned_to == "@me":
+			self.assigned_to = frappe.session.user
+
 	@staticmethod
 	def default_list_data():
 		columns = [

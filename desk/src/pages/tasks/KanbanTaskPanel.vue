@@ -157,11 +157,10 @@
           :key="sub.name || idx"
           class="flex items-center gap-2 rounded p-1 hover:bg-surface-gray-1 group"
         >
-          <input
-            type="checkbox"
-            class="h-3.5 w-3.5 cursor-pointer accent-green-500 flex-shrink-0"
-            :checked="sub.status === 'Done'"
-            @change="toggleSubtask(idx)"
+          <Checkbox
+            :model-value="sub.status === 'Done'"
+            class="flex-shrink-0"
+            @update:model-value="toggleSubtask(idx)"
           />
           <input
             v-model="sub.title"
@@ -197,6 +196,7 @@ import Link from "@/components/frappe-ui/Link.vue";
 import { __ } from "@/translation";
 import {
   call,
+  Checkbox,
   createDocumentResource,
   DatePicker,
   LoadingIndicator,
