@@ -54,11 +54,11 @@
         <div class="flex flex-col gap-1">
           <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Priority') }}</label>
           <Link
-            v-model="form.priority"
+            :value="form.priority"
             doctype="HD Ticket Priority"
             :placeholder="__('—')"
             class="form-control"
-            @change="saveField('priority', form.priority)"
+            @change="(val) => { form.priority = val; saveField('priority', val || null); }"
           />
         </div>
       </div>
@@ -68,21 +68,22 @@
         <div class="flex flex-col gap-1">
           <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Assigned To') }}</label>
           <Link
-            v-model="form.assigned_to"
+            :value="form.assigned_to"
             doctype="HD Agent"
             :placeholder="__('—')"
             class="form-control"
-            @change="saveField('assigned_to', form.assigned_to)"
+            @change="(val) => { form.assigned_to = val; saveField('assigned_to', val || null); }"
           />
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Due Date') }}</label>
-          <input
+          <DatePicker
             v-model="form.due_date"
-            type="date"
-            class="text-sm rounded border border-outline-gray-2 bg-surface-white px-2 py-1.5 focus:outline-none focus:border-outline-gray-4"
-            :class="isOverdue(form.due_date) ? 'text-red-500' : 'text-ink-gray-8'"
-            @blur="saveField('due_date', form.due_date)"
+            :format="dateFormat"
+            :clearable="true"
+            :placeholder="__('—')"
+            :input-class="isOverdue(form.due_date) ? '!text-red-500' : ''"
+            @change="(val) => saveField('due_date', val || null)"
           />
         </div>
       </div>
@@ -92,21 +93,21 @@
         <div class="flex flex-col gap-1">
           <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Ticket') }}</label>
           <Link
-            v-model="form.ticket"
+            :value="form.ticket"
             doctype="HD Ticket"
             :placeholder="__('—')"
             class="form-control"
-            @change="saveField('ticket', form.ticket)"
+            @change="(val) => { form.ticket = val; saveField('ticket', val || null); }"
           />
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Team') }}</label>
           <Link
-            v-model="form.team"
+            :value="form.team"
             doctype="HD Team"
             :placeholder="__('—')"
             class="form-control"
-            @change="saveField('team', form.team)"
+            @change="(val) => { form.team = val; saveField('team', val || null); }"
           />
         </div>
       </div>
@@ -187,20 +188,24 @@ import { __ } from "@/translation";
 import {
   call,
   createDocumentResource,
+  DatePicker,
   LoadingIndicator,
   TextEditor,
   toast,
 } from "frappe-ui";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
+
+const dateFormat = (window as any).date_format?.toUpperCase() || "DD-MM-YYYY";
 
 const props = defineProps<{ taskId: string }>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 const router = useRouter();
 
 const savedIndicator = ref(false);
+const isFormLoaded = ref(false);
 const currentModified = ref<string | null>(null);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
 let descTimer: ReturnType<typeof setTimeout> | null = null;
@@ -231,6 +236,7 @@ const task = createDocumentResource({
   name: props.taskId,
   auto: true,
   onSuccess(doc: any) {
+    isFormLoaded.value = false;
     currentModified.value = doc.modified ?? null;
     form.title = doc.title ?? "";
     form.status = doc.status ?? "Backlog";
@@ -246,6 +252,7 @@ const task = createDocumentResource({
       status: s.status ?? "Backlog",
       due_date: s.due_date ?? "",
     }));
+    nextTick(() => { isFormLoaded.value = true; });
   },
   onError() {
     toast.error(__("Task not found"));
@@ -288,7 +295,9 @@ async function saveField(fieldname: string, value: any) {
   }
 }
 
-function debouncedSaveDescription() {
+function debouncedSaveDescription(val?: string) {
+  if (!isFormLoaded.value) return;
+  if (val !== undefined) form.description = val;
   if (descTimer) clearTimeout(descTimer);
   descTimer = setTimeout(() => saveField("description", form.description), 800);
 }

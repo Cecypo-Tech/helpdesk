@@ -98,10 +98,12 @@
           <label class="block text-sm font-medium text-ink-gray-7">
             {{ __("Due Date") }}
           </label>
-          <FormControl
+          <DatePicker
             v-model="form.due_date"
-            type="date"
-                      />
+            :format="dateFormat"
+            :clearable="true"
+            :placeholder="__('Select date')"
+          />
         </div>
       </div>
 
@@ -199,11 +201,14 @@
               </option>
             </select>
             <!-- Due date -->
-            <input
+            <DatePicker
               v-model="subtask.due_date"
-              type="date"
-              class="text-xs rounded border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-ink-gray-6 focus:outline-none"
-                          />
+              :format="dateFormat"
+              :clearable="true"
+              :placeholder="__('Date')"
+              variant="outline"
+              input-class="!text-xs !py-0.5 !px-1.5"
+            />
             <!-- Remove -->
             <button
               class="invisible group-hover:visible text-ink-gray-4 hover:text-red-400"
@@ -236,6 +241,7 @@ import {
   Button,
   call,
   createDocumentResource,
+  DatePicker,
   FormControl,
   LoadingIndicator,
   TextEditor,
@@ -249,9 +255,11 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { dayjs } from "frappe-ui";
 
+const dateFormat = (window as any).date_format?.toUpperCase() || "DD-MM-YYYY";
+
 function formatDate(d: string) {
   if (!d) return "";
-  return dayjs(d).format((window as any).date_format?.toUpperCase() || "DD-MM-YYYY");
+  return dayjs(d).format(dateFormat);
 }
 
 const props = defineProps<{ taskId: string }>();
