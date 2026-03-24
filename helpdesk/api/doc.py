@@ -159,7 +159,11 @@ def get_list_data(
 
         def get_options(fieldtype, options):
             if fieldtype == "Select":
-                return [option for option in options.split("\n")]
+                return [
+                    {"label": option, "value": option}
+                    for option in options.split("\n")
+                    if option
+                ]
             else:
                 has_empty_values = any([not d.get(group_by_field) for d in data])
                 options = list(set([d.get(group_by_field) for d in data]))
@@ -220,7 +224,7 @@ def get_list_data(
         "data": data,
         "columns": columns,
         "rows": rows,
-        "fields": fields if doctype == "HD Ticket" else [],
+        "fields": fields if doctype in ("HD Ticket", "HD Task") else [],
         "total_count": frappe.get_list(doctype, fields=[COUNT_NAME], filters=filters)[
             0
         ].get("count", 0),

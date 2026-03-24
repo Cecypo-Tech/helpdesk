@@ -646,6 +646,10 @@ function handleViewChanges() {
   defaultParams.order_by = currentView.order_by || "modified desc";
   defaultParams.columns = currentView.columns;
   defaultParams.rows = currentView.rows;
+  // "kanban" in HD View maps to group_by rendering (no separate Kanban component exists)
+  defaultParams.view.view_type =
+    currentView.type === "kanban" ? "group_by" : currentView.type || "list";
+  defaultParams.view.group_by_field = currentView.group_by_field || "owner";
 
   list.submit({ ...defaultParams });
 }

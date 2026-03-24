@@ -50,6 +50,27 @@ const routes = [
     },
   },
   {
+    path: "/tasks",
+    name: "TasksAgent",
+    component: () => import("@/pages/tasks/Tasks.vue"),
+  },
+  {
+    path: "/tasks/new",
+    name: "TaskAgentNew",
+    component: () => import("@/pages/tasks/TaskNew.vue"),
+    props: true,
+    meta: {
+      onSuccessRoute: "TaskAgent",
+      parent: "TasksAgent",
+    },
+  },
+  {
+    path: "/tasks/:taskId",
+    name: "TaskAgent",
+    component: () => import("@/pages/tasks/TaskDetail.vue"),
+    props: true,
+  },
+  {
     path: "/notifications",
     name: "Notifications",
     component: () => import("@/pages/MobileNotifications.vue"),

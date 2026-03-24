@@ -1,0 +1,131 @@
+<h2>How should the task detail panel appear?</h2>
+<p class="subtitle">Click a layout to select it — this affects how you see the board while editing a task</p>
+
+<div class="cards">
+
+  <!-- Option A: Side-by-side split panel -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8f9fa;border-radius:6px 6px 0 0">
+      <div style="display:flex;gap:6px;height:160px;font-size:11px">
+        <!-- Kanban columns (compressed) -->
+        <div style="flex:1;display:flex;gap:4px">
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Backlog</div>
+            <div style="background:white;border-radius:3px;padding:4px;margin-bottom:3px;font-size:9px;box-shadow:0 1px 2px rgba(0,0,0,.08)">Fix login bug</div>
+            <div style="background:white;border-radius:3px;padding:4px;font-size:9px;box-shadow:0 1px 2px rgba(0,0,0,.08)">Update docs</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">In Progress</div>
+            <div style="background:#d0f0c0;border-radius:3px;padding:4px;font-size:9px;box-shadow:0 1px 2px rgba(0,0,0,.08);border:1.5px solid #52b788">Design kanban</div>
+          </div>
+        </div>
+        <!-- Detail panel -->
+        <div style="width:140px;background:white;border-radius:4px;border:1.5px solid #4361ee;padding:8px;flex-shrink:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-weight:600;font-size:10px;color:#212529">Design kanban</span>
+            <span style="font-size:10px;color:#adb5bd">✕</span>
+          </div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:3px">Status</div>
+          <div style="background:#fff3cd;border-radius:3px;padding:2px 5px;font-size:9px;display:inline-block;margin-bottom:5px">In Progress</div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:3px">Assigned To</div>
+          <div style="background:#e9ecef;border-radius:3px;padding:2px 5px;font-size:9px;margin-bottom:5px">Jane D.</div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:3px">Description</div>
+          <div style="background:#f8f9fa;border-radius:3px;padding:3px;font-size:8px;color:#495057;height:30px">Design the side panel layout…</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Split panel</h3>
+      <p>Board stays visible on the left; detail panel opens on the right. You can still see all columns while editing.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Slide-over (overlay) -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8f9fa;border-radius:6px 6px 0 0">
+      <div style="position:relative;height:160px;font-size:11px;overflow:hidden">
+        <!-- Board underneath -->
+        <div style="display:flex;gap:4px;position:absolute;inset:0;padding:4px;opacity:.35">
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Backlog</div>
+            <div style="background:white;border-radius:3px;padding:4px;margin-bottom:3px;font-size:9px">Fix login bug</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Todo</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">In Progress</div>
+            <div style="background:#d0f0c0;border-radius:3px;padding:4px;font-size:9px">Design kanban</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Done</div>
+          </div>
+        </div>
+        <!-- Overlay backdrop -->
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.15);border-radius:4px"></div>
+        <!-- Slide-over panel -->
+        <div style="position:absolute;right:0;top:0;bottom:0;width:150px;background:white;border-radius:0 4px 4px 0;border-left:2px solid #4361ee;padding:8px;box-shadow:-4px 0 12px rgba(0,0,0,.12)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-weight:600;font-size:10px;color:#212529">Design kanban</span>
+            <span style="font-size:10px;color:#adb5bd">✕</span>
+          </div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:3px">Status</div>
+          <div style="background:#fff3cd;border-radius:3px;padding:2px 5px;font-size:9px;display:inline-block;margin-bottom:5px">In Progress</div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:3px">Assigned To</div>
+          <div style="background:#e9ecef;border-radius:3px;padding:2px 5px;font-size:9px;margin-bottom:5px">Jane D.</div>
+          <div style="font-size:9px;color:#6c757d;margin-bottom:2px">Due</div>
+          <div style="font-size:9px;color:#e63946">Mar 20 ⚠</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Slide-over</h3>
+      <p>Panel slides over the right side of the board with a dim backdrop. Full-width panel, board is still hinted behind it.</p>
+    </div>
+  </div>
+
+  <!-- Option C: Modal dialog -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#f8f9fa;border-radius:6px 6px 0 0">
+      <div style="position:relative;height:160px;font-size:11px;overflow:hidden">
+        <!-- Board underneath -->
+        <div style="display:flex;gap:4px;position:absolute;inset:0;padding:4px;opacity:.25">
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Backlog</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">Todo</div>
+          </div>
+          <div style="flex:1;background:#e9ecef;border-radius:4px;padding:6px">
+            <div style="font-weight:600;font-size:10px;margin-bottom:4px;color:#495057">In Progress</div>
+          </div>
+        </div>
+        <!-- Modal backdrop -->
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);border-radius:4px"></div>
+        <!-- Modal -->
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:200px;background:white;border-radius:6px;padding:10px;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;border-bottom:1px solid #e9ecef;padding-bottom:6px">
+            <span style="font-weight:600;font-size:10px;color:#212529">Design kanban</span>
+            <span style="font-size:10px;color:#adb5bd">✕</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <div>
+              <div style="font-size:8px;color:#6c757d">Status</div>
+              <div style="background:#fff3cd;border-radius:3px;padding:2px 4px;font-size:8px">In Progress</div>
+            </div>
+            <div>
+              <div style="font-size:8px;color:#6c757d">Priority</div>
+              <div style="background:#ffe0e0;border-radius:3px;padding:2px 4px;font-size:8px">High</div>
+            </div>
+          </div>
+          <div style="margin-top:5px;font-size:8px;color:#6c757d;background:#f8f9fa;padding:4px;border-radius:3px">Description text here…</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Modal dialog</h3>
+      <p>Centered dialog with dimmed backdrop. Board is completely hidden while editing. Familiar pattern but loses board context.</p>
+    </div>
+  </div>
+
+</div>

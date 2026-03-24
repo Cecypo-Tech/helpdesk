@@ -77,6 +77,7 @@
     @update="ticket.reload()"
   />
   <TicketSubjectModal v-if="showSubjectDialog" v-model="showSubjectDialog" />
+  <CreateTaskModal v-if="showCreateTaskModal" v-model="showCreateTaskModal" />
 </template>
 
 <script setup lang="ts">
@@ -113,6 +114,7 @@ import {
 import { useRoute, useRouter } from "vue-router";
 import LucideMerge from "~icons/lucide/merge";
 import { IndicatorIcon } from "../icons";
+import CreateTaskModal from "./CreateTaskModal.vue";
 import TicketNavigation from "./TicketNavigation.vue";
 import TicketSLA from "./TicketSLA.vue";
 import TicketSubjectModal from "./TicketSubjectModal.vue";
@@ -190,6 +192,7 @@ function updateField(fieldname: string, value: string, callback = () => {}) {
 }
 
 const showMergeModal = ref(false);
+const showCreateTaskModal = ref(false);
 const showMergeOption = computed(() => {
   return (
     !ticket.value.doc.is_merged &&
@@ -207,6 +210,11 @@ const defaultActions = computed(() => {
       onClick: () => (showMergeModal.value = true),
     });
   }
+  items.push({
+    label: __("Create Task"),
+    icon: "check-square",
+    onClick: () => (showCreateTaskModal.value = true),
+  });
   return [
     {
       group: __("Default actions"),

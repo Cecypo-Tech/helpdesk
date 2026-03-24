@@ -66,8 +66,10 @@ export const useNotificationStore = defineStore("notification", () => {
   async function setupPushNotifications() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") return;
+      // Only proceed if the user has already granted permission.
+      // Calling requestPermission() automatically (outside a user click) is
+      // blocked by modern browsers and throws a console error.
+      if (Notification.permission !== "granted") return;
 
       const reg = await navigator.serviceWorker.ready;
 

@@ -1,4 +1,5 @@
 import LucideBookOpen from "~icons/lucide/book-open";
+import LucideCheckSquare from "~icons/lucide/check-square";
 import LucideContact2 from "~icons/lucide/contact-2";
 import LucideTicket from "~icons/lucide/ticket";
 import { OrganizationsIcon } from "../icons";
@@ -10,6 +11,11 @@ export const agentPortalSidebarOptions = [
     label: __("Tickets"),
     icon: LucideTicket,
     to: "TicketsAgent",
+  },
+  {
+    label: __("Tasks"),
+    icon: LucideCheckSquare,
+    to: "TasksAgent",
   },
   {
     label: __("Knowledge Base"),
