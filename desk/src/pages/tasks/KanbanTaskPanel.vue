@@ -276,13 +276,10 @@ function flashSaved() {
 
 async function saveField(fieldname: string, value: any) {
   try {
-    const result = await call("frappe.client.set_value", {
-      doctype: "HD Task",
-      name: props.taskId,
-      fieldname,
-      value: value || null,
-    });
-    // Keep our local modified in sync so saveSubtasks doesn't get a mismatch
+    const result = await call(
+      "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
+      { task_name: props.taskId, fieldname, value: value || null }
+    );
     if (result?.modified) currentModified.value = result.modified;
     flashSaved();
     emit("saved");
@@ -298,21 +295,20 @@ function debouncedSaveDescription() {
 
 async function saveSubtasks() {
   try {
-    const result = await call("frappe.client.save", {
-      doc: {
-        doctype: "HD Task",
-        name: props.taskId,
-        // must include modified so Frappe's timestamp check doesn't reject with a stale comparison
-        modified: currentModified.value,
-        subtasks: form.subtasks.map((s) => ({
-          doctype: "HD Task Subtask",
-          name: s.name || null,
-          title: s.title,
-          status: s.status,
-          due_date: s.due_date || null,
-        })),
-      },
-    });
+    const result = await call(
+      "helpdesk.helpdesk.doctype.hd_task.hd_task.save_task_subtasks",
+      {
+        task_name: props.taskId,
+        subtasks: JSON.stringify(
+          form.subtasks.map((s) => ({
+            name: s.name || null,
+            title: s.title,
+            status: s.status,
+            due_date: s.due_date || null,
+          }))
+        ),
+      }
+    );
     if (result?.modified) currentModified.value = result.modified;
     task.reload();
     flashSaved();

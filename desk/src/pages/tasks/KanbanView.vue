@@ -214,12 +214,10 @@ async function onDrop(targetStatus: string) {
   if (live) live.status = targetStatus;
 
   try {
-    await call("frappe.client.set_value", {
-      doctype: "HD Task",
-      name: card.name,
-      fieldname: "status",
-      value: targetStatus,
-    });
+    await call(
+      "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
+      { task_name: card.name, fieldname: "status", value: targetStatus }
+    );
     tasks.reload();
   } catch {
     if (live) live.status = card.status;
