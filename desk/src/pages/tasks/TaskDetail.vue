@@ -141,7 +141,8 @@
           :editable="true"
           editor-class="min-h-[8rem] prose-f p-2 rounded border border-outline-gray-2 focus-within:border-outline-gray-4"
           :placeholder="__('Add a description...')"
-                  />
+          @change="(val) => { form.description = val; if (isFormLoaded) isDirty = true; }"
+        />
       </div>
 
       <!-- Subtasks -->
@@ -320,13 +321,16 @@ watch(
   { immediate: true }
 );
 
-// Re-fetch when navigating between tasks without unmounting
+// Re-fetch when navigating between tasks without unmounting.
+// immediate:true also acts as a safety-net for the initial load in case
+// auto:true on createDocumentResource doesn't fire on SPA navigation.
 watch(
   () => props.taskId,
   () => {
     isFormLoaded.value = false;
     task.reload();
-  }
+  },
+  { immediate: true }
 );
 
 // Mark dirty on any form change (after initial load)

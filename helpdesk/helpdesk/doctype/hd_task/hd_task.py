@@ -33,6 +33,8 @@ def set_task_field(task_name: str, fieldname: str, value=None):
 		frappe.throw(frappe._("Field {0} cannot be updated via this endpoint").format(fieldname))
 
 	frappe.has_permission("HD Task", doc=task_name, ptype="write", throw=True)
+	if value == "@me":
+		value = frappe.session.user
 	frappe.db.set_value("HD Task", task_name, fieldname, value or None)
 	frappe.clear_document_cache("HD Task", task_name)
 	modified = frappe.db.get_value("HD Task", task_name, "modified")
@@ -56,6 +58,8 @@ def save_task(task_name: str, fields: dict | str, subtasks: list | str = "[]"):
 			doc = frappe.get_doc("HD Task", task_name)
 			for fname, fvalue in fields.items():
 				if fname in allowed_scalar:
+					if isinstance(fvalue, str) and fvalue == "@me":
+						fvalue = frappe.session.user
 					doc.set(fname, fvalue or None)
 			doc.subtasks = []
 			for sub in subtasks:

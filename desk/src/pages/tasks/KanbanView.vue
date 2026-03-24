@@ -134,7 +134,7 @@ import LucideChevronRight from "~icons/lucide/chevron-right";
 import LucidePlus from "~icons/lucide/plus";
 import LucideSquareDashed from "~icons/lucide/square-dashed";
 import LucideUser from "~icons/lucide/user";
-import { onMounted, ref } from "vue";
+import { onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KanbanTaskPanel from "./KanbanTaskPanel.vue";
 
@@ -151,7 +151,13 @@ onMounted(() => {
   } else {
     panelCollapsed.value = localStorage.getItem(COLLAPSE_KEY) === "true";
   }
+  // Safety-net: ensure data loads even if auto:true on createListResource
+  // doesn't fire reliably on SPA navigation.
+  tasks.reload();
 });
+
+// Handle re-activation if this component is wrapped in <KeepAlive>.
+onActivated(() => tasks.reload());
 
 function toggleCollapse() {
   panelCollapsed.value = !panelCollapsed.value;
