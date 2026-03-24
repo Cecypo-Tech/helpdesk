@@ -91,7 +91,17 @@
       <!-- Ticket + Team -->
       <div class="grid grid-cols-2 gap-3">
         <div class="flex flex-col gap-1">
-          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Ticket') }}</label>
+          <label class="flex items-center gap-1 text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">
+            {{ __('Ticket') }}
+            <button
+              v-if="form.ticket"
+              class="text-ink-blue-4 hover:text-ink-blue-5 normal-case"
+              :title="__('Open ticket')"
+              @click="router.push({ name: 'TicketAgent', params: { ticketId: form.ticket } })"
+            >
+              <LucideExternalLink class="h-3 w-3" />
+            </button>
+          </label>
           <Link
             :value="form.ticket"
             doctype="HD Ticket"
@@ -193,6 +203,7 @@ import {
   TextEditor,
   toast,
 } from "frappe-ui";
+import LucideExternalLink from "~icons/lucide/external-link";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
 import { computed, nextTick, onMounted, reactive, ref } from "vue";

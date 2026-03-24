@@ -110,15 +110,23 @@
       <!-- Linked Ticket + Team row -->
       <div class="grid grid-cols-2 gap-4">
         <div class="flex flex-col gap-1.5">
-          <label class="block text-sm font-medium text-ink-gray-7">
+          <label class="flex items-center gap-1 text-sm font-medium text-ink-gray-7">
             {{ __("Linked Ticket") }}
+            <button
+              v-if="form.ticket"
+              class="text-ink-blue-4 hover:text-ink-blue-5"
+              :title="__('Open ticket')"
+              @click="router.push({ name: 'TicketAgent', params: { ticketId: form.ticket } })"
+            >
+              <LucideExternalLink class="h-3.5 w-3.5" />
+            </button>
           </label>
           <Link
             v-model="form.ticket"
             doctype="HD Ticket"
             :placeholder="__('Link to a ticket')"
             class="form-control"
-                      />
+          />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="block text-sm font-medium text-ink-gray-7">
@@ -249,6 +257,7 @@ import {
   usePageMeta,
 } from "frappe-ui";
 import LucideClipboard from "~icons/lucide/clipboard";
+import LucideExternalLink from "~icons/lucide/external-link";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
 import { computed, nextTick, reactive, ref, watch } from "vue";

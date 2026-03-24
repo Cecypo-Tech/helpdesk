@@ -76,6 +76,19 @@ def get_contact_phone(ticket: str) -> str | None:
 	return result[0][0] if result else None
 
 
+def _agent_initials() -> str:
+	"""Return the ^XY initials suffix for the current session user."""
+	full_name = frappe.db.get_value("User", frappe.session.user, "full_name") or ""
+	parts = full_name.strip().split()
+	if len(parts) >= 2:
+		initials = parts[0][0].upper() + parts[-1][0].upper()
+	elif parts:
+		initials = parts[0][0].upper()
+	else:
+		initials = frappe.session.user[:2].upper()
+	return initials
+
+
 def _set_ticket_status(ticket_name: str, status_name: str) -> None:
 	"""Set HD Ticket status by name, ignore errors gracefully."""
 	if not status_name:
@@ -302,6 +315,8 @@ def send_whatsapp_reply(
 	if not phone:
 		frappe.throw(_("No phone number found for the contact linked to this ticket."))
 
+	message = f"{message}\n^{_agent_initials()}"
+
 	msg_doc = frappe.get_doc({
 		"doctype": "WhatsApp Message",
 		"type": "Outgoing",
@@ -391,8 +406,9 @@ def send_whatsapp_media(
 
 	# 2. Send the message using media_id (no public URL needed)
 	media_payload: dict = {"id": media_id}
-	if content_type in ("image", "video", "document") and message:
-		media_payload["caption"] = message
+	if content_type in ("image", "video", "document"):
+		caption = f"{message}\n^{_agent_initials()}" if message else f"^{_agent_initials()}"
+		media_payload["caption"] = caption
 	if content_type == "document":
 		media_payload["filename"] = filename
 
