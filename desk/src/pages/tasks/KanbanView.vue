@@ -127,7 +127,7 @@
 
 <script setup lang="ts">
 import { __ } from "@/translation";
-import { call, createListResource, toast } from "frappe-ui";
+import { call, createListResource, dayjs, toast } from "frappe-ui";
 import LucideCalendar from "~icons/lucide/calendar";
 import LucideChevronLeft from "~icons/lucide/chevron-left";
 import LucideChevronRight from "~icons/lucide/chevron-right";
@@ -242,7 +242,7 @@ function priorityClass(priority: string) {
 
 function formatDate(d: string) {
   if (!d) return "";
-  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return dayjs(d).format((window as any).date_format?.toUpperCase() || "DD-MM-YYYY");
 }
 
 function isOverdue(d: string) {

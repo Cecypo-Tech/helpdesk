@@ -53,8 +53,7 @@
           v-model="form.title"
           type="text"
           :placeholder="__('Task title')"
-          @change="isDirty = true"
-        />
+                  />
       </div>
 
       <!-- Status + Priority row -->
@@ -67,8 +66,7 @@
             v-model="form.status"
             type="select"
             :options="statusOptions"
-            @change="isDirty = true"
-          />
+                      />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="block text-sm font-medium text-ink-gray-7">
@@ -79,8 +77,7 @@
             doctype="HD Ticket Priority"
             :placeholder="__('Select priority')"
             class="form-control"
-            @change="isDirty = true"
-          />
+                      />
         </div>
       </div>
 
@@ -95,8 +92,7 @@
             doctype="HD Agent"
             :placeholder="__('Assign an agent')"
             class="form-control"
-            @change="isDirty = true"
-          />
+                      />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="block text-sm font-medium text-ink-gray-7">
@@ -105,8 +101,7 @@
           <FormControl
             v-model="form.due_date"
             type="date"
-            @change="isDirty = true"
-          />
+                      />
         </div>
       </div>
 
@@ -121,8 +116,7 @@
             doctype="HD Ticket"
             :placeholder="__('Link to a ticket')"
             class="form-control"
-            @change="isDirty = true"
-          />
+                      />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="block text-sm font-medium text-ink-gray-7">
@@ -133,8 +127,7 @@
             doctype="HD Team"
             :placeholder="__('Assign a team')"
             class="form-control"
-            @change="isDirty = true"
-          />
+                      />
         </div>
       </div>
 
@@ -148,8 +141,7 @@
           :editable="true"
           editor-class="min-h-[8rem] prose-f p-2 rounded border border-outline-gray-2 focus-within:border-outline-gray-4"
           :placeholder="__('Add a description...')"
-          @change="isDirty = true"
-        />
+                  />
       </div>
 
       <!-- Subtasks -->
@@ -195,14 +187,12 @@
               class="flex-1 bg-transparent text-sm text-ink-gray-8 outline-none placeholder:text-ink-gray-4"
               :placeholder="__('Subtask title')"
               :class="subtask.status === 'Done' && 'line-through text-ink-gray-4'"
-              @input="isDirty = true"
-            />
+                          />
             <!-- Status select -->
             <select
               v-model="subtask.status"
               class="text-xs rounded border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-ink-gray-6 focus:outline-none"
-              @change="isDirty = true"
-            >
+                          >
               <option v-for="s in subtaskStatuses" :key="s" :value="s">
                 {{ s }}
               </option>
@@ -212,8 +202,7 @@
               v-model="subtask.due_date"
               type="date"
               class="text-xs rounded border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-ink-gray-6 focus:outline-none"
-              @change="isDirty = true"
-            />
+                          />
             <!-- Remove -->
             <button
               class="invisible group-hover:visible text-ink-gray-4 hover:text-red-400"
@@ -255,13 +244,20 @@ import {
 import LucideClipboard from "~icons/lucide/clipboard";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
-import { computed, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { dayjs } from "frappe-ui";
+
+function formatDate(d: string) {
+  if (!d) return "";
+  return dayjs(d).format((window as any).date_format?.toUpperCase() || "DD-MM-YYYY");
+}
 
 const props = defineProps<{ taskId: string }>();
 const router = useRouter();
 const isSaving = ref(false);
 const isDirty = ref(false);
+const isFormLoaded = ref(false);
 
 const statusOptions = [
   { label: __("Backlog"), value: "Backlog" },
@@ -295,7 +291,13 @@ const task = createDocumentResource({
   doctype: "HD Task",
   name: props.taskId,
   auto: true,
-  onSuccess(doc: any) {
+});
+
+watch(
+  () => task.doc,
+  (doc: any) => {
+    if (!doc) return;
+    isFormLoaded.value = false;
     form.title = doc.title ?? "";
     form.status = doc.status ?? "Backlog";
     form.priority = doc.priority ?? "";
@@ -311,8 +313,30 @@ const task = createDocumentResource({
       due_date: s.due_date ?? "",
     }));
     isDirty.value = false;
+    nextTick(() => {
+      isFormLoaded.value = true;
+    });
   },
-});
+  { immediate: true }
+);
+
+// Re-fetch when navigating between tasks without unmounting
+watch(
+  () => props.taskId,
+  () => {
+    isFormLoaded.value = false;
+    task.reload();
+  }
+);
+
+// Mark dirty on any form change (after initial load)
+watch(
+  form,
+  () => {
+    if (isFormLoaded.value) isDirty.value = true;
+  },
+  { deep: true }
+);
 
 const doneCount = computed(
   () => form.subtasks.filter((s) => s.status === "Done").length
@@ -389,7 +413,7 @@ function copyToClipboard() {
     lines.push("Subtasks:");
     for (const s of form.subtasks) {
       const check = s.status === "Done" ? "[x]" : "[ ]";
-      const due = s.due_date ? ` - due ${s.due_date}` : "";
+      const due = s.due_date ? ` - due ${formatDate(s.due_date)}` : "";
       lines.push(`${check} ${s.title} (${s.status})${due}`);
     }
   }
