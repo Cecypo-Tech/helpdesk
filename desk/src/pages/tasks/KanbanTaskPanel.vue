@@ -201,6 +201,7 @@ const emit = defineEmits<{ close: []; saved: [] }>();
 const router = useRouter();
 
 const savedIndicator = ref(false);
+const currentModified = ref<string | null>(null);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
 let descTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -230,6 +231,7 @@ const task = createDocumentResource({
   name: props.taskId,
   auto: true,
   onSuccess(doc: any) {
+    currentModified.value = doc.modified ?? null;
     form.title = doc.title ?? "";
     form.status = doc.status ?? "Backlog";
     form.priority = doc.priority ?? "";
@@ -256,6 +258,14 @@ const progressPct = computed(() =>
   form.subtasks.length ? Math.round((doneCount.value / form.subtasks.length) * 100) : 0
 );
 
+function errorMessage(e: any, fallback: string): string {
+  if (e?.exc_type === "TimestampMismatchError") {
+    return __("Document was modified elsewhere — close and reopen the panel to refresh.");
+  }
+  // frappe-ui surfaces server messages as e.message; fall back to the raw exception
+  return e?.message || e?.exc || fallback;
+}
+
 function flashSaved() {
   savedIndicator.value = true;
   if (savedTimer) clearTimeout(savedTimer);
@@ -266,16 +276,18 @@ function flashSaved() {
 
 async function saveField(fieldname: string, value: any) {
   try {
-    await call("frappe.client.set_value", {
+    const result = await call("frappe.client.set_value", {
       doctype: "HD Task",
       name: props.taskId,
       fieldname,
       value: value || null,
     });
+    // Keep our local modified in sync so saveSubtasks doesn't get a mismatch
+    if (result?.modified) currentModified.value = result.modified;
     flashSaved();
     emit("saved");
-  } catch {
-    toast.error(__("Failed to save"));
+  } catch (e: any) {
+    toast.error(errorMessage(e, __("Failed to save")));
   }
 }
 
@@ -286,10 +298,12 @@ function debouncedSaveDescription() {
 
 async function saveSubtasks() {
   try {
-    await call("frappe.client.save", {
+    const result = await call("frappe.client.save", {
       doc: {
         doctype: "HD Task",
         name: props.taskId,
+        // must include modified so Frappe's timestamp check doesn't reject with a stale comparison
+        modified: currentModified.value,
         subtasks: form.subtasks.map((s) => ({
           doctype: "HD Task Subtask",
           name: s.name || null,
@@ -299,11 +313,12 @@ async function saveSubtasks() {
         })),
       },
     });
+    if (result?.modified) currentModified.value = result.modified;
     task.reload();
     flashSaved();
     emit("saved");
-  } catch {
-    toast.error(__("Failed to save subtasks"));
+  } catch (e: any) {
+    toast.error(errorMessage(e, __("Failed to save subtasks")));
   }
 }
 
