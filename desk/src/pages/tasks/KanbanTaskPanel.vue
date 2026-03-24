@@ -1,0 +1,329 @@
+<template>
+  <div class="flex flex-col h-full bg-surface-white overflow-hidden">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-outline-gray-1 flex-shrink-0">
+      <span class="text-xs text-green-600 transition-opacity duration-300 min-w-0">
+        {{ savedIndicator ? __('✓ Saved') : '' }}
+      </span>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <button
+          class="text-xs text-ink-gray-5 hover:text-ink-blue-4"
+          @click="router.push({ name: 'TaskAgent', params: { taskId } })"
+        >
+          {{ __('Open full page →') }}
+        </button>
+        <button
+          class="text-ink-gray-4 hover:text-ink-gray-7"
+          @click="$emit('close')"
+        >
+          <LucideX class="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div v-if="task.loading" class="flex items-center justify-center h-32">
+      <LoadingIndicator class="h-5 w-5 text-ink-gray-4" />
+    </div>
+
+    <!-- Content -->
+    <div v-else-if="task.doc" class="flex flex-col gap-4 p-4 overflow-y-auto flex-1">
+
+      <!-- Title -->
+      <input
+        v-model="form.title"
+        type="text"
+        class="w-full text-base font-semibold text-ink-gray-9 bg-transparent border-0 outline-none focus:ring-1 focus:ring-outline-gray-3 rounded px-1 -mx-1"
+        :placeholder="__('Task title')"
+        @blur="saveField('title', form.title)"
+      />
+
+      <!-- Status + Priority -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Status') }}</label>
+          <select
+            v-model="form.status"
+            class="text-sm rounded border border-outline-gray-2 bg-surface-white px-2 py-1.5 text-ink-gray-8 focus:outline-none focus:border-outline-gray-4"
+            @change="saveField('status', form.status)"
+          >
+            <option v-for="s in statusOptions" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Priority') }}</label>
+          <Link
+            v-model="form.priority"
+            doctype="HD Ticket Priority"
+            :placeholder="__('—')"
+            class="form-control"
+            @change="saveField('priority', form.priority)"
+          />
+        </div>
+      </div>
+
+      <!-- Assigned To + Due Date -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Assigned To') }}</label>
+          <Link
+            v-model="form.assigned_to"
+            doctype="HD Agent"
+            :placeholder="__('—')"
+            class="form-control"
+            @change="saveField('assigned_to', form.assigned_to)"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Due Date') }}</label>
+          <input
+            v-model="form.due_date"
+            type="date"
+            class="text-sm rounded border border-outline-gray-2 bg-surface-white px-2 py-1.5 focus:outline-none focus:border-outline-gray-4"
+            :class="isOverdue(form.due_date) ? 'text-red-500' : 'text-ink-gray-8'"
+            @blur="saveField('due_date', form.due_date)"
+          />
+        </div>
+      </div>
+
+      <!-- Ticket + Team -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Ticket') }}</label>
+          <Link
+            v-model="form.ticket"
+            doctype="HD Ticket"
+            :placeholder="__('—')"
+            class="form-control"
+            @change="saveField('ticket', form.ticket)"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Team') }}</label>
+          <Link
+            v-model="form.team"
+            doctype="HD Team"
+            :placeholder="__('—')"
+            class="form-control"
+            @change="saveField('team', form.team)"
+          />
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Description') }}</label>
+        <TextEditor
+          v-model:content="form.description"
+          :editable="true"
+          editor-class="min-h-[5rem] prose-f p-2 rounded border border-outline-gray-2 focus-within:border-outline-gray-4 text-sm"
+          :placeholder="__('Add a description...')"
+          @change="debouncedSaveDescription"
+        />
+      </div>
+
+      <!-- Subtasks -->
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">
+            {{ __('Subtasks') }}
+          </label>
+          <span class="text-xs text-ink-gray-4">{{ doneCount }} / {{ form.subtasks.length }} {{ __('done') }}</span>
+        </div>
+
+        <!-- Progress bar -->
+        <div v-if="form.subtasks.length" class="h-1 w-full rounded-full bg-surface-gray-2 overflow-hidden">
+          <div
+            class="h-full rounded-full bg-green-500 transition-all duration-300"
+            :style="{ width: progressPct + '%' }"
+          />
+        </div>
+
+        <!-- Subtask rows -->
+        <div
+          v-for="(sub, idx) in form.subtasks"
+          :key="sub.name || idx"
+          class="flex items-center gap-2 rounded p-1 hover:bg-surface-gray-1 group"
+        >
+          <input
+            type="checkbox"
+            class="h-3.5 w-3.5 cursor-pointer accent-green-500 flex-shrink-0"
+            :checked="sub.status === 'Done'"
+            @change="toggleSubtask(idx)"
+          />
+          <input
+            v-model="sub.title"
+            type="text"
+            class="flex-1 bg-transparent text-sm text-ink-gray-8 outline-none placeholder:text-ink-gray-4"
+            :class="sub.status === 'Done' ? 'line-through text-ink-gray-4' : ''"
+            :placeholder="__('Subtask title')"
+            @blur="saveSubtasks"
+          />
+          <button
+            class="invisible group-hover:visible text-ink-gray-4 hover:text-red-400"
+            @click="removeSubtask(idx)"
+          >
+            <LucideX class="h-3 w-3" />
+          </button>
+        </div>
+
+        <button
+          class="flex items-center gap-1 text-xs text-ink-gray-5 hover:text-ink-gray-8 w-fit"
+          @click="addSubtask"
+        >
+          <LucidePlus class="h-3.5 w-3.5" />
+          {{ __('Add subtask') }}
+        </button>
+      </div>
+
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import Link from "@/components/frappe-ui/Link.vue";
+import { __ } from "@/translation";
+import {
+  call,
+  createDocumentResource,
+  LoadingIndicator,
+  TextEditor,
+  toast,
+} from "frappe-ui";
+import LucidePlus from "~icons/lucide/plus";
+import LucideX from "~icons/lucide/x";
+import { computed, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
+
+const props = defineProps<{ taskId: string }>();
+const emit = defineEmits<{ close: []; saved: [] }>();
+const router = useRouter();
+
+const savedIndicator = ref(false);
+let savedTimer: ReturnType<typeof setTimeout> | null = null;
+let descTimer: ReturnType<typeof setTimeout> | null = null;
+
+const statusOptions = ["Backlog", "Todo", "In Progress", "Done"];
+
+interface Subtask {
+  name?: string;
+  title: string;
+  status: string;
+  due_date: string;
+}
+
+const form = reactive({
+  title: "",
+  status: "Backlog",
+  priority: "",
+  assigned_to: "",
+  due_date: "",
+  ticket: "",
+  team: "",
+  description: "",
+  subtasks: [] as Subtask[],
+});
+
+const task = createDocumentResource({
+  doctype: "HD Task",
+  name: props.taskId,
+  auto: true,
+  onSuccess(doc: any) {
+    form.title = doc.title ?? "";
+    form.status = doc.status ?? "Backlog";
+    form.priority = doc.priority ?? "";
+    form.assigned_to = doc.assigned_to ?? "";
+    form.due_date = doc.due_date ?? "";
+    form.ticket = doc.ticket ?? "";
+    form.team = doc.team ?? "";
+    form.description = doc.description ?? "";
+    form.subtasks = (doc.subtasks ?? []).map((s: any) => ({
+      name: s.name,
+      title: s.title ?? "",
+      status: s.status ?? "Backlog",
+      due_date: s.due_date ?? "",
+    }));
+  },
+  onError() {
+    toast.error(__("Task not found"));
+    emit("close");
+  },
+});
+
+const doneCount = computed(() => form.subtasks.filter((s) => s.status === "Done").length);
+const progressPct = computed(() =>
+  form.subtasks.length ? Math.round((doneCount.value / form.subtasks.length) * 100) : 0
+);
+
+function flashSaved() {
+  savedIndicator.value = true;
+  if (savedTimer) clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => {
+    savedIndicator.value = false;
+  }, 1500);
+}
+
+async function saveField(fieldname: string, value: any) {
+  try {
+    await call("frappe.client.set_value", {
+      doctype: "HD Task",
+      name: props.taskId,
+      fieldname,
+      value: value || null,
+    });
+    flashSaved();
+    emit("saved");
+  } catch {
+    toast.error(__("Failed to save"));
+  }
+}
+
+function debouncedSaveDescription() {
+  if (descTimer) clearTimeout(descTimer);
+  descTimer = setTimeout(() => saveField("description", form.description), 800);
+}
+
+async function saveSubtasks() {
+  try {
+    await call("frappe.client.save", {
+      doc: {
+        doctype: "HD Task",
+        name: props.taskId,
+        subtasks: form.subtasks.map((s) => ({
+          doctype: "HD Task Subtask",
+          name: s.name || null,
+          title: s.title,
+          status: s.status,
+          due_date: s.due_date || null,
+        })),
+      },
+    });
+    task.reload();
+    flashSaved();
+    emit("saved");
+  } catch {
+    toast.error(__("Failed to save subtasks"));
+  }
+}
+
+function addSubtask() {
+  form.subtasks.push({ title: "", status: "Backlog", due_date: "" });
+}
+
+function removeSubtask(idx: number) {
+  form.subtasks.splice(idx, 1);
+  saveSubtasks();
+}
+
+function toggleSubtask(idx: number) {
+  const sub = form.subtasks[idx];
+  sub.status = sub.status === "Done" ? "Todo" : "Done";
+  saveSubtasks();
+}
+
+function isOverdue(d: string) {
+  if (!d) return false;
+  return new Date(d) < new Date();
+}
+</script>
