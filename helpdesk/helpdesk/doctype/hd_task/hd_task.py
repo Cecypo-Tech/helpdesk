@@ -40,6 +40,41 @@ def set_task_field(task_name: str, fieldname: str, value=None):
 
 
 @frappe.whitelist()
+def save_task(task_name: str, fields: dict | str, subtasks: list | str = "[]"):
+	"""Save all fields and subtasks for an HD Task in one call.
+
+	Loads fresh from DB so the client never needs to track modified.
+	Retries up to 3x on TimestampMismatchError to handle concurrent saves.
+	"""
+	frappe.has_permission("HD Task", doc=task_name, ptype="write", throw=True)
+	fields = frappe.parse_json(fields)
+	subtasks = frappe.parse_json(subtasks)
+
+	allowed_scalar = ALLOWED_FIELDS
+	for attempt in range(3):
+		try:
+			doc = frappe.get_doc("HD Task", task_name)
+			for fname, fvalue in fields.items():
+				if fname in allowed_scalar:
+					doc.set(fname, fvalue or None)
+			doc.subtasks = []
+			for sub in subtasks:
+				doc.append("subtasks", {
+					"doctype": "HD Task Subtask",
+					"name": sub.get("name") or None,
+					"title": sub.get("title", ""),
+					"status": sub.get("status", "Backlog"),
+					"due_date": sub.get("due_date") or None,
+				})
+			doc.save()
+			return {"modified": str(doc.modified)}
+		except frappe.TimestampMismatchError:
+			if attempt == 2:
+				raise
+			frappe.db.rollback()
+
+
+@frappe.whitelist()
 def save_task_subtasks(task_name: str, subtasks: list | str):
 	"""Save the subtasks child table for an HD Task.
 
