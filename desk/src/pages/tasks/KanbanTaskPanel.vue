@@ -206,7 +206,7 @@ import {
 import LucideExternalLink from "~icons/lucide/external-link";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 const dateFormat = (window as any).date_format?.toUpperCase() || "DD-MM-YYYY";
@@ -246,7 +246,19 @@ const task = createDocumentResource({
   doctype: "HD Task",
   name: props.taskId,
   auto: true,
-  onSuccess(doc: any) {
+  onError() {
+    toast.error(__("Task not found"));
+    emit("close");
+  },
+});
+
+// Watch task.doc reactively — fires whenever the doc arrives or reloads,
+// regardless of whether onSuccess would have fired. This is more reliable
+// than onSuccess alone on SPA navigation.
+watch(
+  () => task.doc,
+  (doc: any) => {
+    if (!doc) return;
     isFormLoaded.value = false;
     currentModified.value = doc.modified ?? null;
     form.title = doc.title ?? "";
@@ -265,14 +277,10 @@ const task = createDocumentResource({
     }));
     nextTick(() => { isFormLoaded.value = true; });
   },
-  onError() {
-    toast.error(__("Task not found"));
-    emit("close");
-  },
-});
+  { immediate: true }
+);
 
-// auto:true on createDocumentResource doesn't reliably trigger on SPA navigation;
-// explicit reload on mount guarantees data is always fetched.
+// Explicit reload on mount — auto:true alone is unreliable on SPA navigation.
 onMounted(() => task.reload());
 
 const doneCount = computed(() => form.subtasks.filter((s) => s.status === "Done").length);
