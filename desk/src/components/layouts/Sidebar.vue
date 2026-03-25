@@ -98,7 +98,16 @@
               :is-active="isActiveTab(link.to)"
               class="my-0.5 emoji"
               :onClick="link.onClick"
-            />
+            >
+              <template #right>
+                <Badge
+                  v-if="isExpanded && linkBadge(link)"
+                  :label="linkBadge(link) > 99 ? '99+' : String(linkBadge(link))"
+                  theme="gray"
+                  variant="subtle"
+                />
+              </template>
+            </SidebarLink>
           </nav>
         </Section>
       </div>
@@ -193,7 +202,7 @@ import { useNotificationStore } from "@/stores/notification";
 import { useSidebarStore } from "@/stores/sidebar";
 import { capture } from "@/telemetry";
 import { isCustomerPortal } from "@/utils";
-import { call } from "frappe-ui";
+import { call, createResource } from "frappe-ui";
 import {
   GettingStartedBanner,
   HelpModal,
@@ -666,6 +675,20 @@ function setUpOnboarding() {
   useShortcut({ key: "h", meta: true }, () => {
     showHelpModal.value = !showHelpModal.value;
   });
+}
+
+const openCounts = createResource({
+  url: "helpdesk.api.general.get_my_open_counts",
+  auto: true,
+});
+
+function linkBadge(link: any): number | null {
+  if (isCustomerPortal.value) return null;
+  const to = link.to;
+  const routeName = typeof to === "string" ? to : to?.name;
+  if (routeName === "TicketsAgent") return openCounts.data?.tickets || null;
+  if (routeName === "TasksAgent") return openCounts.data?.tasks || null;
+  return null;
 }
 
 onMounted(() => {
