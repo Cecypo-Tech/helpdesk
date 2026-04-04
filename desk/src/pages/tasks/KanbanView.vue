@@ -1,5 +1,8 @@
 <template>
-  <div class="flex h-full overflow-hidden">
+  <div class="flex flex-col h-full overflow-hidden">
+
+    <!-- ── Filter bar ── (content added in Task 5) -->
+    <div id="kanban-filter-bar-placeholder" />
 
     <!-- ── Kanban columns ── -->
     <div class="flex-1 flex overflow-x-auto gap-3 p-4">
@@ -45,29 +48,59 @@
             @dragstart="onDragStart(card)"
             @dragend="onDragEnd"
           >
+            <!-- Title -->
             <p class="text-sm font-medium text-ink-gray-9 leading-snug mb-2">{{ card.title }}</p>
-            <div class="flex flex-wrap items-center gap-1.5">
+
+            <!-- Tags row -->
+            <div v-if="cardTags(card).length" class="flex flex-wrap gap-1 mb-2">
+              <span
+                v-for="tag in cardTags(card).slice(0, 2)"
+                :key="tag"
+                class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                :class="tagColor(tag)"
+              >{{ tag }}</span>
+              <span
+                v-if="cardTags(card).length > 2"
+                class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-surface-gray-2 text-ink-gray-5"
+              >+{{ cardTags(card).length - 2 }}</span>
+            </div>
+
+            <!-- Bottom row: priority | due date | avatar -->
+            <div class="flex items-center gap-2">
+              <!-- Priority bars -->
               <span
                 v-if="card.priority"
-                class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium"
-                :class="priorityClass(card.priority)"
-              >{{ card.priority }}</span>
+                :title="card.priority"
+                class="flex items-end gap-[2px] flex-shrink-0"
+              >
+                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 0), priorityBarColor(card.priority)]" />
+                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 1), priorityBarColor(card.priority)]" />
+                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 2), priorityBarColor(card.priority)]" />
+              </span>
+
+              <!-- Due date -->
               <span
                 v-if="card.due_date"
-                class="inline-flex items-center gap-1 text-xs"
-                :class="isOverdue(card.due_date) ? 'text-red-500' : 'text-ink-gray-5'"
+                class="flex items-center gap-1 text-xs"
+                :class="relativeDue(card.due_date).cls"
               >
-                <LucideCalendar class="h-3 w-3" />
-                {{ formatDate(card.due_date) }}
+                <LucideCalendar class="h-3 w-3 flex-shrink-0" />
+                {{ relativeDue(card.due_date).label }}
               </span>
+
+              <!-- Spacer -->
+              <span class="flex-1" />
+
+              <!-- Assignee avatar -->
               <span
                 v-if="card.assigned_to"
-                class="inline-flex items-center gap-1 text-xs text-ink-gray-5 ml-auto"
-              >
-                <LucideUser class="h-3 w-3" />
-                {{ card.assigned_to }}
-              </span>
+                :title="card.assigned_to"
+                class="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0"
+                :class="[avatarColor(card.assigned_to).bg, avatarColor(card.assigned_to).text]"
+              >{{ avatarInitials(card.assigned_to) }}</span>
             </div>
+
+            <!-- Ticket ref -->
             <div v-if="card.ticket" class="mt-1.5 text-xs text-ink-gray-4">#{{ card.ticket }}</div>
           </div>
 
@@ -103,7 +136,6 @@
       v-show="!panelCollapsed"
       class="flex-shrink-0 w-96 border-l border-outline-gray-1 flex flex-col overflow-hidden"
     >
-      <!-- No task selected -->
       <div
         v-if="!selectedTaskId"
         class="flex flex-col items-center justify-center h-full text-ink-gray-3 gap-2"
@@ -112,11 +144,11 @@
         <p class="text-sm">{{ __("Select a task to view details") }}</p>
       </div>
 
-      <!-- Panel — :key forces recreation when task changes -->
       <KanbanTaskPanel
         v-else
         :key="selectedTaskId"
         :task-id="selectedTaskId"
+        :all-tags="allTags"
         @close="selectedTaskId = null"
         @saved="tasks.reload()"
       />
@@ -133,7 +165,6 @@ import LucideChevronLeft from "~icons/lucide/chevron-left";
 import LucideChevronRight from "~icons/lucide/chevron-right";
 import LucidePlus from "~icons/lucide/plus";
 import LucideSquareDashed from "~icons/lucide/square-dashed";
-import LucideUser from "~icons/lucide/user";
 import { onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KanbanTaskPanel from "./KanbanTaskPanel.vue";
@@ -151,12 +182,10 @@ onMounted(() => {
   } else {
     panelCollapsed.value = localStorage.getItem(COLLAPSE_KEY) === "true";
   }
-  // Safety-net: ensure data loads even if auto:true on createListResource
-  // doesn't fire reliably on SPA navigation.
   tasks.reload();
+  loadAllTags();
 });
 
-// Handle re-activation if this component is wrapped in <KeepAlive>.
 onActivated(() => tasks.reload());
 
 function toggleCollapse() {
@@ -175,7 +204,7 @@ const columns = [
 // ── Task list ────────────────────────────────────────────────
 const tasks = createListResource({
   doctype: "HD Task",
-  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket"],
+  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket", "_user_tags"],
   filters: [],
   orderBy: "modified desc",
   pageLength: 999,
@@ -184,6 +213,18 @@ const tasks = createListResource({
 
 function getCardsForStatus(status: string) {
   return (tasks.data ?? []).filter((t: any) => t.status === status);
+}
+
+// ── All tags (for panel autocomplete) ────────────────────────
+const allTags = ref<string[]>([]);
+
+async function loadAllTags() {
+  try {
+    const result = await call("helpdesk.helpdesk.doctype.hd_task.hd_task.get_all_task_tags");
+    allTags.value = result ?? [];
+  } catch {
+    // non-critical
+  }
 }
 
 // ── Drag and drop ────────────────────────────────────────────
@@ -215,7 +256,6 @@ async function onDrop(targetStatus: string) {
 
   if (!card || card.status === targetStatus) return;
 
-  // Optimistic update
   const live = (tasks.data ?? []).find((t: any) => t.name === card.name);
   if (live) live.status = targetStatus;
 
@@ -236,23 +276,92 @@ function createTask(status: string) {
   router.push({ name: "TaskAgentNew", query: { status } });
 }
 
-function priorityClass(priority: string) {
-  const map: Record<string, string> = {
-    Urgent: "bg-surface-red-2 text-ink-red-3",
-    High: "bg-orange-100 text-orange-700",
-    Medium: "bg-amber-100 text-amber-700",
-    Low: "bg-surface-green-1 text-ink-green-3",
-  };
-  return map[priority] ?? "bg-surface-gray-2 text-ink-gray-6";
-}
-
 function formatDate(d: string) {
   if (!d) return "";
   return dayjs(d).format((window as any).date_format?.toUpperCase() || "DD-MM-YYYY");
 }
 
-function isOverdue(d: string) {
-  if (!d) return false;
-  return new Date(d) < new Date();
+// ── Avatar ───────────────────────────────────────────────────
+const AVATAR_COLORS = [
+  { bg: "bg-blue-100", text: "text-blue-700" },
+  { bg: "bg-green-100", text: "text-green-700" },
+  { bg: "bg-purple-100", text: "text-purple-700" },
+  { bg: "bg-orange-100", text: "text-orange-700" },
+  { bg: "bg-pink-100", text: "text-pink-700" },
+  { bg: "bg-teal-100", text: "text-teal-700" },
+  { bg: "bg-indigo-100", text: "text-indigo-700" },
+  { bg: "bg-red-100", text: "text-red-700" },
+];
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (const c of s) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return h;
+}
+
+function avatarInitials(name: string): string {
+  if (!name) return "?";
+  const parts = name.split(/[@.\s]/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function avatarColor(name: string): { bg: string; text: string } {
+  return AVATAR_COLORS[hashStr(name) % AVATAR_COLORS.length];
+}
+
+// ── Priority bars ────────────────────────────────────────────
+const PRIORITY_HEIGHTS: Record<string, [string, string, string]> = {
+  Low:    ["h-[4px]", "h-[4px]", "h-[4px]"],
+  Medium: ["h-[4px]", "h-[8px]", "h-[8px]"],
+  High:   ["h-[4px]", "h-[8px]", "h-[12px]"],
+  Urgent: ["h-[4px]", "h-[8px]", "h-[12px]"],
+};
+
+function priorityBarH(priority: string, idx: number): string {
+  return (PRIORITY_HEIGHTS[priority] ?? PRIORITY_HEIGHTS["Low"])[idx];
+}
+
+function priorityBarColor(priority: string): string {
+  const map: Record<string, string> = {
+    Urgent: "bg-red-500",
+    High:   "bg-orange-500",
+    Medium: "bg-amber-400",
+    Low:    "bg-green-400",
+  };
+  return map[priority] ?? "bg-gray-300";
+}
+
+// ── Relative due date ─────────────────────────────────────────
+function relativeDue(d: string): { label: string; cls: string } {
+  if (!d) return { label: "", cls: "" };
+  const today = dayjs().startOf("day");
+  const due = dayjs(d).startOf("day");
+  const diff = due.diff(today, "day");
+  if (diff < -1) return { label: `${Math.abs(diff)}d ago`, cls: "text-red-500" };
+  if (diff === -1) return { label: "Yesterday", cls: "text-red-500" };
+  if (diff === 0)  return { label: "Today", cls: "text-ink-gray-6" };
+  if (diff === 1)  return { label: "Tomorrow", cls: "text-blue-500" };
+  if (diff <= 7)   return { label: `In ${diff}d`, cls: "text-ink-gray-5" };
+  return { label: formatDate(d), cls: "text-ink-gray-4" };
+}
+
+// ── Tags ──────────────────────────────────────────────────────
+const TAG_CLASSES = [
+  "bg-blue-100 text-blue-700",
+  "bg-green-100 text-green-700",
+  "bg-purple-100 text-purple-700",
+  "bg-orange-100 text-orange-700",
+  "bg-pink-100 text-pink-700",
+  "bg-teal-100 text-teal-700",
+];
+
+function tagColor(tag: string): string {
+  return TAG_CLASSES[hashStr(tag) % TAG_CLASSES.length];
+}
+
+function cardTags(card: any): string[] {
+  if (!card._user_tags) return [];
+  return card._user_tags.split(",").map((t: string) => t.trim()).filter(Boolean);
 }
 </script>
