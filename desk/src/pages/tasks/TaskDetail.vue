@@ -141,6 +141,17 @@
         </div>
       </div>
 
+      <!-- Tags -->
+      <div class="flex flex-col gap-1.5">
+        <label class="block text-sm font-medium text-ink-gray-7">
+          {{ __("Tags") }}
+        </label>
+        <TagInput
+          v-model="form.user_tags"
+          :all-tags="allTags"
+        />
+      </div>
+
       <!-- Description -->
       <div class="flex flex-col gap-1.5">
         <label class="block text-sm font-medium text-ink-gray-7">
@@ -236,6 +247,12 @@
           {{ __("Add subtask") }}
         </button>
       </div>
+
+      <!-- Created by footer -->
+      <div class="flex items-center gap-3 pt-2 border-t border-outline-gray-1 text-xs text-ink-gray-4">
+        <span>{{ __('Created by') }} <span class="font-medium text-ink-gray-6">{{ task.doc.owner }}</span></span>
+        <span>{{ dayjs(task.doc.creation).format('DD MMM YYYY') }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -244,6 +261,7 @@
 import { LayoutHeader } from "@/components";
 import { __ } from "@/translation";
 import Link from "@/components/frappe-ui/Link.vue";
+import TagInput from "@/components/TagInput.vue";
 import {
   Breadcrumbs,
   Button,
@@ -260,7 +278,7 @@ import LucideClipboard from "~icons/lucide/clipboard";
 import LucideExternalLink from "~icons/lucide/external-link";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { dayjs } from "frappe-ui";
 
@@ -276,6 +294,17 @@ const router = useRouter();
 const isSaving = ref(false);
 const isDirty = ref(false);
 const isFormLoaded = ref(false);
+
+const allTags = ref<string[]>([]);
+
+onMounted(async () => {
+  try {
+    const result = await call("helpdesk.helpdesk.doctype.hd_task.hd_task.get_all_task_tags");
+    allTags.value = result ?? [];
+  } catch {
+    // non-critical
+  }
+});
 
 const statusOptions = [
   { label: __("Backlog"), value: "Backlog" },
@@ -302,6 +331,7 @@ const form = reactive({
   ticket: "",
   team: "",
   description: "",
+  user_tags: "",
   subtasks: [] as Subtask[],
 });
 
@@ -324,6 +354,7 @@ watch(
     form.ticket = doc.ticket ?? "";
     form.team = doc.team ?? "";
     form.description = doc.description ?? "";
+    form.user_tags = doc._user_tags ?? "";
     form.subtasks = (doc.subtasks ?? []).map((s: any) => ({
       name: s.name,
       title: s.title,
@@ -400,6 +431,7 @@ async function saveTask() {
         ticket: form.ticket || null,
         team: form.team || null,
         description: form.description || null,
+        _user_tags: form.user_tags || null,
       }),
       subtasks: JSON.stringify(
         form.subtasks.map((s) => ({
