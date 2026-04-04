@@ -123,7 +123,7 @@
 import { LayoutHeader } from "@/components";
 import { __ } from "@/translation";
 import Link from "@/components/frappe-ui/Link.vue";
-import { Breadcrumbs, Button, call, FormControl, TextEditor, toast, usePageMeta } from "frappe-ui";
+import { Breadcrumbs, Button, call, dayjs, FormControl, TextEditor, toast, usePageMeta } from "frappe-ui";
 import { reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -146,9 +146,9 @@ const initialStatus = validStatuses.includes(route.query.status as string)
 const form = reactive({
   title: "",
   status: initialStatus,
-  priority: "",
-  assigned_to: "",
-  due_date: "",
+  priority: "Low",
+  assigned_to: (window as any).frappe?.session?.user ?? "",
+  due_date: dayjs().format("YYYY-MM-DD"),
   ticket: "",
   description: "",
 });
