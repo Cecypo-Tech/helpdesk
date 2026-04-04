@@ -1,8 +1,83 @@
 <template>
   <div class="flex flex-col h-full overflow-hidden">
 
-    <!-- ── Filter bar ── (content added in Task 5) -->
-    <div id="kanban-filter-bar-placeholder" />
+    <!-- ── Filter bar ── -->
+    <div class="flex items-center gap-2 px-4 py-2 border-b border-outline-gray-1 bg-surface-white flex-shrink-0">
+
+      <!-- Search -->
+      <div class="relative flex items-center">
+        <LucideSearch class="absolute left-2 h-3.5 w-3.5 text-ink-gray-4 pointer-events-none" />
+        <input
+          v-model="filterSearch"
+          type="text"
+          class="pl-7 pr-6 py-1.5 text-sm rounded border border-outline-gray-2 bg-surface-white text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none focus:border-outline-gray-4 w-52"
+          :placeholder="__('Search tasks\u2026')"
+          @input="onSearchInput"
+        />
+        <button
+          v-if="filterSearch"
+          class="absolute right-1.5 text-ink-gray-4 hover:text-ink-gray-7"
+          @click="filterSearch = ''; searchResultNames = null"
+        >
+          <LucideX class="h-3 w-3" />
+        </button>
+        <LucideLoader v-if="searchLoading" class="absolute right-1.5 h-3 w-3 text-ink-gray-4 animate-spin" />
+      </div>
+
+      <!-- Assignee filter -->
+      <div class="relative flex items-center">
+        <LucideUser class="absolute left-2 h-3.5 w-3.5 text-ink-gray-4 pointer-events-none z-10" />
+        <select
+          v-model="filterAssignee"
+          class="pl-7 pr-6 py-1.5 text-sm rounded border border-outline-gray-2 bg-surface-white text-ink-gray-8 focus:outline-none focus:border-outline-gray-4 appearance-none w-40"
+        >
+          <option value="">{{ __('All agents') }}</option>
+          <option
+            v-for="agent in uniqueAssignees"
+            :key="agent"
+            :value="agent"
+          >{{ agent }}</option>
+        </select>
+        <button
+          v-if="filterAssignee"
+          class="absolute right-1.5 text-ink-gray-4 hover:text-ink-gray-7 z-10"
+          @click="filterAssignee = ''"
+        >
+          <LucideX class="h-3 w-3" />
+        </button>
+      </div>
+
+      <!-- Tag filter -->
+      <div class="relative flex items-center">
+        <LucideTag class="absolute left-2 h-3.5 w-3.5 text-ink-gray-4 pointer-events-none" />
+        <input
+          v-model="filterTag"
+          type="text"
+          list="kanban-tag-list"
+          class="pl-7 pr-6 py-1.5 text-sm rounded border border-outline-gray-2 bg-surface-white text-ink-gray-8 placeholder:text-ink-gray-4 focus:outline-none focus:border-outline-gray-4 w-36"
+          :placeholder="__('Filter by tag')"
+        />
+        <datalist id="kanban-tag-list">
+          <option v-for="tag in allTags" :key="tag" :value="tag" />
+        </datalist>
+        <button
+          v-if="filterTag"
+          class="absolute right-1.5 text-ink-gray-4 hover:text-ink-gray-7"
+          @click="filterTag = ''"
+        >
+          <LucideX class="h-3 w-3" />
+        </button>
+      </div>
+
+      <!-- Clear all -->
+      <button
+        v-if="hasFilters"
+        class="text-xs text-ink-gray-4 hover:text-ink-gray-7 ml-1"
+        @click="clearFilters"
+      >
+        {{ __('Clear all') }}
+      </button>
+    </div>
 
     <!-- ── Kanban columns ── -->
     <div class="flex-1 flex overflow-x-auto gap-3 p-4">
@@ -163,9 +238,14 @@ import { call, createListResource, dayjs, toast } from "frappe-ui";
 import LucideCalendar from "~icons/lucide/calendar";
 import LucideChevronLeft from "~icons/lucide/chevron-left";
 import LucideChevronRight from "~icons/lucide/chevron-right";
+import LucideLoader from "~icons/lucide/loader";
 import LucidePlus from "~icons/lucide/plus";
+import LucideSearch from "~icons/lucide/search";
 import LucideSquareDashed from "~icons/lucide/square-dashed";
-import { onActivated, onMounted, ref } from "vue";
+import LucideTag from "~icons/lucide/tag";
+import LucideUser from "~icons/lucide/user";
+import LucideX from "~icons/lucide/x";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import KanbanTaskPanel from "./KanbanTaskPanel.vue";
 
@@ -212,7 +292,16 @@ const tasks = createListResource({
 });
 
 function getCardsForStatus(status: string) {
-  return (tasks.data ?? []).filter((t: any) => t.status === status);
+  return (tasks.data ?? []).filter((t: any) => {
+    if (t.status !== status) return false;
+    if (searchResultNames.value !== null && !searchResultNames.value.has(t.name)) return false;
+    if (filterAssignee.value && t.assigned_to !== filterAssignee.value) return false;
+    if (filterTag.value) {
+      const tags = (t._user_tags ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
+      if (!tags.includes(filterTag.value)) return false;
+    }
+    return true;
+  });
 }
 
 // ── All tags (for panel autocomplete) ────────────────────────
@@ -225,6 +314,53 @@ async function loadAllTags() {
   } catch {
     // non-critical
   }
+}
+
+// ── Filter state ─────────────────────────────────────────────
+const filterSearch = ref("");
+const filterAssignee = ref("");
+const filterTag = ref("");
+const searchResultNames = ref<Set<string> | null>(null);
+const searchLoading = ref(false);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+const hasFilters = computed(() => !!(filterSearch.value || filterAssignee.value || filterTag.value));
+
+const uniqueAssignees = computed<string[]>(() => {
+  const set = new Set<string>();
+  for (const t of (tasks.data ?? [])) {
+    if (t.assigned_to) set.add(t.assigned_to);
+  }
+  return [...set].sort();
+});
+
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer);
+  if (!filterSearch.value.trim()) {
+    searchResultNames.value = null;
+    return;
+  }
+  searchLoading.value = true;
+  searchTimer = setTimeout(async () => {
+    try {
+      const names: string[] = await call(
+        "helpdesk.helpdesk.doctype.hd_task.hd_task.search_tasks",
+        { query: filterSearch.value.trim() }
+      );
+      searchResultNames.value = new Set(names);
+    } catch {
+      searchResultNames.value = null;
+    } finally {
+      searchLoading.value = false;
+    }
+  }, 300);
+}
+
+function clearFilters() {
+  filterSearch.value = "";
+  filterAssignee.value = "";
+  filterTag.value = "";
+  searchResultNames.value = null;
 }
 
 // ── Drag and drop ────────────────────────────────────────────
