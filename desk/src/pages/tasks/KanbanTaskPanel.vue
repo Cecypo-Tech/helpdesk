@@ -13,6 +13,14 @@
         >
           {{ __('Open full page →') }}
         </button>
+        <!-- Copy button -->
+        <button
+          class="text-ink-gray-4 hover:text-ink-gray-7"
+          :title="__('Copy task summary')"
+          @click="copyToClipboard"
+        >
+          <LucideClipboard class="h-4 w-4" />
+        </button>
         <button
           class="text-ink-gray-4 hover:text-ink-gray-7"
           @click="$emit('close')"
@@ -122,6 +130,16 @@
         </div>
       </div>
 
+      <!-- Tags -->
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Tags') }}</label>
+        <TagInput
+          :model-value="form.user_tags"
+          :all-tags="allTags"
+          @update:model-value="(val) => { form.user_tags = val; saveField('_user_tags', val || null); }"
+        />
+      </div>
+
       <!-- Description -->
       <div class="flex flex-col gap-1">
         <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Description') }}</label>
@@ -143,7 +161,6 @@
           <span class="text-xs text-ink-gray-4">{{ doneCount }} / {{ form.subtasks.length }} {{ __('done') }}</span>
         </div>
 
-        <!-- Progress bar -->
         <div v-if="form.subtasks.length" class="h-1 w-full rounded-full bg-surface-gray-2 overflow-hidden">
           <div
             class="h-full rounded-full bg-green-500 transition-all duration-300"
@@ -151,7 +168,6 @@
           />
         </div>
 
-        <!-- Subtask rows -->
         <div
           v-for="(sub, idx) in form.subtasks"
           :key="sub.name || idx"
@@ -188,10 +204,21 @@
       </div>
 
     </div>
+
+    <!-- Footer: created by / on -->
+    <div
+      v-if="task.doc"
+      class="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-t border-outline-gray-1 text-xs text-ink-gray-4"
+    >
+      <span>{{ __('Created by') }} <span class="font-medium text-ink-gray-6">{{ task.doc.owner }}</span></span>
+      <span>{{ formatCreation(task.doc.creation) }}</span>
+    </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
+import TagInput from "@/components/TagInput.vue";
 import Link from "@/components/frappe-ui/Link.vue";
 import { __ } from "@/translation";
 import {
@@ -199,10 +226,12 @@ import {
   Checkbox,
   createDocumentResource,
   DatePicker,
+  dayjs,
   LoadingIndicator,
   TextEditor,
   toast,
 } from "frappe-ui";
+import LucideClipboard from "~icons/lucide/clipboard";
 import LucideExternalLink from "~icons/lucide/external-link";
 import LucidePlus from "~icons/lucide/plus";
 import LucideX from "~icons/lucide/x";
@@ -211,7 +240,10 @@ import { useRouter } from "vue-router";
 
 const dateFormat = (window as any).date_format?.toUpperCase() || "DD-MM-YYYY";
 
-const props = defineProps<{ taskId: string }>();
+const props = defineProps<{
+  taskId: string;
+  allTags: string[];
+}>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 const router = useRouter();
 
@@ -239,6 +271,7 @@ const form = reactive({
   ticket: "",
   team: "",
   description: "",
+  user_tags: "",   // mirrors _user_tags (underscore-prefixed fields can't be reactive keys)
   subtasks: [] as Subtask[],
 });
 
@@ -252,9 +285,6 @@ const task = createDocumentResource({
   },
 });
 
-// Watch task.doc reactively — fires whenever the doc arrives or reloads,
-// regardless of whether onSuccess would have fired. This is more reliable
-// than onSuccess alone on SPA navigation.
 watch(
   () => task.doc,
   (doc: any) => {
@@ -269,6 +299,7 @@ watch(
     form.ticket = doc.ticket ?? "";
     form.team = doc.team ?? "";
     form.description = doc.description ?? "";
+    form.user_tags = doc._user_tags ?? "";
     form.subtasks = (doc.subtasks ?? []).map((s: any) => ({
       name: s.name,
       title: s.title ?? "",
@@ -280,7 +311,6 @@ watch(
   { immediate: true }
 );
 
-// Explicit reload on mount — auto:true alone is unreliable on SPA navigation.
 onMounted(() => task.reload());
 
 const doneCount = computed(() => form.subtasks.filter((s) => s.status === "Done").length);
@@ -292,16 +322,13 @@ function errorMessage(e: any, fallback: string): string {
   if (e?.exc_type === "TimestampMismatchError") {
     return __("Document was modified elsewhere — close and reopen the panel to refresh.");
   }
-  // frappe-ui surfaces server messages as e.message; fall back to the raw exception
   return e?.message || e?.exc || fallback;
 }
 
 function flashSaved() {
   savedIndicator.value = true;
   if (savedTimer) clearTimeout(savedTimer);
-  savedTimer = setTimeout(() => {
-    savedIndicator.value = false;
-  }, 1500);
+  savedTimer = setTimeout(() => { savedIndicator.value = false; }, 1500);
 }
 
 async function saveField(fieldname: string, value: any) {
@@ -368,5 +395,31 @@ function toggleSubtask(idx: number) {
 function isOverdue(d: string) {
   if (!d) return false;
   return new Date(d) < new Date();
+}
+
+function formatCreation(ts: string): string {
+  if (!ts) return "";
+  return dayjs(ts).format("DD MMM YYYY");
+}
+
+function copyToClipboard() {
+  const lines: string[] = [
+    `Task: ${form.title}`,
+    `Status: ${form.status}`,
+  ];
+  if (form.user_tags) lines.push(`Tags: ${form.user_tags}`);
+  if (form.subtasks.length) {
+    lines.push(`Progress: ${doneCount.value} of ${form.subtasks.length} subtasks completed`);
+    lines.push("");
+    lines.push("Subtasks:");
+    for (const s of form.subtasks) {
+      const check = s.status === "Done" ? "[x]" : "[ ]";
+      lines.push(`${check} ${s.title} (${s.status})`);
+    }
+  }
+  navigator.clipboard
+    .writeText(lines.join("\n"))
+    .then(() => toast.success(__("Copied to clipboard")))
+    .catch(() => toast.error(__("Could not copy to clipboard")));
 }
 </script>
