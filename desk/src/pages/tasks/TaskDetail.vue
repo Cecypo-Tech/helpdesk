@@ -457,6 +457,7 @@ function copyToClipboard() {
     `Task: ${form.title}`,
     `Status: ${form.status}`,
   ];
+  if (form.user_tags) lines.push(`Tags: ${form.user_tags}`);
 
   if (form.subtasks.length) {
     lines.push(

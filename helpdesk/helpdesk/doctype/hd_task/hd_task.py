@@ -128,11 +128,12 @@ def search_tasks(query: str) -> list[str]:
 	"""
 	if not query or not query.strip():
 		return []
-	like = f"%{query.strip()}%"
+	q = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+	like = f"%{q}%"
 	main = frappe.db.sql(
 		"""
 		SELECT name FROM `tabHD Task`
-		WHERE title LIKE %(like)s OR description LIKE %(like)s
+		WHERE title LIKE %(like)s ESCAPE '\\\\' OR description LIKE %(like)s ESCAPE '\\\\'
 		""",
 		{"like": like},
 		as_dict=False,
@@ -140,7 +141,7 @@ def search_tasks(query: str) -> list[str]:
 	subs = frappe.db.sql(
 		"""
 		SELECT DISTINCT parent FROM `tabHD Task Subtask`
-		WHERE title LIKE %(like)s
+		WHERE title LIKE %(like)s ESCAPE '\\\\'
 		""",
 		{"like": like},
 		as_dict=False,

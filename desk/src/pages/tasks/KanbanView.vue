@@ -79,6 +79,9 @@
       </button>
     </div>
 
+    <!-- ── Main area: columns + panel ── -->
+    <div class="flex flex-1 overflow-hidden">
+
     <!-- ── Kanban columns ── -->
     <div class="flex-1 flex overflow-x-auto gap-3 p-4">
       <div
@@ -225,9 +228,11 @@
         :task-id="selectedTaskId"
         :all-tags="allTags"
         @close="selectedTaskId = null"
-        @saved="tasks.reload()"
+        @saved="() => { tasks.reload(); loadAllTags(); }"
       />
     </div>
+
+    </div><!-- end main area -->
 
   </div>
 </template>
