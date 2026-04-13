@@ -38,6 +38,9 @@ scheduler_events = {
         "helpdesk.search.build_index_if_not_exists",
         "helpdesk.search.download_corpus",
     ],
+    "hourly": [
+        "helpdesk.helpdesk.doctype.hd_task.hd_task.send_due_task_wpa_notifications",
+    ],
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days"
     ],
