@@ -156,9 +156,23 @@ def _notify_assigned_agents(ticket_name: str, message: str | None, sender_name: 
 
 	Deduplicates: skips agents who already have an unread WhatsApp notification for
 	this ticket, so a chatty customer never floods the bell.
+
+	Falls back to notifying the default_team members when the ticket has no assignees
+	(e.g. brand-new tickets that haven't been picked up yet).
 	"""
 	assign_json = frappe.db.get_value("HD Ticket", ticket_name, "_assign") or "[]"
 	assignees = frappe.parse_json(assign_json) or []
+
+	if not assignees:
+		# New / unassigned tickets: notify the default team so someone sees the bell.
+		settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+		if settings.default_team:
+			assignees = frappe.get_all(
+				"HD Team Member",
+				filters={"parent": settings.default_team, "parenttype": "HD Team"},
+				pluck="user",
+			)
+
 	if not assignees:
 		return
 
