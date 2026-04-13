@@ -16,7 +16,9 @@ import Briefcase from "~icons/lucide/briefcase";
 import AssignmentRules from "./Assignment Rules/AssignmentRules.vue";
 import Settings from "~icons/lucide/settings-2";
 import { FieldDependencyIcon, PhoneIcon } from "@/components/icons";
+import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import Telephony from "./Telephony/Telephony.vue";
+import WhatsAppSettings from "./WhatsApp/WhatsAppSettings.vue";
 import { EmailNotifications } from "./EmailNotifications";
 import { __ } from "@/translation";
 import SavedReplies from "./SavedReplies/SavedReplies.vue";
@@ -130,6 +132,12 @@ export const tabs = computed(() => {
           icon: markRaw(PhoneIcon),
           component: markRaw(Telephony),
         },
+        {
+          label: __("WhatsApp"),
+          icon: markRaw(WhatsAppIcon),
+          component: markRaw(WhatsAppSettings),
+          condition: () => auth.isAdmin,
+        },
       ],
     },
   ];
@@ -165,6 +173,7 @@ type TabName =
   | "Assignment Rules"
   | "Field Dependencies"
   | "Telephony"
+  | "WhatsApp"
   | "Saved Replies";
 
 export const setActiveSettingsTab = (tabName: TabName) => {

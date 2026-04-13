@@ -159,22 +159,44 @@ def _notify_assigned_agents(ticket_name: str, message: str | None, sender_name: 
 
 	Falls back to notifying the default_team members when the ticket has no assignees
 	(e.g. brand-new tickets that haven't been picked up yet).
+
+	Respects notification_quiet_minutes: if an agent replied within that window,
+	the notification is suppressed (the conversation is being actively managed).
 	"""
+	settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+
 	assign_json = frappe.db.get_value("HD Ticket", ticket_name, "_assign") or "[]"
 	assignees = frappe.parse_json(assign_json) or []
 
-	if not assignees:
+	if not assignees and settings.default_team:
 		# New / unassigned tickets: notify the default team so someone sees the bell.
-		settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
-		if settings.default_team:
-			assignees = frappe.get_all(
-				"HD Team Member",
-				filters={"parent": settings.default_team, "parenttype": "HD Team"},
-				pluck="user",
-			)
+		assignees = frappe.get_all(
+			"HD Team Member",
+			filters={"parent": settings.default_team, "parenttype": "HD Team"},
+			pluck="user",
+		)
 
 	if not assignees:
 		return
+
+	# Quiet-period check: skip notification if an agent replied recently.
+	quiet_minutes = settings.notification_quiet_minutes or 0
+	if quiet_minutes > 0:
+		last_outgoing = frappe.get_all(
+			"WhatsApp Message",
+			filters={
+				"reference_doctype": "HD Ticket",
+				"reference_name": ticket_name,
+				"type": "Outgoing",
+			},
+			fields=["creation"],
+			order_by="creation desc",
+			limit=1,
+		)
+		if last_outgoing:
+			minutes_since_reply = time_diff_in_hours(now_datetime(), last_outgoing[0].creation) * 60
+			if minutes_since_reply < quiet_minutes:
+				return
 
 	preview = (message or "")[:80] or "sent a WhatsApp message"
 

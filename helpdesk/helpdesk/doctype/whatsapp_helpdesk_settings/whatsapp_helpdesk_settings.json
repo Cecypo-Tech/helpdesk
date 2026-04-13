@@ -18,6 +18,8 @@
   "customer_reply_status",
   "col_break_status",
   "agent_reply_status",
+  "section_notifications",
+  "notification_quiet_minutes",
   "section_initial_message",
   "send_initial_message",
   "initial_message_template",
@@ -107,6 +109,18 @@
    "label": "Status on Agent Reply",
    "options": "HD Ticket Status",
    "description": "Set ticket to this status when an agent sends a WhatsApp reply."
+  },
+  {
+   "fieldname": "section_notifications",
+   "fieldtype": "Section Break",
+   "label": "Notifications"
+  },
+  {
+   "default": "10",
+   "fieldname": "notification_quiet_minutes",
+   "fieldtype": "Int",
+   "label": "Notification Quiet Period (Minutes)",
+   "description": "Skip the bell notification if an agent already replied to this ticket within this many minutes. Set to 0 to always notify."
   },
   {
    "fieldname": "section_initial_message",
