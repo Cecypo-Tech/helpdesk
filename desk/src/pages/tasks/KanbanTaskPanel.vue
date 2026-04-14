@@ -419,6 +419,8 @@ function formatCreation(ts: string): string {
   return dayjs(ts).format("DD MMM YYYY");
 }
 
+defineExpose({ reload: () => task.reload() });
+
 function copyToClipboard() {
   const lines: string[] = [
     `Task: ${form.title}`,

@@ -200,6 +200,7 @@
         </div>
         <KanbanTaskPanel
           v-else
+          ref="taskPanel"
           :key="selectedTaskId"
           :task-id="selectedTaskId"
           :all-tags="allTags"
@@ -229,6 +230,7 @@ import KanbanTaskPanel from "./KanbanTaskPanel.vue";
 const COLLAPSE_KEY = "hd_task_calendar_panel_collapsed";
 const selectedTaskId = ref<string | null>(null);
 const panelCollapsed = ref(false);
+const taskPanel = ref<InstanceType<typeof KanbanTaskPanel> | null>(null);
 
 // ── Drag & drop state ────────────────────────────────────────
 interface DragState { name: string; fromDate: string }
@@ -286,6 +288,7 @@ async function onDrop(toDate: string) {
       { task_name: dragged.name, fieldname: "due_date", value: toDate }
     );
     tasks.reload();
+    taskPanel.value?.reload();
   } catch {
     if (live) live.due_date = originalDate;
     tasks.reload();
