@@ -1,9 +1,10 @@
 import frappe
 from frappe.model.document import Document
+from frappe.utils import now_datetime
 
 ALLOWED_FIELDS = {
 	"title", "status", "priority", "assigned_to",
-	"due_date", "ticket", "team", "description", "_user_tags",
+	"due_date", "due_time", "ticket", "team", "description", "_user_tags",
 }
 
 
@@ -118,6 +119,96 @@ def get_all_task_tags() -> list[str]:
 			if tag:
 				tags.add(tag)
 	return sorted(tags)
+
+
+def send_due_task_wpa_notifications() -> None:
+	"""Hourly scheduler: send a WhatsApp reminder to the assigned agent when a task is due.
+
+	Criteria for sending:
+	- status != 'Done'
+	- wpa_notified = 0  (haven't sent yet)
+	- assigned_to is set
+	- due_date is set and the due datetime has arrived:
+	    - if due_time is set  → CONCAT(due_date, ' ', due_time) <= NOW()
+	    - if due_time is null  → due_date <= CURDATE()
+
+	After sending, wpa_notified is set to 1 to prevent re-sending.
+	"""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return
+
+	try:
+		settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+		if not settings.enabled:
+			return
+	except Exception:
+		return
+
+	due_tasks = frappe.db.sql(
+		"""
+		SELECT name, title, assigned_to, due_date, due_time, status, ticket
+		FROM `tabHD Task`
+		WHERE status != 'Done'
+		  AND wpa_notified = 0
+		  AND assigned_to IS NOT NULL AND assigned_to != ''
+		  AND due_date IS NOT NULL
+		  AND (
+		      (due_time IS NULL AND due_date <= CURDATE())
+		      OR
+		      (due_time IS NOT NULL AND CONCAT(due_date, ' ', due_time) <= NOW())
+		  )
+		""",
+		as_dict=True,
+	)
+
+	for task in due_tasks:
+		try:
+			phone = _get_agent_phone(task.assigned_to)
+			if not phone:
+				continue
+
+			due_label = str(task.due_date)
+			if task.due_time:
+				# due_time is a timedelta from MySQL — format as HH:MM
+				total_seconds = int(task.due_time.total_seconds())
+				h, m = divmod(total_seconds // 60, 60)
+				due_label += f" at {h:02d}:{m:02d}"
+
+			lines = [f"⏰ Task due: {task.title}", f"Due: {due_label}", f"Status: {task.status}"]
+			if task.ticket:
+				lines.append(f"Ticket: {task.ticket}")
+
+			frappe.get_doc({
+				"doctype": "WhatsApp Message",
+				"type": "Outgoing",
+				"to": phone,
+				"message": "\n".join(lines),
+				"content_type": "text",
+			}).insert(ignore_permissions=True)
+
+			frappe.db.set_value("HD Task", task.name, "wpa_notified", 1, update_modified=False)
+			frappe.db.commit()
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), f"WPA task notification failed: {task.name}")
+
+
+def _get_agent_phone(assigned_to: str) -> str | None:
+	"""Resolve a phone number for an HD Agent, trying User.mobile_no then their Contact."""
+	user_email = frappe.db.get_value("HD Agent", assigned_to, "user")
+	if not user_email:
+		return None
+
+	# Fastest path: mobile_no stored directly on the User record
+	phone = frappe.db.get_value("User", user_email, "mobile_no")
+	if phone:
+		return phone
+
+	# Fallback: Contact linked by email_id
+	contact = frappe.db.get_value("Contact", {"email_id": user_email}, "name")
+	if contact:
+		phone = frappe.db.get_value("Contact", contact, "mobile_no") or \
+		        frappe.db.get_value("Contact", contact, "phone")
+	return phone or None
 
 
 @frappe.whitelist()

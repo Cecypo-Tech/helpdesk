@@ -90,8 +90,22 @@
             :format="dateFormat"
             :clearable="true"
             :placeholder="__('—')"
-            :input-class="isOverdue(form.due_date) ? '!text-red-500' : ''"
+            :input-class="isOverdue(form.due_date, form.due_time) ? '!text-red-500' : ''"
             @change="(val) => saveField('due_date', val || null)"
+          />
+        </div>
+      </div>
+
+      <!-- Due Time -->
+      <div class="grid grid-cols-2 gap-3" v-if="form.due_date">
+        <div />
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Due Time') }}</label>
+          <input
+            v-model="form.due_time"
+            type="time"
+            class="text-sm rounded border border-outline-gray-2 bg-surface-white px-2 py-1.5 text-ink-gray-8 focus:outline-none focus:border-outline-gray-4"
+            @change="saveField('due_time', form.due_time || null)"
           />
         </div>
       </div>
@@ -268,6 +282,7 @@ const form = reactive({
   priority: "",
   assigned_to: "",
   due_date: "",
+  due_time: "",
   ticket: "",
   team: "",
   description: "",
@@ -296,6 +311,7 @@ watch(
     form.priority = doc.priority ?? "";
     form.assigned_to = doc.assigned_to ?? "";
     form.due_date = doc.due_date ?? "";
+    form.due_time = doc.due_time ?? "";
     form.ticket = doc.ticket ?? "";
     form.team = doc.team ?? "";
     form.description = doc.description ?? "";
@@ -392,9 +408,10 @@ function toggleSubtask(idx: number) {
   saveSubtasks();
 }
 
-function isOverdue(d: string) {
+function isOverdue(d: string, t?: string) {
   if (!d) return false;
-  return new Date(d) < new Date();
+  const due = t ? new Date(`${d}T${t}`) : new Date(d);
+  return due < new Date();
 }
 
 function formatCreation(ts: string): string {

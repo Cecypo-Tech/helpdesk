@@ -20,8 +20,11 @@
         </RouterLink>
       </template>
     </LayoutHeader>
+    <CalendarView
+      v-if="isCalendarView"
+    />
     <KanbanView
-      v-if="isKanbanView"
+      v-else-if="isKanbanView"
     />
     <ListViewBuilder
       v-else
@@ -42,6 +45,7 @@
 
 <script setup lang="ts">
 import { LayoutHeader, ListViewBuilder } from "@/components";
+import CalendarView from "@/pages/tasks/CalendarView.vue";
 import KanbanView from "@/pages/tasks/KanbanView.vue";
 import {
   EditIcon,
@@ -58,6 +62,7 @@ import { View } from "@/types";
 import { getIcon } from "@/utils";
 import { Badge, FeatherIcon, toast, usePageMeta } from "frappe-ui";
 import LucideAlignJustify from "~icons/lucide/align-justify";
+import LucideCalendarDays from "~icons/lucide/calendar-days";
 import LucidePlus from "~icons/lucide/plus";
 import { computed, h, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -79,9 +84,11 @@ const {
   deleteView,
 } = useView("HD Task");
 
+const isCalendarView = computed(() => route.query.view === "calendar");
+
 const isKanbanView = computed(() => {
   const viewName = route.query.view as string | undefined;
-  if (!viewName) return false;
+  if (!viewName || viewName === "calendar") return false;
   return findView(viewName).value?.type === "kanban";
 });
 
@@ -133,6 +140,14 @@ const dropdownOptions = computed(() => {
           label: __("List View"),
           icon: "align-justify",
           onClick: () => router.push({ name: "TasksAgent" }),
+        },
+        {
+          label: __("Calendar View"),
+          icon: h(LucideCalendarDays, { class: "h-4 w-4" }),
+          onClick: () => {
+            currentView.value = { label: __("Calendar"), icon: LucideCalendarDays };
+            router.push({ name: "TasksAgent", query: { view: "calendar" } });
+          },
         },
       ],
     },
@@ -360,6 +375,8 @@ function resetState() {
 onMounted(() => {
   if (!route.query.view) {
     currentView.value = { label: __("List"), icon: LucideAlignJustify };
+  } else if (route.query.view === "calendar") {
+    currentView.value = { label: __("Calendar"), icon: LucideCalendarDays };
   }
 });
 

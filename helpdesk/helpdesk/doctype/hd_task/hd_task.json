@@ -10,11 +10,13 @@
   "priority",
   "assigned_to",
   "due_date",
+  "due_time",
   "ticket",
   "team",
   "description",
   "subtasks_section",
-  "subtasks"
+  "subtasks",
+  "wpa_notified"
  ],
  "fields": [
   {
@@ -55,6 +57,20 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Due Date"
+  },
+  {
+   "fieldname": "due_time",
+   "fieldtype": "Time",
+   "label": "Due Time",
+   "description": "Optional time of day the task is due. Used for WhatsApp due-date reminders."
+  },
+  {
+   "default": "0",
+   "fieldname": "wpa_notified",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "WPA Notified",
+   "description": "Set to 1 after a WhatsApp due-date reminder has been sent, preventing duplicate sends."
   },
   {
    "fieldname": "ticket",

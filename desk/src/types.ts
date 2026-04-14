@@ -285,6 +285,7 @@ export type File = {
 
 export type Notification = {
   creation: string;
+  message?: string;
   name: string;
   notification_type: string;
   read: boolean;
