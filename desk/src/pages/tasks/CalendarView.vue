@@ -122,12 +122,16 @@
                 <div
                   v-for="task in visibleTasksForDate(cell.dateStr)"
                   :key="task.name"
+                  role="button"
+                  tabindex="0"
                   class="w-full rounded border border-outline-gray-1 border-l-2 bg-surface-white px-1.5 py-1 cursor-pointer select-none transition-all hover:shadow-sm"
                   :class="[
                     statusBorderClass(task.status),
                     selectedTaskId === task.name ? 'ring-2 ring-ink-blue-3' : '',
                   ]"
                   @click="selectedTaskId = task.name"
+                  @keydown.enter.prevent="selectedTaskId = task.name"
+                  @keydown.space.prevent="selectedTaskId = task.name"
                 >
                   <!-- Row 1: title -->
                   <p class="text-[11px] font-medium text-ink-gray-8 truncate leading-4">{{ task.title }}</p>
