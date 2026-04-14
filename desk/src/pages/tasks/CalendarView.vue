@@ -118,20 +118,39 @@
               </div>
 
               <!-- Task chips -->
-              <div class="flex flex-col gap-0.5 px-1 pb-1 overflow-y-auto flex-1">
-                <button
+              <div class="flex flex-col gap-1 px-1 pb-1 overflow-y-auto flex-1">
+                <div
                   v-for="task in visibleTasksForDate(cell.dateStr)"
                   :key="task.name"
-                  class="w-full text-left px-1.5 py-0.5 rounded text-[11px] font-medium truncate leading-4 transition-colors"
+                  class="w-full rounded border border-outline-gray-1 border-l-2 bg-surface-white px-1.5 py-1 cursor-pointer select-none transition-all hover:shadow-sm"
                   :class="[
-                    selectedTaskId === task.name
-                      ? 'bg-ink-blue-3 text-white'
-                      : statusChipClass(task.status),
+                    statusBorderClass(task.status),
+                    selectedTaskId === task.name ? 'ring-2 ring-ink-blue-3' : '',
                   ]"
                   @click="selectedTaskId = task.name"
                 >
-                  {{ task.title }}
-                </button>
+                  <!-- Row 1: title -->
+                  <p class="text-[11px] font-medium text-ink-gray-8 truncate leading-4">{{ task.title }}</p>
+                  <!-- Row 2: priority bars + assignee avatar -->
+                  <div class="flex items-center mt-0.5">
+                    <span
+                      v-if="task.priority"
+                      :title="task.priority"
+                      class="flex items-end gap-[2px] flex-shrink-0"
+                    >
+                      <span class="w-[3px] rounded-sm" :class="[priorityBarH(task.priority, 0), priorityBarColor(task.priority)]" />
+                      <span class="w-[3px] rounded-sm" :class="[priorityBarH(task.priority, 1), priorityBarColor(task.priority)]" />
+                      <span class="w-[3px] rounded-sm" :class="[priorityBarH(task.priority, 2), priorityBarColor(task.priority)]" />
+                    </span>
+                    <span class="flex-1" />
+                    <span
+                      v-if="task.assigned_to"
+                      :title="task.assigned_to"
+                      class="h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-semibold flex-shrink-0"
+                      :class="[avatarColor(task.assigned_to).bg, avatarColor(task.assigned_to).text]"
+                    >{{ avatarInitials(task.assigned_to) }}</span>
+                  </div>
+                </div>
                 <span
                   v-if="overflowCount(cell.dateStr) > 0"
                   class="text-[10px] text-ink-gray-4 px-1"
