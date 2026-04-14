@@ -104,11 +104,10 @@
                   : cell.isCurrentMonth
                     ? 'bg-surface-white border-outline-gray-2'
                     : 'bg-surface-gray-1 border-outline-gray-1',
-                cell.isToday && dragOverDate !== cell.dateStr ? 'ring-2 ring-ink-blue-3' : '',
-                dragOverDate === cell.dateStr ? 'ring-2 ring-ink-blue-3' : '',
+                (cell.isToday || dragOverDate === cell.dateStr) ? 'ring-2 ring-ink-blue-3' : '',
               ]"
               @dragover.prevent="onDragOver(cell.dateStr)"
-              @dragleave="onDragLeave"
+              @dragleave="onDragLeave($event)"
               @drop.prevent="onDrop(cell.dateStr)"
             >
               <!-- Date number -->
@@ -264,7 +263,9 @@ function onDragOver(dateStr: string) {
   dragOverDate.value = dateStr;
 }
 
-function onDragLeave() {
+function onDragLeave(event: DragEvent) {
+  const cell = event.currentTarget as HTMLElement;
+  if (cell.contains(event.relatedTarget as Node)) return;
   dragOverDate.value = null;
 }
 
