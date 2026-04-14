@@ -182,7 +182,7 @@
 
 <script setup lang="ts">
 import { __ } from "@/translation";
-import { call, createListResource, dayjs } from "frappe-ui";
+import { call, createListResource, dayjs, toast } from "frappe-ui";
 import LucideChevronLeft from "~icons/lucide/chevron-left";
 import LucideChevronRight from "~icons/lucide/chevron-right";
 import LucideLoader from "~icons/lucide/loader";
@@ -287,7 +287,7 @@ const tasksByDate = computed(() => {
   return map;
 });
 
-const MAX_VISIBLE = 3;
+const MAX_VISIBLE = 2;
 function visibleTasksForDate(dateStr: string) {
   return (tasksByDate.value[dateStr] ?? []).slice(0, MAX_VISIBLE);
 }
@@ -346,14 +346,65 @@ function clearFilters() {
   searchResultNames.value = null;
 }
 
-// ── Status chip colours ───────────────────────────────────────
-const STATUS_CHIP: Record<string, string> = {
-  "Backlog":     "bg-gray-100 text-gray-600",
-  "Todo":        "bg-blue-100 text-blue-700",
-  "In Progress": "bg-orange-100 text-orange-700",
-  "Done":        "bg-green-100 text-green-700",
+// ── Status border colours ─────────────────────────────────────
+const STATUS_BORDER: Record<string, string> = {
+  "Backlog":     "border-l-gray-400",
+  "Todo":        "border-l-blue-400",
+  "In Progress": "border-l-orange-400",
+  "Done":        "border-l-green-400",
 };
-function statusChipClass(status: string) {
-  return STATUS_CHIP[status] ?? "bg-surface-gray-2 text-ink-gray-6";
+function statusBorderClass(status: string): string {
+  return STATUS_BORDER[status] ?? "border-l-gray-300";
+}
+
+// ── Avatar ───────────────────────────────────────────────────
+const AVATAR_COLORS = [
+  { bg: "bg-blue-100", text: "text-blue-700" },
+  { bg: "bg-green-100", text: "text-green-700" },
+  { bg: "bg-purple-100", text: "text-purple-700" },
+  { bg: "bg-orange-100", text: "text-orange-700" },
+  { bg: "bg-pink-100", text: "text-pink-700" },
+  { bg: "bg-teal-100", text: "text-teal-700" },
+  { bg: "bg-indigo-100", text: "text-indigo-700" },
+  { bg: "bg-red-100", text: "text-red-700" },
+];
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (const c of s) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return h;
+}
+
+function avatarInitials(name: string): string {
+  if (!name) return "?";
+  const parts = name.split(/[@.\s]/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function avatarColor(name: string): { bg: string; text: string } {
+  return AVATAR_COLORS[hashStr(name) % AVATAR_COLORS.length];
+}
+
+// ── Priority bars ────────────────────────────────────────────
+const PRIORITY_HEIGHTS: Record<string, [string, string, string]> = {
+  Low:    ["h-[4px]", "h-[4px]", "h-[4px]"],
+  Medium: ["h-[4px]", "h-[8px]", "h-[8px]"],
+  High:   ["h-[4px]", "h-[8px]", "h-[12px]"],
+  Urgent: ["h-[4px]", "h-[8px]", "h-[12px]"],
+};
+
+function priorityBarH(priority: string, idx: number): string {
+  return (PRIORITY_HEIGHTS[priority] ?? PRIORITY_HEIGHTS["Low"])[idx];
+}
+
+function priorityBarColor(priority: string): string {
+  const map: Record<string, string> = {
+    Urgent: "bg-red-500",
+    High:   "bg-orange-500",
+    Medium: "bg-amber-400",
+    Low:    "bg-green-400",
+  };
+  return map[priority] ?? "bg-gray-300";
 }
 </script>
