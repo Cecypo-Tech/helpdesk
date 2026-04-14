@@ -97,13 +97,19 @@
             <div
               v-for="cell in week"
               :key="cell.dateStr"
-              class="min-h-24 rounded-lg border flex flex-col overflow-hidden"
+              class="min-h-24 rounded-lg border flex flex-col overflow-hidden transition-all"
               :class="[
-                cell.isCurrentMonth
-                  ? 'bg-surface-white border-outline-gray-2'
-                  : 'bg-surface-gray-1 border-outline-gray-1',
-                cell.isToday ? 'ring-2 ring-ink-blue-3' : '',
+                dragOverDate === cell.dateStr
+                  ? 'bg-surface-blue-1 border-outline-gray-2'
+                  : cell.isCurrentMonth
+                    ? 'bg-surface-white border-outline-gray-2'
+                    : 'bg-surface-gray-1 border-outline-gray-1',
+                cell.isToday && dragOverDate !== cell.dateStr ? 'ring-2 ring-ink-blue-3' : '',
+                dragOverDate === cell.dateStr ? 'ring-2 ring-ink-blue-3' : '',
               ]"
+              @dragover.prevent="onDragOver(cell.dateStr)"
+              @dragleave="onDragLeave"
+              @drop.prevent="onDrop(cell.dateStr)"
             >
               <!-- Date number -->
               <div class="flex items-center justify-between px-2 pt-1.5 pb-0.5 flex-shrink-0">
@@ -122,16 +128,20 @@
                 <div
                   v-for="task in visibleTasksForDate(cell.dateStr)"
                   :key="task.name"
+                  draggable="true"
                   role="button"
                   tabindex="0"
-                  class="w-full rounded border border-outline-gray-1 border-l-2 bg-surface-white px-1.5 py-1 cursor-pointer select-none transition-all hover:shadow-sm"
+                  class="w-full rounded border border-outline-gray-1 border-l-2 bg-surface-white px-1.5 py-1 cursor-grab select-none transition-all hover:shadow-sm"
                   :class="[
                     statusBorderClass(task.status),
                     selectedTaskId === task.name ? 'ring-2 ring-ink-blue-3' : '',
+                    draggedTask?.name === task.name ? 'opacity-40' : '',
                   ]"
                   @click="selectedTaskId = task.name"
                   @keydown.enter.prevent="selectedTaskId = task.name"
                   @keydown.space.prevent="selectedTaskId = task.name"
+                  @dragstart="onDragStart($event, task, cell.dateStr)"
+                  @dragend="onDragEnd"
                 >
                   <!-- Row 1: title -->
                   <p class="text-[11px] font-medium text-ink-gray-8 truncate leading-4">{{ task.title }}</p>
@@ -221,6 +231,11 @@ const COLLAPSE_KEY = "hd_task_calendar_panel_collapsed";
 const selectedTaskId = ref<string | null>(null);
 const panelCollapsed = ref(false);
 
+// ── Drag & drop state ────────────────────────────────────────
+interface DragState { name: string; fromDate: string }
+const draggedTask = ref<DragState | null>(null);
+const dragOverDate = ref<string | null>(null);
+
 onMounted(() => {
   panelCollapsed.value = window.innerWidth < 640 || localStorage.getItem(COLLAPSE_KEY) === "true";
   tasks.reload();
@@ -231,6 +246,49 @@ onActivated(() => tasks.reload());
 function toggleCollapse() {
   panelCollapsed.value = !panelCollapsed.value;
   localStorage.setItem(COLLAPSE_KEY, String(panelCollapsed.value));
+}
+
+// ── Drag & drop handlers ──────────────────────────────────────
+function onDragStart(event: DragEvent, task: any, fromDate: string) {
+  draggedTask.value = { name: task.name, fromDate };
+  event.dataTransfer!.effectAllowed = "move";
+  event.dataTransfer!.setData("text/plain", JSON.stringify({ name: task.name, fromDate }));
+}
+
+function onDragEnd() {
+  draggedTask.value = null;
+  dragOverDate.value = null;
+}
+
+function onDragOver(dateStr: string) {
+  dragOverDate.value = dateStr;
+}
+
+function onDragLeave() {
+  dragOverDate.value = null;
+}
+
+async function onDrop(toDate: string) {
+  const dragged = draggedTask.value;
+  draggedTask.value = null;
+  dragOverDate.value = null;
+  if (!dragged || dragged.fromDate === toDate) return;
+
+  // Optimistic update
+  const live = (tasks.data ?? []).find((t: any) => t.name === dragged.name);
+  if (live) live.due_date = toDate;
+  selectedTaskId.value = dragged.name;
+
+  try {
+    await call(
+      "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
+      { task_name: dragged.name, fieldname: "due_date", value: toDate }
+    );
+    tasks.reload();
+  } catch {
+    tasks.reload();
+    toast.error(__("Failed to reschedule task"));
+  }
 }
 
 // ── Month navigation ─────────────────────────────────────────
