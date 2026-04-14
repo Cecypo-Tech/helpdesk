@@ -204,7 +204,7 @@
           :task-id="selectedTaskId"
           :all-tags="allTags"
           @close="selectedTaskId = null"
-          @saved="tasks.reload()"
+          @saved="() => { tasks.reload(); loadAllTags(); }"
         />
       </div>
 
@@ -251,7 +251,6 @@ function toggleCollapse() {
 function onDragStart(event: DragEvent, task: any, fromDate: string) {
   draggedTask.value = { name: task.name, fromDate };
   event.dataTransfer!.effectAllowed = "move";
-  event.dataTransfer!.setData("text/plain", JSON.stringify({ name: task.name, fromDate }));
 }
 
 function onDragEnd() {
@@ -277,6 +276,7 @@ async function onDrop(toDate: string) {
 
   // Optimistic update
   const live = (tasks.data ?? []).find((t: any) => t.name === dragged.name);
+  const originalDate = live?.due_date ?? null;
   if (live) live.due_date = toDate;
   selectedTaskId.value = dragged.name;
 
@@ -287,6 +287,7 @@ async function onDrop(toDate: string) {
     );
     tasks.reload();
   } catch {
+    if (live) live.due_date = originalDate;
     tasks.reload();
     toast.error(__("Failed to reschedule task"));
   }
@@ -473,7 +474,7 @@ const PRIORITY_HEIGHTS: Record<string, [string, string, string]> = {
   Low:    ["h-[4px]", "h-[4px]", "h-[4px]"],
   Medium: ["h-[4px]", "h-[8px]", "h-[8px]"],
   High:   ["h-[4px]", "h-[8px]", "h-[12px]"],
-  Urgent: ["h-[4px]", "h-[8px]", "h-[12px]"],
+  Urgent: ["h-[6px]", "h-[10px]", "h-[12px]"],
 };
 
 function priorityBarH(priority: string, idx: number): string {
