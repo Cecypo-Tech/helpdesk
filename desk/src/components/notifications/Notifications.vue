@@ -94,6 +94,23 @@
       <LucideBell class="size-6" />
       <p class="text-base text-ink-gray-8">You are all caught up!</p>
     </div>
+
+    <!-- Push notification opt-in -->
+    <div
+      v-if="notificationStore.pushSupported && notificationStore.pushPermissionStatus !== 'granted'"
+      class="border-t border-outline-gray-2 px-5 py-3"
+    >
+      <div v-if="notificationStore.pushPermissionStatus === 'denied'" class="text-center text-xs text-ink-gray-5">
+        Notifications blocked. Enable them in your browser settings to receive mobile alerts.
+      </div>
+      <button
+        v-else
+        class="w-full rounded-lg border border-outline-gray-3 py-2 text-xs font-medium text-ink-gray-7 hover:bg-surface-gray-1"
+        @click="notificationStore.requestPushPermission()"
+      >
+        Enable mobile notifications
+      </button>
+    </div>
   </span>
 </template>
 

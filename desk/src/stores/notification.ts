@@ -63,8 +63,22 @@ export const useNotificationStore = defineStore("notification", () => {
     },
     { immediate: true }
   );
+  const pushSupported =
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  const pushPermissionStatus = ref<NotificationPermission | "unsupported">(
+    pushSupported ? Notification.permission : "unsupported"
+  );
+
+  async function requestPushPermission() {
+    if (!pushSupported) return;
+    const result = await Notification.requestPermission();
+    pushPermissionStatus.value = result;
+    if (result === "granted") await setupPushNotifications();
+  }
+
   async function setupPushNotifications() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (!pushSupported) return;
     try {
       // Only proceed if the user has already granted permission.
       // Calling requestPermission() automatically (outside a user click) is
@@ -154,5 +168,8 @@ export const useNotificationStore = defineStore("notification", () => {
     unread,
     visible,
     resource,
+    pushSupported,
+    pushPermissionStatus,
+    requestPushPermission,
   };
 });

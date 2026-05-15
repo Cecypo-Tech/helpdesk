@@ -163,6 +163,23 @@ def _find_open_dm_ticket(phone: str, timeout_hours: int) -> str | None:
 	return ticket_name
 
 
+def _is_blocked(jid: str, sender: str, settings) -> bool:
+	"""Return True if the jid or sender phone is on the blocklist."""
+	blocked = settings.get("blocked_jids") or []
+	if not blocked:
+		return False
+	phone = _phone_from_jid(sender or jid)
+	for row in blocked:
+		entry = (row.jid or "").strip()
+		if not entry:
+			continue
+		if entry == jid or entry == sender:
+			return True
+		if _normalize_phone(entry) == phone:
+			return True
+	return False
+
+
 def _group_label(jid: str, settings) -> str:
 	"""Return the configured group name for a JID, or a formatted fallback."""
 	for row in (settings.group_jids or []):
@@ -248,6 +265,10 @@ def webhook():
 
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
+
+	# Blocklist check — silent drop, no ticket, no notification
+	if _is_blocked(jid, sender, settings):
+		return {"status": "blocked"}
 
 	# Deduplicate
 	if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):

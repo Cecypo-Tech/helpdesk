@@ -27,7 +27,9 @@
   "section_notifications",
   "notification_quiet_minutes",
   "section_groups",
-  "group_jids"
+  "group_jids",
+  "section_blocklist",
+  "blocked_jids"
  ],
  "fields": [
   {
@@ -166,6 +168,18 @@
    "label": "WhatsApp Groups",
    "options": "Baileys Gateway Group JID",
    "description": "Map each group JID to a friendly name and optional team override."
+  },
+  {
+   "fieldname": "section_blocklist",
+   "fieldtype": "Section Break",
+   "label": "Blocklist"
+  },
+  {
+   "fieldname": "blocked_jids",
+   "fieldtype": "Table",
+   "label": "Blocked Numbers / Groups",
+   "options": "Baileys Blocked JID",
+   "description": "Messages from these JIDs or phone numbers are silently dropped — no ticket, no notification."
   }
  ],
  "issingle": 1,

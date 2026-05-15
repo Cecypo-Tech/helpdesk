@@ -27,7 +27,9 @@
   "allow_template_outside_window",
   "allowed_templates",
   "section_products",
-  "product_list"
+  "product_list",
+  "section_blocklist",
+  "blocked_numbers"
  ],
  "fields": [
   {
@@ -171,6 +173,18 @@
    "fieldtype": "Small Text",
    "label": "Product List",
    "description": "One product per line. Used to populate the Product field on tickets via the welcome template."
+  },
+  {
+   "fieldname": "section_blocklist",
+   "fieldtype": "Section Break",
+   "label": "Blocklist"
+  },
+  {
+   "fieldname": "blocked_numbers",
+   "fieldtype": "Table",
+   "label": "Blocked Numbers",
+   "options": "WhatsApp Helpdesk Blocked Number",
+   "description": "Messages from these phone numbers are silently dropped — no ticket, no notification."
   }
  ],
  "issingle": 1,

@@ -713,6 +713,11 @@ def on_whatsapp_message_insert(doc, method=None):
 	if not phone:
 		return
 
+	# Blocklist check — silent drop
+	for row in (settings.get("blocked_numbers") or []):
+		if normalize_phone(row.phone or "") == phone:
+			return
+
 	# Try to find a contact
 	contact_name = match_phone_to_contact(phone)
 	placeholder_domain = settings.placeholder_email_domain or "whatsapp.placeholder.local"
