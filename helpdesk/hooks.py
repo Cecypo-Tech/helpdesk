@@ -113,7 +113,10 @@ auth_hooks = ["helpdesk.auth.authenticate"]
 fixtures = [
     {
         "doctype": "Custom Field",
-        "filters": [["dt", "=", "HD Ticket"], ["fieldname", "=", "baileys_jid"]],
+        "filters": [
+            ["dt", "in", ["HD Ticket", "Customer"]],
+            ["fieldname", "in", ["baileys_jid", "helpdesk_notes"]],
+        ],
     }
 ]
 
