@@ -1,0 +1,45 @@
+{
+ "actions": [],
+ "creation": "2026-05-15 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "jid",
+  "group_name",
+  "team"
+ ],
+ "fields": [
+  {
+   "fieldname": "jid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Group JID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "group_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Group Name"
+  },
+  {
+   "fieldname": "team",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Team Override",
+   "options": "HD Team",
+   "description": "Route messages from this group to this team. Overrides the default team."
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-15 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "Baileys Gateway Group JID",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

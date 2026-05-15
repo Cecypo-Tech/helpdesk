@@ -1,0 +1,15 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "HD Ticket-baileys_jid",
+  "dt": "HD Ticket",
+  "fieldname": "baileys_jid",
+  "fieldtype": "Data",
+  "label": "Baileys JID",
+  "insert_after": "ticket_channel",
+  "read_only": 1,
+  "in_list_view": 0,
+  "in_filter": 0,
+  "permlevel": 0
+ }
+]

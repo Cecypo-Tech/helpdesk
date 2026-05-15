@@ -1,0 +1,142 @@
+{
+ "actions": [],
+ "creation": "2026-05-15 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "direction",
+  "jid",
+  "col_break_jid",
+  "sender_jid",
+  "sender_name",
+  "col_break_ref",
+  "reference_doctype",
+  "reference_name",
+  "section_message",
+  "message",
+  "content_type",
+  "col_break_media",
+  "media_url",
+  "message_id",
+  "section_meta",
+  "status",
+  "profile_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "Incoming\nOutgoing",
+   "reqd": 1
+  },
+  {
+   "fieldname": "jid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "JID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_jid",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sender_jid",
+   "fieldtype": "Data",
+   "label": "Sender JID"
+  },
+  {
+   "fieldname": "sender_name",
+   "fieldtype": "Data",
+   "label": "Sender Name"
+  },
+  {
+   "fieldname": "col_break_ref",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "section_message",
+   "fieldtype": "Section Break",
+   "label": "Message"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Text",
+   "label": "Message"
+  },
+  {
+   "fieldname": "content_type",
+   "fieldtype": "Select",
+   "label": "Content Type",
+   "options": "text\nimage\nvideo\naudio\ndocument"
+  },
+  {
+   "fieldname": "col_break_media",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "media_url",
+   "fieldtype": "Data",
+   "label": "Media URL"
+  },
+  {
+   "fieldname": "message_id",
+   "fieldtype": "Data",
+   "label": "Message ID"
+  },
+  {
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break",
+   "label": "Meta"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nSent\nDelivered\nRead\nFailed"
+  },
+  {
+   "fieldname": "profile_name",
+   "fieldtype": "Data",
+   "label": "Profile Name"
+  }
+ ],
+ "links": [],
+ "modified": "2026-05-15 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "Baileys Message",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Agent",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": []
+}

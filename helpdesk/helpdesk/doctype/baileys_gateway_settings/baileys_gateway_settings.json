@@ -1,0 +1,189 @@
+{
+ "actions": [],
+ "creation": "2026-05-15 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_connection",
+  "enabled",
+  "gateway_url",
+  "col_break_conn",
+  "api_key",
+  "session_name",
+  "section_ticket_defaults",
+  "default_ticket_type",
+  "col_break_defaults",
+  "default_team",
+  "col_break_email",
+  "placeholder_email_domain",
+  "section_dm_behaviour",
+  "unknown_contact_action",
+  "col_break_dm",
+  "new_conversation_timeout_hours",
+  "section_status_automation",
+  "customer_reply_status",
+  "col_break_status",
+  "agent_reply_status",
+  "section_notifications",
+  "notification_quiet_minutes",
+  "section_groups",
+  "group_jids"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_connection",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "gateway_url",
+   "fieldtype": "Data",
+   "label": "Gateway URL",
+   "description": "Base URL of the Baileys gateway, e.g. http://localhost:3001"
+  },
+  {
+   "fieldname": "col_break_conn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key",
+   "description": "Shared secret sent as X-API-Key header to and from the gateway."
+  },
+  {
+   "fieldname": "session_name",
+   "fieldtype": "Data",
+   "label": "Session Name",
+   "default": "helpdesk",
+   "description": "The Baileys session name configured on the gateway."
+  },
+  {
+   "fieldname": "section_ticket_defaults",
+   "fieldtype": "Section Break",
+   "label": "Ticket Defaults"
+  },
+  {
+   "fieldname": "default_ticket_type",
+   "fieldtype": "Link",
+   "label": "Default Ticket Type",
+   "options": "HD Ticket Type"
+  },
+  {
+   "fieldname": "col_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_team",
+   "fieldtype": "Link",
+   "label": "Default Team",
+   "options": "HD Team"
+  },
+  {
+   "fieldname": "col_break_email",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "baileys.placeholder.local",
+   "fieldname": "placeholder_email_domain",
+   "fieldtype": "Data",
+   "label": "Placeholder Email Domain",
+   "description": "Domain used for synthetic email addresses (group tickets and unknown contacts)."
+  },
+  {
+   "fieldname": "section_dm_behaviour",
+   "fieldtype": "Section Break",
+   "label": "Individual DM Behaviour"
+  },
+  {
+   "default": "Skip Ticket Creation",
+   "fieldname": "unknown_contact_action",
+   "fieldtype": "Select",
+   "label": "Unknown Contact Action",
+   "options": "Skip Ticket Creation\nCreate Ticket Only\nCreate Contact and Ticket",
+   "description": "What to do when a DM arrives from a number not matched to any Contact."
+  },
+  {
+   "fieldname": "col_break_dm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "24",
+   "fieldname": "new_conversation_timeout_hours",
+   "fieldtype": "Int",
+   "label": "New Conversation Timeout (Hours)",
+   "description": "For DMs: reuse the existing ticket if the last message was within this window. Groups always use one persistent ticket."
+  },
+  {
+   "fieldname": "section_status_automation",
+   "fieldtype": "Section Break",
+   "label": "Status Automation"
+  },
+  {
+   "fieldname": "customer_reply_status",
+   "fieldtype": "Link",
+   "label": "Status on Customer Reply",
+   "options": "HD Ticket Status",
+   "description": "Set ticket to this status when a customer sends a message."
+  },
+  {
+   "fieldname": "col_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "agent_reply_status",
+   "fieldtype": "Link",
+   "label": "Status on Agent Reply",
+   "options": "HD Ticket Status",
+   "description": "Set ticket to this status when an agent replies."
+  },
+  {
+   "fieldname": "section_notifications",
+   "fieldtype": "Section Break",
+   "label": "Notifications"
+  },
+  {
+   "default": "10",
+   "fieldname": "notification_quiet_minutes",
+   "fieldtype": "Int",
+   "label": "Notification Quiet Period (Minutes)",
+   "description": "Skip the bell notification if an agent already replied within this many minutes. 0 = always notify."
+  },
+  {
+   "fieldname": "section_groups",
+   "fieldtype": "Section Break",
+   "label": "Group Mappings"
+  },
+  {
+   "fieldname": "group_jids",
+   "fieldtype": "Table",
+   "label": "WhatsApp Groups",
+   "options": "Baileys Gateway Group JID",
+   "description": "Map each group JID to a friendly name and optional team override."
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-15 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "Baileys Gateway Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

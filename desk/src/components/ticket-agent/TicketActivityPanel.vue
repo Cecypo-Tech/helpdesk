@@ -10,6 +10,10 @@
         v-if="tab.name === 'whatsapp'"
         :ticketId="String(ticket.doc?.name)"
       />
+      <BaileysGroupChatTab
+        v-else-if="tab.name === 'baileys'"
+        :ticketId="String(ticket.doc?.name)"
+      />
       <template v-else>
         <TicketAgentActivities
           v-if="Boolean(activities.data)"
@@ -40,7 +44,7 @@
   </Tabs>
   <!-- Comm Area -->
   <CommunicationArea
-    v-if="activeTabName !== 'whatsapp'"
+    v-if="activeTabName !== 'whatsapp' && activeTabName !== 'baileys'"
     ref="communicationAreaRef"
     :ticketId="String(ticket.doc?.name)"
     :to-emails="[ticket.doc?.raised_by]"
@@ -65,6 +69,7 @@ import {
   WhatsAppIcon,
 } from "@/components/icons";
 import WhatsAppChatTab from "@/components/whatsapp/WhatsAppChatTab.vue";
+import BaileysGroupChatTab from "@/components/whatsapp/BaileysGroupChatTab.vue";
 import { useActiveTabManager } from "@/composables/useActiveTabManager";
 import { useTelephonyStore } from "@/stores/telephony";
 import {
@@ -92,6 +97,7 @@ const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
 
 const hasWhatsApp = true;
+const hasBaileys = computed(() => Boolean(ticket.value?.doc?.baileys_jid));
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [
@@ -124,6 +130,14 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
     _tabs.push({
       name: "whatsapp",
       label: "WhatsApp",
+      icon: WhatsAppIcon,
+    });
+  }
+
+  if (hasBaileys.value) {
+    _tabs.push({
+      name: "baileys",
+      label: "Group Chat",
       icon: WhatsAppIcon,
     });
   }

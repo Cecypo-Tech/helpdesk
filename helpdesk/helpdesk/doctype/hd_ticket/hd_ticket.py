@@ -784,6 +784,11 @@ class HDTicket(Document):
             frappe.throw(_(e))
 
     def send_acknowledgement_email(self):
+        if self.raised_by and (
+            self.raised_by.startswith("whatsapp+") or self.raised_by.startswith("group+")
+        ):
+            return
+
         acknowledgement_email_content = frappe.db.get_single_value(
             "HD Settings", "acknowledgement_email_content"
         )
