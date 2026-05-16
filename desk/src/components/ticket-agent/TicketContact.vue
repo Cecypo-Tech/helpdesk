@@ -152,7 +152,7 @@ watch(
   (val) => {
     if (val) {
       getNotesResource.submit({
-        doctype: "Customer",
+        doctype: "HD Customer",
         filters: val,
         fieldname: "helpdesk_notes",
       });
@@ -166,7 +166,7 @@ watch(
 const debouncedSave = useDebounceFn(() => {
   if (!customer.value) return;
   setNotesResource.submit({
-    doctype: "Customer",
+    doctype: "HD Customer",
     name: customer.value,
     fieldname: "helpdesk_notes",
     value: notesValue.value,

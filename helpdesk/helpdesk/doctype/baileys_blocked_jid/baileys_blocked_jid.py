@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class BaileysBlockedJid(Document):
+class BaileysBlockedJID(Document):
 	pass

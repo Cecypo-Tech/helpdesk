@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class BaileysGatewayGroupJid(Document):
+class BaileysGatewayGroupJID(Document):
 	pass

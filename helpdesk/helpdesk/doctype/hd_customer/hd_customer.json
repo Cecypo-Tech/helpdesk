@@ -10,6 +10,7 @@
   "image",
   "customer_name",
   "domain",
+  "helpdesk_notes",
   "references_tab",
   "contact_html"
  ],
@@ -31,6 +32,12 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Domain"
+  },
+  {
+   "fieldname": "helpdesk_notes",
+   "fieldtype": "Long Text",
+   "label": "Helpdesk Notes",
+   "description": "Internal notes visible to agents (not shared with customer)."
   },
   {
    "fieldname": "references_tab",
