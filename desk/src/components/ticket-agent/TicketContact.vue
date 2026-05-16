@@ -50,7 +50,7 @@
     </div>
 
     <!-- Company notes -->
-    <div v-if="ticket?.value?.doc?.customer" class="mt-3">
+    <div v-if="ticket?.value?.doc?.customer && !notesUnavailable" class="mt-3">
       <div class="flex items-center justify-between mb-1">
         <span class="text-xs font-medium text-ink-gray-5 uppercase tracking-wide">Company Notes</span>
         <span class="text-xs text-ink-gray-4 transition-opacity" :class="saveStatus ? 'opacity-100' : 'opacity-0'">Saved</span>
@@ -122,6 +122,7 @@ const callContact = () => {
 // --- Company notes ---
 const notesValue = ref("");
 const saveStatus = ref(false);
+const notesUnavailable = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const customer = computed(() => ticket?.value?.doc?.customer);
@@ -130,6 +131,9 @@ const getNotesResource = createResource({
   url: "frappe.client.get_value",
   onSuccess(data: { helpdesk_notes?: string }) {
     notesValue.value = data?.helpdesk_notes || "";
+  },
+  onError() {
+    notesUnavailable.value = true;
   },
 });
 
@@ -140,6 +144,7 @@ const setNotesResource = createResource({
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => (saveStatus.value = false), 2000);
   },
+  onError() {},
 });
 
 watch(
