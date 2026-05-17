@@ -26,15 +26,38 @@
     <KanbanView
       v-else-if="isKanbanView"
     />
-    <ListViewBuilder
-      v-else
-      ref="listViewRef"
-      :options="options"
-      @empty-state-action="() => $router.push({ name: 'TaskAgentNew' })"
-      @row-click="
-        (row) => $router.push({ name: 'TaskAgent', params: { taskId: row } })
-      "
-    />
+    <template v-else>
+      <div class="flex items-center gap-2 px-4 py-2 border-b border-outline-gray-1 bg-surface-white">
+        <button
+          class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors"
+          :class="quickFilter === 'overdue'
+            ? 'bg-red-50 border-red-300 text-red-600 font-semibold'
+            : 'bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4'"
+          @click="quickFilter = quickFilter === 'overdue' ? null : 'overdue'"
+        >
+          <LucideAlertCircle class="h-3 w-3" />
+          {{ __('Overdue') }}
+        </button>
+        <button
+          class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors"
+          :class="quickFilter === 'due-today'
+            ? 'bg-amber-50 border-amber-300 text-amber-600 font-semibold'
+            : 'bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4'"
+          @click="quickFilter = quickFilter === 'due-today' ? null : 'due-today'"
+        >
+          <LucideCalendarClock class="h-3 w-3" />
+          {{ __('Due Today') }}
+        </button>
+      </div>
+      <ListViewBuilder
+        ref="listViewRef"
+        :options="options"
+        @empty-state-action="() => $router.push({ name: 'TaskAgentNew' })"
+        @row-click="
+          (row) => $router.push({ name: 'TaskAgent', params: { taskId: row } })
+        "
+      />
+    </template>
     <ViewModal
       v-if="viewDialog.show"
       v-model="viewDialog"
@@ -64,7 +87,9 @@ import { Badge, FeatherIcon, toast, usePageMeta } from "frappe-ui";
 import LucideAlignJustify from "~icons/lucide/align-justify";
 import LucideCalendarDays from "~icons/lucide/calendar-days";
 import LucidePlus from "~icons/lucide/plus";
-import { computed, h, onMounted, reactive, ref } from "vue";
+import LucideAlertCircle from "~icons/lucide/alert-circle";
+import LucideCalendarClock from "~icons/lucide/calendar-clock";
+import { computed, h, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const router = useRouter();
@@ -73,6 +98,21 @@ const { isManager } = useAuthStore();
 const { $dialog } = globalStore();
 
 const listViewRef = ref(null);
+
+const quickFilter = ref<"overdue" | "due-today" | null>(null);
+
+watch(quickFilter, () => {
+	if (!listViewRef.value?.list) return;
+	const today = new Date().toISOString().slice(0, 10);
+	const filters =
+		quickFilter.value === "overdue"
+			? [["due_date", "<", today], ["status", "!=", "Done"]]
+			: quickFilter.value === "due-today"
+			? [["due_date", "=", today]]
+			: [];
+	listViewRef.value.list.params.filters = filters;
+	listViewRef.value.list.reload();
+});
 
 const {
   getCurrentUserViews,
