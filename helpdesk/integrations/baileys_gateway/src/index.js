@@ -30,9 +30,11 @@ async function connectToWhatsApp() {
 	sock.ev.on("creds.update", saveCreds);
 	sock.ev.on("connection.update", ({ connection, lastDisconnect, qr }) => {
 		if (qr) { qrString = qr; isConnected = false; logger.info("QR code ready"); }
+		logger.info({ connection, qr: !!qr }, "connection.update");
 		if (connection === "close") {
 			isConnected = false; qrString = null;
 			const code = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output.statusCode : null;
+			logger.warn({ code, reason: lastDisconnect?.error?.message }, "Connection closed");
 			if (code !== DisconnectReason.loggedOut) setTimeout(connectToWhatsApp, 5000);
 		} else if (connection === "open") { isConnected = true; qrString = null; logger.info("Connected"); }
 	});
