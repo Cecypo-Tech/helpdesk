@@ -7,10 +7,12 @@
     </div>
     <Notifications />
     <CommandPalette />
+    <TaskDueAlertPanel />
   </div>
 </template>
 <script setup>
 import { Notifications, CommandPalette } from "@/components";
 import AppHeader from "./AppHeader.vue";
 import Sidebar from "./Sidebar.vue";
+import TaskDueAlertPanel from "@/components/TaskDueAlertPanel.vue";
 </script>
