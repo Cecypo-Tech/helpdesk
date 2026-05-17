@@ -92,6 +92,24 @@ class TestHDTask(FrappeTestCase):
 		finally:
 			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
 
+	def test_get_my_due_tasks_includes_due_today(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "Due today sentinel",
+			"status": "Todo",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": frappe.session.user,
+			"due_date": frappe.utils.today(),
+		})
+		try:
+			results = get_my_due_tasks()
+			names = [r["name"] for r in results]
+			self.assertIn(task.name, names)
+		finally:
+			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
+
 	def test_get_my_due_tasks_excludes_done(self):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
 		task = frappe.get_doc({

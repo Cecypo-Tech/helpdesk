@@ -213,7 +213,10 @@ def _get_agent_phone(assigned_to: str) -> str | None:
 
 @frappe.whitelist()
 def get_my_due_tasks() -> list[dict]:
-	"""Return tasks assigned to the current user that are overdue or due today, status != Done."""
+	"""Return tasks assigned to the current user where due_date <= today and status != Done.
+
+	Includes both overdue tasks and tasks due today. Does not filter by due_time.
+	"""
 	return frappe.get_list(
 		"HD Task",
 		filters=[
