@@ -112,7 +112,7 @@ watch(quickFilter, () => {
 			: [];
 	listViewRef.value.list.params.filters = filters;
 	listViewRef.value.list.reload();
-});
+}, { immediate: true });
 
 const {
   getCurrentUserViews,

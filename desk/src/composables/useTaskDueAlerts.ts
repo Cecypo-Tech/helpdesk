@@ -56,8 +56,11 @@ export function useTaskDueAlerts() {
 			"helpdesk.helpdesk.doctype.hd_task.hd_task.get_my_due_tasks"
 		)
 		const active = (tasks ?? []).filter((t) => !isSnoozed(t.name))
+		const prevNames = dueTasks.value.map((t) => t.name).sort().join(",")
+		const nextNames = active.map((t) => t.name).sort().join(",")
 		dueTasks.value = active
-		if (active.length > 0) visible.value = true
+		if (active.length === 0) visible.value = false
+		else if (nextNames !== prevNames) visible.value = true
 	}
 
 	function dismiss() {
