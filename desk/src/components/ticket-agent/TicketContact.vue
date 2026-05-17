@@ -50,7 +50,7 @@
     </div>
 
     <!-- Company notes -->
-    <div v-if="ticket?.value?.doc?.customer && !notesUnavailable" class="mt-3">
+    <div v-if="customer && !notesUnavailable" class="mt-3">
       <div class="flex items-center justify-between mb-1">
         <span class="text-xs font-medium text-ink-gray-5 uppercase tracking-wide">Company Notes</span>
         <span class="text-xs text-ink-gray-4 transition-opacity" :class="saveStatus ? 'opacity-100' : 'opacity-0'">Saved</span>
