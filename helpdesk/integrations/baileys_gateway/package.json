@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-gateway-helpdesk",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": { "start": "node src/index.js" },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.16",
+    "axios": "^1.7.0",
+    "express": "^4.19.0",
+    "pino": "^8.21.0",
+    "qrcode": "^1.5.3"
+  }
+}
