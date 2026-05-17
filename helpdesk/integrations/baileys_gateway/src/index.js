@@ -1,7 +1,7 @@
 const express = require("express");
 const {
 	makeWASocket, useMultiFileAuthState, DisconnectReason,
-	makeCacheableSignalKeyStore,
+	makeCacheableSignalKeyStore, Browsers,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
@@ -24,7 +24,7 @@ async function connectToWhatsApp() {
 			creds: state.creds,
 			keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
 		},
-		printQRInTerminal: true,
+		browser: Browsers.ubuntu("Chrome"),
 		logger: pino({ level: "silent" }),
 	});
 	sock.ev.on("creds.update", saveCreds);
