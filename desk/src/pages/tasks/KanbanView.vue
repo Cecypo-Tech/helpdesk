@@ -69,6 +69,30 @@
         </button>
       </div>
 
+      <!-- Overdue chip -->
+      <button
+        class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors"
+        :class="filterOverdue
+          ? 'bg-red-50 border-red-300 text-red-600 font-semibold'
+          : 'bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4'"
+        @click="filterDueToday = false; filterOverdue = !filterOverdue"
+      >
+        <LucideAlertCircle class="h-3 w-3" />
+        {{ __('Overdue') }}
+      </button>
+
+      <!-- Due Today chip -->
+      <button
+        class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors"
+        :class="filterDueToday
+          ? 'bg-amber-50 border-amber-300 text-amber-600 font-semibold'
+          : 'bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4'"
+        @click="filterOverdue = false; filterDueToday = !filterDueToday"
+      >
+        <LucideCalendarClock class="h-3 w-3" />
+        {{ __('Due Today') }}
+      </button>
+
       <!-- Clear all -->
       <button
         v-if="hasFilters"
@@ -97,7 +121,7 @@
         <div class="flex items-center justify-between px-3 py-2.5 border-b border-outline-gray-1">
           <div class="flex items-center gap-2">
             <span class="h-2.5 w-2.5 rounded-full flex-shrink-0" :class="col.dotClass" />
-            <span class="text-sm font-semibold text-ink-gray-8">{{ col.status }}</span>
+            <span class="text-sm font-semibold text-ink-gray-8">{{ col.label ?? col.status }}</span>
             <span class="text-xs text-ink-gray-4 font-normal">
               {{ getCardsForStatus(col.status).length }}
             </span>
@@ -240,7 +264,9 @@
 <script setup lang="ts">
 import { __ } from "@/translation";
 import { call, createListResource, dayjs, toast } from "frappe-ui";
+import LucideAlertCircle from "~icons/lucide/alert-circle";
 import LucideCalendar from "~icons/lucide/calendar";
+import LucideCalendarClock from "~icons/lucide/calendar-clock";
 import LucideChevronLeft from "~icons/lucide/chevron-left";
 import LucideChevronRight from "~icons/lucide/chevron-right";
 import LucideLoader from "~icons/lucide/loader";
@@ -280,16 +306,16 @@ function toggleCollapse() {
 
 // ── Columns ──────────────────────────────────────────────────
 const columns = [
-  { status: "Backlog", dotClass: "bg-gray-400" },
-  { status: "Todo", dotClass: "bg-blue-400" },
+  { status: "Backlog",     dotClass: "bg-gray-400"   },
+  { status: "Todo",        dotClass: "bg-blue-400"   },
   { status: "In Progress", dotClass: "bg-orange-400" },
-  { status: "Done", dotClass: "bg-green-400" },
+  { status: "Done",        dotClass: "bg-green-400", label: "Done (last 3 days)" },
 ];
 
 // ── Task list ────────────────────────────────────────────────
 const tasks = createListResource({
   doctype: "HD Task",
-  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket", "_user_tags"],
+  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket", "_user_tags", "modified"],
   filters: [],
   orderBy: "modified desc",
   pageLength: 999,
@@ -297,8 +323,28 @@ const tasks = createListResource({
 });
 
 function getCardsForStatus(status: string) {
+  const today = dayjs().format("YYYY-MM-DD");
+  const threeDaysAgo = dayjs().subtract(3, "day").startOf("day");
+
   return (tasks.data ?? []).filter((t: any) => {
     if (t.status !== status) return false;
+
+    // Done column: only last 3 days (by modified timestamp)
+    if (status === "Done" && t.modified) {
+      if (dayjs(t.modified).isBefore(threeDaysAgo)) return false;
+    }
+
+    // Overdue chip: due_date < today, skip Done column entirely
+    if (filterOverdue.value) {
+      if (status === "Done") return false;
+      if (!t.due_date || t.due_date >= today) return false;
+    }
+
+    // Due Today chip
+    if (filterDueToday.value) {
+      if (!t.due_date || t.due_date !== today) return false;
+    }
+
     if (searchResultNames.value !== null && !searchResultNames.value.has(t.name)) return false;
     if (filterAssignee.value && t.assigned_to !== filterAssignee.value) return false;
     if (filterTag.value) {
@@ -325,11 +371,13 @@ async function loadAllTags() {
 const filterSearch = ref("");
 const filterAssignee = ref("");
 const filterTag = ref("");
+const filterOverdue = ref(false);
+const filterDueToday = ref(false);
 const searchResultNames = ref<Set<string> | null>(null);
 const searchLoading = ref(false);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-const hasFilters = computed(() => !!(filterSearch.value || filterAssignee.value || filterTag.value));
+const hasFilters = computed(() => !!(filterSearch.value || filterAssignee.value || filterTag.value || filterOverdue.value || filterDueToday.value));
 
 const uniqueAssignees = computed<string[]>(() => {
   const set = new Set<string>();
@@ -365,6 +413,8 @@ function clearFilters() {
   filterSearch.value = "";
   filterAssignee.value = "";
   filterTag.value = "";
+  filterOverdue.value = false;
+  filterDueToday.value = false;
   searchResultNames.value = null;
 }
 
