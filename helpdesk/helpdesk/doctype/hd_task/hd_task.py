@@ -212,6 +212,21 @@ def _get_agent_phone(assigned_to: str) -> str | None:
 
 
 @frappe.whitelist()
+def get_my_due_tasks() -> list[dict]:
+	"""Return tasks assigned to the current user that are overdue or due today, status != Done."""
+	return frappe.get_list(
+		"HD Task",
+		filters=[
+			["assigned_to", "=", frappe.session.user],
+			["due_date", "<=", frappe.utils.today()],
+			["status", "!=", "Done"],
+		],
+		fields=["name", "title", "due_date", "due_time", "status", "ticket"],
+		order_by="due_date asc",
+	)
+
+
+@frappe.whitelist()
 def search_tasks(query: str) -> list[str]:
 	"""Search task names, descriptions, and subtask titles via SQL LIKE.
 

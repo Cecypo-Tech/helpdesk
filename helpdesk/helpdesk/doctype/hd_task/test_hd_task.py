@@ -73,3 +73,75 @@ class TestHDTask(FrappeTestCase):
 		set_task_field(self.task1.name, "_user_tags", "newtag,anothertag")
 		saved = frappe.db.get_value("HD Task", self.task1.name, "_user_tags")
 		self.assertEqual(saved, "newtag,anothertag")
+
+	def test_get_my_due_tasks_returns_overdue(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "Overdue sentinel",
+			"status": "Todo",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": frappe.session.user,
+			"due_date": frappe.utils.add_days(frappe.utils.today(), -1),
+		})
+		try:
+			results = get_my_due_tasks()
+			names = [r["name"] for r in results]
+			self.assertIn(task.name, names)
+		finally:
+			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
+
+	def test_get_my_due_tasks_excludes_done(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "Done sentinel",
+			"status": "Done",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": frappe.session.user,
+			"due_date": frappe.utils.add_days(frappe.utils.today(), -1),
+		})
+		try:
+			results = get_my_due_tasks()
+			names = [r["name"] for r in results]
+			self.assertNotIn(task.name, names)
+		finally:
+			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
+
+	def test_get_my_due_tasks_excludes_future(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "Future sentinel",
+			"status": "Todo",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": frappe.session.user,
+			"due_date": frappe.utils.add_days(frappe.utils.today(), 2),
+		})
+		try:
+			results = get_my_due_tasks()
+			names = [r["name"] for r in results]
+			self.assertNotIn(task.name, names)
+		finally:
+			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
+
+	def test_get_my_due_tasks_excludes_other_user(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_my_due_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "Other user sentinel",
+			"status": "Todo",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": "someone.else@example.com",
+			"due_date": frappe.utils.add_days(frappe.utils.today(), -1),
+		})
+		try:
+			results = get_my_due_tasks()
+			names = [r["name"] for r in results]
+			self.assertNotIn(task.name, names)
+		finally:
+			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
