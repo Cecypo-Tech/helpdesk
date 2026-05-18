@@ -96,8 +96,8 @@ const communicationAreaRef = ref(null);
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
 
-const hasWhatsApp = true;
 const hasBaileys = computed(() => Boolean(ticket.value?.doc?.baileys_jid));
+const hasWhatsApp = computed(() => !hasBaileys.value);
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [
@@ -126,7 +126,7 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
     });
   }
 
-  if (hasWhatsApp) {
+  if (hasWhatsApp.value) {
     _tabs.push({
       name: "whatsapp",
       label: "WhatsApp",
@@ -137,7 +137,7 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
   if (hasBaileys.value) {
     _tabs.push({
       name: "baileys",
-      label: "Group Chat",
+      label: "WhatsApp",
       icon: WhatsAppIcon,
     });
   }
