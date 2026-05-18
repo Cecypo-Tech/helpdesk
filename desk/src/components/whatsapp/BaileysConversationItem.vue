@@ -1,14 +1,23 @@
 <template>
   <div
-    class="flex cursor-pointer items-center gap-3 border-b border-outline-gray-2 px-3 py-3 hover:bg-surface-gray-2"
+    class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="selected ? 'bg-surface-gray-2' : ''"
     @click="$emit('select', jid, displayName)"
   >
-    <div
-      class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
-      :style="{ background: avatarColor }"
-    >
-      {{ avatarLetter }}
+    <!-- Avatar with type badge -->
+    <div class="relative shrink-0">
+      <div
+        class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white"
+        :style="{ background: avatarColor }"
+      >
+        {{ avatarLetter }}
+      </div>
+      <span
+        class="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-surface-white ring-1 ring-outline-gray-2"
+      >
+        <LucideUsers v-if="isGroup" class="h-2 w-2 text-ink-gray-5" />
+        <LucideUser v-else class="h-2 w-2 text-ink-gray-5" />
+      </span>
     </div>
 
     <div class="min-w-0 flex-1">
@@ -35,6 +44,8 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import LucideUser from "~icons/lucide/user";
+import LucideUsers from "~icons/lucide/users";
 
 const props = defineProps<{
   jid: string;
