@@ -1,13 +1,14 @@
 const express = require("express");
 const {
 	makeWASocket, useMultiFileAuthState, DisconnectReason,
-	makeCacheableSignalKeyStore, fetchLatestBaileysVersion,
+	makeCacheableSignalKeyStore, fetchLatestBaileysVersion, Browsers,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const axios = require("axios");
 const qrcode = require("qrcode");
 
+const fs           = require("fs");
 const API_KEY      = process.env.API_KEY      || "changeme";
 const WEBHOOK_URL  = process.env.WEBHOOK_URL  || "";
 const SESSION_NAME = process.env.SESSION_NAME || "helpdesk";
@@ -23,6 +24,7 @@ async function connectToWhatsApp() {
 	logger.info({ version }, "Using WA version");
 	sock = makeWASocket({
 		version,
+		browser: Browsers.ubuntu("Chrome"),
 		auth: {
 			creds: state.creds,
 			keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" })),
@@ -37,7 +39,14 @@ async function connectToWhatsApp() {
 			isConnected = false; qrString = null;
 			const code = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output.statusCode : null;
 			logger.warn({ code, reason: lastDisconnect?.error?.message }, "Connection closed");
-			if (code !== DisconnectReason.loggedOut) setTimeout(connectToWhatsApp, 5000);
+			if (code === DisconnectReason.loggedOut || code === 405) {
+				// 401 = logged out deliberately; 405 = server rejected session — both need fresh auth
+				logger.warn({ code }, "Clearing stale session for fresh QR");
+				fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+				setTimeout(connectToWhatsApp, 3000);
+			} else {
+				setTimeout(connectToWhatsApp, 5000);
+			}
 		} else if (connection === "open") { isConnected = true; qrString = null; logger.info("Connected"); }
 	});
 	sock.ev.on("messages.upsert", async ({ messages, type }) => {
