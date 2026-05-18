@@ -109,6 +109,7 @@ import { ref, computed, nextTick } from "vue";
 const props = defineProps<{
   ticketId: string;
   replyTo?: Record<string, any> | null;
+  jid?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -188,7 +189,11 @@ async function send() {
     sending.value = true;
     const formData = new FormData();
     formData.append("file", attachment.value, attachment.value.name);
-    formData.append("ticket", props.ticketId);
+    if (props.jid) {
+      formData.append("jid", props.jid);
+    } else {
+      formData.append("ticket", props.ticketId);
+    }
     formData.append("message", text.value.trim());
     formData.append("content_type", contentType.value);
 
@@ -216,7 +221,7 @@ async function send() {
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     emit("sent");
     sendReply.submit({
-      ticket: props.ticketId,
+      ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
       message: msgText,
       content_type: "text",
       reply_to_message_id: props.replyTo?.message_id || "",
