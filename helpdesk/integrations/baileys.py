@@ -153,6 +153,10 @@ def webhook():
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
 
+	# Ignore WhatsApp Stories/Status updates — these are not real conversations
+	if jid == "status@broadcast" or jid.endswith("@broadcast"):
+		return {"status": "skipped", "reason": "status broadcast"}
+
 	if _is_blocked(jid, sender, settings):
 		return {"status": "blocked"}
 
@@ -567,8 +571,9 @@ def get_baileys_conversations() -> list[dict]:
 
 	seen: dict[str, dict] = {}
 	for r in rows:
-		if r.get("jid") and r["jid"] not in seen:
-			seen[r["jid"]] = r
+		jid_val = r.get("jid") or ""
+		if jid_val and jid_val not in seen and not jid_val.endswith("@broadcast"):
+			seen[jid_val] = r
 
 	settings = _settings()
 	group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
@@ -634,6 +639,16 @@ def get_baileys_contact(jid: str) -> dict:
 		return {"jid": jid, "custom_name": "", "company": ""}
 	row = frappe.db.get_value("Baileys Contact", {"jid": jid}, ["custom_name", "company"], as_dict=True)
 	return {"jid": jid, "custom_name": (row or {}).get("custom_name") or "", "company": (row or {}).get("company") or ""}
+
+
+@frappe.whitelist()
+def check_baileys_number(phone: str) -> dict:
+	"""Normalise a phone number to a JID and check if it is registered on WhatsApp."""
+	phone = _normalize_phone(phone)
+	if not phone:
+		frappe.throw(_("Enter a valid phone number."))
+	jid = f"{phone}@s.whatsapp.net"
+	return {"jid": jid, "phone": phone}
 
 
 @frappe.whitelist()

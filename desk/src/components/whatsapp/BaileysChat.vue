@@ -88,6 +88,15 @@
       </div>
 
       <div v-else class="space-y-3">
+        <!-- Load older messages -->
+        <div v-if="hasMore" class="flex justify-center pb-2">
+          <button
+            class="rounded-full bg-surface-white px-3 py-1 text-xs text-ink-gray-6 shadow-sm hover:bg-surface-gray-2"
+            :disabled="loadingMore"
+            @click="loadMore"
+          >{{ loadingMore ? "Loading…" : "Load older messages" }}</button>
+        </div>
+
         <template v-for="(group, dateKey) in groupedMessages" :key="dateKey">
           <div class="my-4 flex items-center gap-3">
             <div class="flex-1 border-t border-outline-gray-2" />
@@ -148,6 +157,10 @@ const editName = ref("");
 const editCompany = ref("");
 const savingContact = ref(false);
 
+const PAGE_SIZE = 40;
+const visibleCount = ref(PAGE_SIZE);
+const loadingMore = ref(false);
+
 const connectedPhone = createResource({
   url: "helpdesk.integrations.baileys.get_connected_phone",
   auto: true,
@@ -179,6 +192,21 @@ const saveContactResource = createResource({
   },
 });
 
+function loadMore() {
+  if (loadingMore.value || !hasMore.value) return;
+  loadingMore.value = true;
+  const container = messagesContainer.value;
+  const prevScrollHeight = container?.scrollHeight ?? 0;
+  visibleCount.value += PAGE_SIZE;
+  nextTick(() => {
+    loadingMore.value = false;
+    if (container) {
+      // Keep scroll position so user stays at where they were
+      container.scrollTop = container.scrollHeight - prevScrollHeight;
+    }
+  });
+}
+
 function openEdit() {
   editName.value = props.displayName || "";
   editCompany.value = props.company || "";
@@ -207,6 +235,7 @@ watch(
   (newJid) => {
     if (newJid) {
       replyingTo.value = null;
+      visibleCount.value = PAGE_SIZE;
       loadMessages();
     }
   },
@@ -215,8 +244,14 @@ watch(
 
 const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
 
-const messageList = computed(() =>
+const allNonReactions = computed(() =>
   allMessages.value.filter((m) => m.content_type !== "reaction")
+);
+
+const hasMore = computed(() => visibleCount.value < allNonReactions.value.length);
+
+const messageList = computed(() =>
+  allNonReactions.value.slice(-visibleCount.value)
 );
 
 const messageByMsgId = computed(() => {

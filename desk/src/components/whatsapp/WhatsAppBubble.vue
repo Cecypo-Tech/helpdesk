@@ -21,6 +21,20 @@
             <polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
           </svg>
         </button>
+        <!-- Copy button -->
+        <button
+          v-if="message.message"
+          class="flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
+          :title="copied ? 'Copied!' : 'Copy text'"
+          @click.stop="copyText"
+        >
+          <svg v-if="!copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-600">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </button>
         <!-- React button -->
         <button
           class="flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
@@ -58,10 +72,11 @@
             : 'bg-surface-white text-ink-gray-9 border border-outline-gray-2'
         "
       >
-        <!-- Profile name for incoming -->
+        <!-- Profile name for incoming (color-coded per sender for group chats) -->
         <div
           v-if="!isOutgoing && message.profile_name"
-          class="mb-1 text-xs font-medium text-green-700 dark:text-green-400"
+          class="mb-1 text-xs font-medium"
+          :style="{ color: senderColor }"
         >
           {{ message.profile_name }}
         </div>
@@ -149,13 +164,21 @@
         <div v-if="message.content_type === 'audio' && message.attach" class="mb-1">
           <audio controls :src="message.attach" class="max-w-full" />
         </div>
+        <div
+          v-else-if="message.content_type === 'audio' && !message.attach"
+          class="mb-1 flex items-center gap-2 text-xs italic text-ink-gray-5"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          Voice message
+        </div>
 
         <!-- Video -->
         <div v-if="message.content_type === 'video' && message.attach" class="mb-1">
           <video
             :src="message.attach"
             controls
-            class="max-h-60 max-w-full rounded"
+            class="max-h-60 max-w-full cursor-pointer rounded"
+            @click.stop="openLightbox(message.attach, 'video')"
           />
         </div>
 
@@ -168,8 +191,32 @@
           Video sent
         </div>
 
+        <!-- Sticker -->
+        <div v-if="message.content_type === 'sticker'" class="mb-1">
+          <img v-if="message.attach" :src="message.attach" class="h-24 w-24 object-contain" />
+          <span v-else class="text-2xl">🎭</span>
+        </div>
+
+        <!-- Location -->
+        <div v-if="message.content_type === 'location'" class="mb-1 flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-xs text-ink-gray-7">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span>{{ message.message || "Location" }}</span>
+        </div>
+
+        <!-- Contact card -->
+        <div v-if="message.content_type === 'contact'" class="mb-1 flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-xs text-ink-gray-7">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>{{ message.message || "Contact" }}</span>
+        </div>
+
+        <!-- Poll -->
+        <div v-if="message.content_type === 'poll'" class="mb-1 flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-xs text-ink-gray-7">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>{{ message.message || "Poll" }}</span>
+        </div>
+
         <!-- Message text -->
-        <div v-if="message.message" class="whitespace-pre-wrap break-words" v-html="sanitizedMessage" />
+        <div v-if="message.message" class="whitespace-pre-wrap break-words" v-html="formattedMessage" />
 
         <!-- Footer: time + status -->
         <div class="mt-1 flex items-center justify-end gap-1">
@@ -250,6 +297,14 @@ const emit = defineEmits<{
 
 const isOutgoing = computed(() => props.message.type === "Outgoing");
 
+const SENDER_COLORS = ["#e53935","#8e24aa","#1e88e5","#00897b","#f4511e","#6d4c41","#546e7a","#d81b60"];
+const senderColor = computed(() => {
+  const name = props.message.profile_name || props.message.sender_jid || "";
+  let hash = 0;
+  for (const ch of name) hash = ((hash * 31) + ch.charCodeAt(0)) & 0x7fffffff;
+  return SENDER_COLORS[hash % SENDER_COLORS.length];
+});
+
 const showEmojiPicker = ref(false);
 const emojiPickerRef = ref<HTMLElement | null>(null);
 
@@ -318,9 +373,34 @@ const formattedTime = computed(() => {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 });
 
-const sanitizedMessage = computed(() => {
-  const text = props.message.message || "";
-  return text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+const copied = ref(false);
+let copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function copyText() {
+  navigator.clipboard.writeText(props.message.message || "").then(() => {
+    copied.value = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => { copied.value = false; }, 1500);
+  });
+}
+
+const formattedMessage = computed(() => {
+  let text = props.message.message || "";
+  // Strip script tags
+  text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  // Escape HTML first
+  text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // WhatsApp formatting: *bold*, _italic_, ~strikethrough~, ```monospace```
+  text = text.replace(/```([\s\S]*?)```/g, "<code class=\"rounded bg-surface-gray-2 px-1 font-mono text-[0.85em]\">$1</code>");
+  text = text.replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>");
+  text = text.replace(/_([^_\n]+)_/g, "<em>$1</em>");
+  text = text.replace(/~([^~\n]+)~/g, "<del>$1</del>");
+  // Clickable URLs
+  text = text.replace(
+    /(https?:\/\/[^\s<>"]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-blue-600 dark:text-blue-400 break-all">$1</a>',
+  );
+  return text;
 });
 
 const attachFilename = computed(() => {
