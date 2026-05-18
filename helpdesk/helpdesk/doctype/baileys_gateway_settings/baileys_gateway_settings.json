@@ -55,7 +55,7 @@
   },
   {
    "fieldname": "api_key",
-   "fieldtype": "Password",
+   "fieldtype": "Data",
    "label": "API Key",
    "description": "Shared secret sent as X-API-Key header to and from the gateway."
   },
@@ -104,7 +104,7 @@
    "label": "Individual DM Behaviour"
   },
   {
-   "default": "Skip Ticket Creation",
+   "default": "Create Contact and Ticket",
    "fieldname": "unknown_contact_action",
    "fieldtype": "Select",
    "label": "Unknown Contact Action",

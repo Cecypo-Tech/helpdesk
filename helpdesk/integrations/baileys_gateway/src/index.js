@@ -121,4 +121,13 @@ app.post("/markRead", auth, async (req, res) => {
 	} catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get("/groups", auth, async (_, res) => {
+	if (!isConnected) return res.status(503).json({ error: "Not connected" });
+	try {
+		const raw = await sock.groupFetchAllParticipating();
+		const groups = Object.values(raw).map((g) => ({ jid: g.id, subject: g.subject, size: g.size || 0 }));
+		res.json({ groups });
+	} catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.listen(PORT, () => { logger.info(`Gateway :${PORT}`); connectToWhatsApp(); });

@@ -244,7 +244,7 @@ def webhook():
 
 	# Validate API key
 	api_key = frappe.get_request_header("X-API-Key") or frappe.get_request_header("x-api-key")
-	stored_key = settings.get_password("api_key") if settings.api_key else ""
+	stored_key = settings.api_key or ""
 	if not stored_key or api_key != stored_key:
 		frappe.response["http_status_code"] = 401
 		return {"error": "Unauthorized"}
@@ -372,7 +372,7 @@ def send_baileys_reply(
 	full_message = f"{message}{agent_suffix}" if message else agent_suffix.strip()
 
 	gateway_url = (settings.gateway_url or "").rstrip("/")
-	api_key = settings.get_password("api_key") if settings.api_key else ""
+	api_key = settings.api_key or ""
 
 	payload: dict = {
 		"sessionName": settings.session_name or "helpdesk",
@@ -562,7 +562,7 @@ def mark_baileys_messages_read(ticket: str) -> int:
 
 	if message_ids and settings.enabled and settings.gateway_url:
 		gateway_url = (settings.gateway_url or "").rstrip("/")
-		api_key = settings.get_password("api_key") if settings.api_key else ""
+		api_key = settings.api_key or ""
 		try:
 			_requests.post(
 				f"{gateway_url}/markRead",
@@ -588,6 +588,41 @@ def mark_baileys_messages_read(ticket: str) -> int:
 		pass
 
 	return len(unread)
+
+
+@frappe.whitelist()
+def get_gateway_status() -> dict:
+	"""Proxy the gateway /health endpoint so the form JS can poll without CORS issues."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		return {"connected": False, "error": "Gateway not configured or disabled"}
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/health",
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=5,
+		)
+		return resp.json()
+	except Exception as e:
+		return {"connected": False, "error": str(e)}
+
+
+@frappe.whitelist()
+def fetch_gateway_groups() -> list:
+	"""Fetch the list of WhatsApp groups from the gateway and return [{jid, subject, size}]."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		frappe.throw(_("Gateway not configured or disabled"))
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/groups",
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=15,
+		)
+		resp.raise_for_status()
+		return resp.json().get("groups", [])
+	except Exception as e:
+		frappe.throw(_("Failed to fetch groups from gateway: {0}").format(str(e)))
 
 
 @frappe.whitelist()
