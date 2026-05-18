@@ -137,6 +137,11 @@ const routes = [
     name: "CallLogs",
     component: () => import("@/pages/call-logs/CallLogs.vue"),
   },
+  {
+    path: "/whatsapp",
+    name: "WhatsAppChat",
+    component: () => import("@/pages/whatsapp/WhatsAppPage.vue"),
+  },
 
   // Customer Portal Routes
   {
