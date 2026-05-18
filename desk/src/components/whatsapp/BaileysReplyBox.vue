@@ -32,6 +32,29 @@
       </button>
     </div>
 
+    <!-- Reply-to preview -->
+    <div
+      v-if="replyTo"
+      class="mb-2 flex items-start gap-2 rounded-lg border-l-4 border-green-500 bg-surface-gray-1 px-3 py-2"
+    >
+      <div class="min-w-0 flex-1">
+        <p class="text-[11px] font-medium text-green-600">
+          {{ replyTo.direction === "Outgoing" ? "You" : (replyTo.sender_name || "Customer") }}
+        </p>
+        <p class="truncate text-xs text-ink-gray-6">{{ replyTo.message || "(media)" }}</p>
+      </div>
+      <button
+        class="shrink-0 text-ink-gray-4 hover:text-ink-gray-7"
+        @click="emit('clearReply')"
+        title="Cancel reply"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
     <div class="flex items-end gap-2">
       <!-- Attach -->
       <button
@@ -85,10 +108,12 @@ import { ref, computed, nextTick } from "vue";
 
 const props = defineProps<{
   ticketId: string;
+  replyTo?: Record<string, any> | null;
 }>();
 
 const emit = defineEmits<{
   (e: "sent"): void;
+  (e: "clearReply"): void;
 }>();
 
 const text = ref("");
@@ -190,7 +215,14 @@ async function send() {
     text.value = "";
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     emit("sent");
-    sendReply.submit({ ticket: props.ticketId, message: msgText, content_type: "text" });
+    sendReply.submit({
+      ticket: props.ticketId,
+      message: msgText,
+      content_type: "text",
+      reply_to_message_id: props.replyTo?.message_id || "",
+      reply_to_text: props.replyTo?.message || "",
+      reply_to_from_me: props.replyTo?.direction === "Outgoing",
+    });
   }
 }
 
