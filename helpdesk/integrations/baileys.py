@@ -52,29 +52,22 @@ def _publish_event(ticket_name: str, is_incoming: bool) -> None:
 	)
 
 
-def _notify_agents(ticket_name: str, preview: str, sender_name: str) -> None:
-	"""Create HD Notification for each assigned agent (or default team if unassigned)."""
+def _publish_baileys_event(jid: str, is_incoming: bool) -> None:
+	frappe.db.commit()
+	frappe.publish_realtime(
+		"helpdesk:baileys-message",
+		message={"jid": jid, "is_incoming": is_incoming},
+	)
+
+
+def _notify_agents_baileys(jid: str, message_text: str, sender_name: str) -> None:
+	"""Publish bell notification for standalone WhatsApp chat."""
 	settings = _settings()
-
-	assign_json = frappe.db.get_value("HD Ticket", ticket_name, "_assign") or "[]"
-	assignees = frappe.parse_json(assign_json) or []
-
-	if not assignees and settings.default_team:
-		assignees = frappe.get_all(
-			"HD Team Member",
-			filters={"parent": settings.default_team, "parenttype": "HD Team"},
-			pluck="user",
-		)
-
-	if not assignees:
-		return
-
-	# Quiet-period check
-	quiet_minutes = settings.notification_quiet_minutes or 0
+	quiet_minutes = int(settings.notification_quiet_minutes or 0)
 	if quiet_minutes > 0:
 		last_outgoing = frappe.get_all(
 			"Baileys Message",
-			filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name, "direction": "Outgoing"},
+			filters={"jid": jid, "direction": "Outgoing"},
 			fields=["creation"],
 			order_by="creation desc",
 			limit=1,
@@ -84,84 +77,13 @@ def _notify_agents(ticket_name: str, preview: str, sender_name: str) -> None:
 			if minutes_since < quiet_minutes:
 				return
 
-	existing = frappe.get_all(
-		"HD Notification",
-		filters={"reference_ticket": ticket_name, "notification_type": "WhatsApp", "read": 0},
-		pluck="user_to",
+	frappe.publish_realtime(
+		"helpdesk:baileys-notification",
+		message={"jid": jid, "message": (message_text or "")[:80], "sender": sender_name},
 	)
-
-	short_preview = (preview or "sent a message")[:80]
-	for agent in assignees:
-		if agent in existing:
-			continue
-		try:
-			frappe.get_doc({
-				"doctype": "HD Notification",
-				"user_from": "Administrator",
-				"user_to": agent,
-				"notification_type": "WhatsApp",
-				"reference_ticket": ticket_name,
-				"message": f"{sender_name}: {short_preview}",
-			}).insert(ignore_permissions=True)
-		except Exception:
-			pass
 
 
 # ── Ticket routing ────────────────────────────────────────────────────────────
-
-def _find_open_group_ticket(jid: str) -> str | None:
-	"""Return the name of the current open ticket for this group JID, or None."""
-	open_statuses = frappe.get_all(
-		"HD Ticket Status",
-		filters={"category": ["not in", ["Resolved"]]},
-		pluck="name",
-	)
-	if not open_statuses:
-		return None
-
-	tickets = frappe.get_all(
-		"HD Ticket",
-		filters={"baileys_jid": jid, "status": ["in", open_statuses]},
-		pluck="name",
-		order_by="creation desc",
-		limit=1,
-	)
-	return tickets[0] if tickets else None
-
-
-def _find_open_dm_ticket(phone: str, timeout_hours: int) -> str | None:
-	"""Return the most recent open ticket for this phone within the timeout window."""
-	from frappe.query_builder import DocType
-
-	BM = DocType("Baileys Message")
-	recent = (
-		frappe.qb.from_(BM)
-		.select(BM.reference_name)
-		.where(BM.reference_doctype == "HD Ticket")
-		.where(BM.jid.like(f"{phone}@%"))
-		.where(BM.direction == "Incoming")
-		.orderby(BM.creation, order=frappe.qb.desc)
-		.limit(1)
-		.run()
-	)
-	if not recent:
-		return None
-
-	ticket_name = recent[0][0]
-	ticket = frappe.db.get_value("HD Ticket", ticket_name, ["status", "creation", "baileys_jid"], as_dict=True)
-	if not ticket:
-		return None
-
-	open_statuses = frappe.get_all("HD Ticket Status", filters={"category": ["not in", ["Resolved"]]}, pluck="name")
-	if ticket.status not in open_statuses:
-		return None
-
-	hours_since = time_diff_in_hours(now_datetime(), frappe.db.get_value("Baileys Message", {"reference_name": ticket_name, "direction": "Incoming"}, "creation", order_by="creation desc"))
-	if hours_since > timeout_hours:
-		return None
-
-	return ticket_name
-
 
 def _is_blocked(jid: str, sender: str, settings) -> bool:
 	"""Return True if the jid or sender phone is on the blocklist."""
@@ -188,52 +110,11 @@ def _group_label(jid: str, settings) -> str:
 	return jid
 
 
-def _group_team(jid: str, settings) -> str | None:
-	"""Return team override for a group JID, or None."""
-	for row in (settings.group_jids or []):
-		if row.jid == jid and row.team:
-			return row.team
-	return None
-
-
-def _create_ticket(subject: str, raised_by: str, settings, team_override: str | None = None) -> str:
-	"""Insert a new HD Ticket and return its name."""
-	ticket_data = {
-		"doctype": "HD Ticket",
-		"subject": subject,
-		"raised_by": raised_by,
-		"via_customer_portal": 0,
-		"ticket_channel": "WhatsApp",
-	}
-	if settings.default_ticket_type:
-		ticket_data["ticket_type"] = settings.default_ticket_type
-	team = team_override or settings.default_team
-	if team:
-		ticket_data["agent_group"] = team
-
-	ticket_doc = frappe.get_doc(ticket_data)
-	ticket_doc.insert(ignore_permissions=True)
-	return ticket_doc.name
-
-
-# ── Contact matching (reuse from whatsapp integration) ────────────────────────
-
-def _match_phone_to_contact(phone: str) -> str | None:
-	from helpdesk.integrations.whatsapp import match_phone_to_contact
-	return match_phone_to_contact(phone)
-
-
 # ── Webhook ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True)
 def webhook():
-	"""Receive incoming messages from the Baileys gateway.
-
-	Expected payload:
-	  { jid, messageId, sender, senderName, message, contentType, timestamp }
-
-	Security: validates X-API-Key header against Baileys Gateway Settings.
-	"""
+	"""Receive incoming messages from the Baileys gateway (standalone mode — no ticket creation)."""
 	if not frappe.db.exists("DocType", "Baileys Gateway Settings"):
 		frappe.response["http_status_code"] = 503
 		return {"error": "Baileys Gateway Settings not configured"}
@@ -242,7 +123,6 @@ def webhook():
 	if not settings.enabled:
 		return {"status": "disabled"}
 
-	# Validate API key
 	api_key = frappe.get_request_header("X-API-Key") or frappe.get_request_header("x-api-key")
 	stored_key = settings.api_key or ""
 	if not stored_key or api_key != stored_key:
@@ -267,67 +147,14 @@ def webhook():
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
 
-	# Blocklist check — silent drop, no ticket, no notification
 	if _is_blocked(jid, sender, settings):
 		return {"status": "blocked"}
 
-	# Deduplicate
 	if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):
 		return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
 
-	is_grp = _is_group(jid)
-	placeholder_domain = settings.placeholder_email_domain or "whatsapp.placeholder.local"
-
-	if is_grp:
-		ticket_name = _find_open_group_ticket(jid)
-		if not ticket_name:
-			group_label = _group_label(jid, settings)
-			team_override = _group_team(jid, settings)
-			raised_by = f"group+{jid.split('@')[0]}@{placeholder_domain}"
-			ticket_name = _create_ticket(f"WhatsApp Group: {group_label}", raised_by, settings, team_override)
-			frappe.db.set_value("HD Ticket", ticket_name, "baileys_jid", jid, update_modified=False)
-			frappe.db.commit()
-	else:
-		# Individual DM
-		phone = _phone_from_jid(jid)
-		if not phone:
-			return {"status": "skipped", "reason": "no phone"}
-
-		contact_name = _match_phone_to_contact(phone)
-		action = settings.unknown_contact_action
-
-		if not contact_name:
-			if action == "Skip Ticket Creation":
-				return {"status": "skipped", "reason": "unknown contact"}
-			if action == "Create Contact and Ticket":
-				contact_doc = frappe.get_doc({
-					"doctype": "Contact",
-					"first_name": sender_name,
-					"phone_nos": [{"doctype": "Contact Phone", "phone": phone, "is_primary_mobile_no": 1}],
-				})
-				contact_doc.insert(ignore_permissions=True)
-				contact_name = contact_doc.name
-
-		timeout = settings.new_conversation_timeout_hours or 24
-		ticket_name = _find_open_dm_ticket(phone, timeout)
-		if not ticket_name:
-			if contact_name:
-				email = frappe.db.get_value("Contact", contact_name, "email_id")
-				raised_by = email or f"whatsapp+{phone}@{placeholder_domain}"
-			else:
-				raised_by = f"whatsapp+{phone}@{placeholder_domain}"
-			ticket_name = _create_ticket(f"WhatsApp from {sender_name}", raised_by, settings)
-			frappe.db.set_value("HD Ticket", ticket_name, "baileys_jid", jid, update_modified=False)
-			frappe.db.commit()
-
-	# Reopen if resolved/closed
-	customer_status = settings.customer_reply_status
-	if customer_status:
-		_set_ticket_status(ticket_name, customer_status)
-
-	# Create Baileys Message record
 	frappe.get_doc({
 		"doctype": "Baileys Message",
 		"direction": "Incoming",
@@ -341,22 +168,23 @@ def webhook():
 		"message_id": message_id,
 		"reply_to_message_id": quoted_message_id,
 		"status": "Delivered",
-		"reference_doctype": "HD Ticket",
-		"reference_name": ticket_name,
+		"reference_doctype": "",
+		"reference_name": "",
 	}).insert(ignore_permissions=True)
 
-	_notify_agents(ticket_name, message, sender_name)
-	_publish_event(ticket_name, is_incoming=True)
+	_publish_baileys_event(jid, is_incoming=True)
+	_notify_agents_baileys(jid, message, sender_name)
 
-	return {"status": "ok", "ticket": ticket_name}
+	return {"status": "ok"}
 
 
 # ── Agent send ────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
 def send_baileys_reply(
-	ticket: str,
-	message: str,
+	ticket: str = None,
+	jid: str = None,
+	message: str = "",
 	content_type: str = "text",
 	media_url: str | None = None,
 	reply_to_message_id: str | None = None,
@@ -368,9 +196,10 @@ def send_baileys_reply(
 	if not settings.enabled:
 		frappe.throw(_("Baileys gateway is not enabled."))
 
-	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid and ticket:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
 	if not jid:
-		frappe.throw(_("This ticket is not linked to a Baileys chat."))
+		frappe.throw(_("No WhatsApp JID provided."))
 
 	if settings.append_agent_initials:
 		agent_suffix = f"\n^{_agent_initials()}"
@@ -419,29 +248,29 @@ def send_baileys_reply(
 		"message_id": sent_id,
 		"reply_to_message_id": reply_to_message_id or "",
 		"status": "Sent",
-		"reference_doctype": "HD Ticket",
-		"reference_name": ticket,
+		"reference_doctype": "HD Ticket" if ticket else "",
+		"reference_name": ticket or "",
 	})
 	msg_doc.insert(ignore_permissions=True)
 
-	# Auto-assign replying agent if ticket is unassigned
-	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
-	if not frappe.parse_json(assign_json):
-		try:
-			frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
-		except Exception:
-			pass
-
-	if settings.agent_reply_status:
-		_set_ticket_status(ticket, settings.agent_reply_status)
-
-	_publish_event(ticket, is_incoming=False)
+	if ticket:
+		assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+		if not frappe.parse_json(assign_json):
+			try:
+				frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
+			except Exception:
+				pass
+		if settings.agent_reply_status:
+			_set_ticket_status(ticket, settings.agent_reply_status)
+		_publish_event(ticket, is_incoming=False)
+	else:
+		_publish_baileys_event(jid, is_incoming=False)
 
 	return {"name": msg_doc.name, "message_id": sent_id, "status": "Sent"}
 
 
 @frappe.whitelist(allow_guest=False)
-def send_baileys_media(ticket: str, message: str = "", content_type: str = "document") -> dict:
+def send_baileys_media(ticket: str = None, jid: str = None, message: str = "", content_type: str = "document") -> dict:
 	"""Upload a file to Frappe storage and send its public URL via the gateway."""
 	file_obj = frappe.request.files.get("file")
 	if not file_obj:
@@ -451,7 +280,6 @@ def send_baileys_media(ticket: str, message: str = "", content_type: str = "docu
 	mime_type = file_obj.content_type or "application/octet-stream"
 	file_data = file_obj.read()
 
-	# Derive content_type from mime
 	if mime_type.startswith("image/"):
 		content_type = "image"
 	elif mime_type.startswith("video/"):
@@ -461,7 +289,6 @@ def send_baileys_media(ticket: str, message: str = "", content_type: str = "docu
 	else:
 		content_type = "document"
 
-	# Save to Frappe public files to get a URL the gateway can fetch
 	file_doc = frappe.get_doc({
 		"doctype": "File",
 		"file_name": filename,
@@ -473,6 +300,7 @@ def send_baileys_media(ticket: str, message: str = "", content_type: str = "docu
 
 	return send_baileys_reply(
 		ticket=ticket,
+		jid=jid,
 		message=message,
 		content_type=content_type,
 		media_url=public_url,
@@ -480,15 +308,21 @@ def send_baileys_media(ticket: str, message: str = "", content_type: str = "docu
 
 
 @frappe.whitelist()
-def send_baileys_reaction(ticket: str, target_message_id: str, emoji: str) -> dict:
+def send_baileys_reaction(
+	ticket: str = None,
+	jid: str = None,
+	target_message_id: str = "",
+	emoji: str = "",
+) -> dict:
 	"""Send an emoji reaction to a specific Baileys message."""
 	settings = _settings()
 	if not settings.enabled:
 		frappe.throw(_("Baileys gateway is not enabled."))
 
-	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid and ticket:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
 	if not jid:
-		frappe.throw(_("This ticket is not linked to a Baileys chat."))
+		frappe.throw(_("No WhatsApp JID provided."))
 
 	gateway_url = (settings.gateway_url or "").rstrip("/")
 	api_key = settings.api_key or ""
@@ -524,20 +358,29 @@ def send_baileys_reaction(ticket: str, target_message_id: str, emoji: str) -> di
 		"message_id": "",
 		"reply_to_message_id": target_message_id,
 		"status": "Sent",
-		"reference_doctype": "HD Ticket",
-		"reference_name": ticket,
+		"reference_doctype": "HD Ticket" if ticket else "",
+		"reference_name": ticket or "",
 	}).insert(ignore_permissions=True)
 
-	_publish_event(ticket, is_incoming=False)
+	if ticket:
+		_publish_event(ticket, is_incoming=False)
+	else:
+		_publish_baileys_event(jid, is_incoming=False)
+
 	return {"ok": True}
 
 
 # ── Queries ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
-def get_baileys_messages(ticket: str) -> list[dict]:
-	"""Return all Baileys Messages for a ticket in WhatsAppBubble-compatible shape."""
+def get_baileys_messages(jid: str = None, ticket: str = None) -> list[dict]:
+	"""Return messages for a conversation. Accepts jid directly or ticket name (backward compat)."""
 	from frappe.query_builder import DocType
+
+	if not jid and ticket:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid:
+		return []
 
 	BM = DocType("Baileys Message")
 	User = DocType("User")
@@ -551,8 +394,7 @@ def get_baileys_messages(ticket: str) -> list[dict]:
 			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
 			User.full_name.as_("sender_full_name"),
 		)
-		.where(BM.reference_doctype == "HD Ticket")
-		.where(BM.reference_name == ticket)
+		.where(BM.jid == jid)
 		.orderby(BM.creation)
 		.run(as_dict=True)
 	)
@@ -560,9 +402,7 @@ def get_baileys_messages(ticket: str) -> list[dict]:
 	for m in rows:
 		if m.get("creation") and not isinstance(m["creation"], str):
 			m["creation"] = str(m["creation"])
-		# Map direction → type so WhatsAppBubble works without modification
 		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
-		# Map media_url → attach for bubble media rendering
 		m["attach"] = m.get("media_url") or ""
 		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
 
@@ -702,6 +542,48 @@ def get_connected_phone() -> dict:
 		return {"phone": data.get("phone"), "connected": data.get("connected", False)}
 	except Exception:
 		return {"phone": None, "connected": False}
+
+
+@frappe.whitelist()
+def get_baileys_conversations() -> list[dict]:
+	"""Return one entry per unique JID sorted by most-recent message first."""
+	from frappe.query_builder import DocType
+
+	BM = DocType("Baileys Message")
+	rows = (
+		frappe.qb.from_(BM)
+		.select(BM.jid, BM.sender_name, BM.message, BM.content_type, BM.direction, BM.creation)
+		.orderby(BM.creation, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+
+	seen: dict[str, dict] = {}
+	for r in rows:
+		if r.get("jid") and r["jid"] not in seen:
+			seen[r["jid"]] = r
+
+	settings = _settings()
+	group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
+
+	result = []
+	for jid, r in seen.items():
+		is_grp = _is_group(jid)
+		display_name = (
+			group_names.get(jid)
+			if is_grp
+			else (r.get("sender_name") or jid.split("@")[0])
+		)
+		result.append({
+			"jid": jid,
+			"display_name": display_name or jid,
+			"is_group": is_grp,
+			"last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
+			"last_message_time": str(r["creation"]),
+			"last_direction": r.get("direction", "Incoming"),
+			"content_type": r.get("content_type", "text"),
+		})
+
+	return result
 
 
 @frappe.whitelist()
