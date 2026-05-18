@@ -250,7 +250,7 @@ def webhook():
 		return {"error": "Unauthorized"}
 
 	try:
-		payload = frappe.parse_json(frappe.request.data)
+		payload = frappe.parse_json(frappe.request.data.decode("utf-8"))
 	except Exception:
 		frappe.response["http_status_code"] = 400
 		return {"error": "Invalid JSON"}
