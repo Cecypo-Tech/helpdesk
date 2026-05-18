@@ -113,7 +113,7 @@ def _find_open_group_ticket(jid: str) -> str | None:
 	"""Return the name of the current open ticket for this group JID, or None."""
 	open_statuses = frappe.get_all(
 		"HD Ticket Status",
-		filters={"status_category": "Open"},
+		filters={"category": ["not in", ["Resolved"]]},
 		pluck="name",
 	)
 	if not open_statuses:
@@ -152,7 +152,7 @@ def _find_open_dm_ticket(phone: str, timeout_hours: int) -> str | None:
 	if not ticket:
 		return None
 
-	open_statuses = frappe.get_all("HD Ticket Status", filters={"status_category": "Open"}, pluck="name")
+	open_statuses = frappe.get_all("HD Ticket Status", filters={"category": ["not in", ["Resolved"]]}, pluck="name")
 	if ticket.status not in open_statuses:
 		return None
 
@@ -284,7 +284,7 @@ def webhook():
 		if not ticket_name:
 			group_label = _group_label(jid, settings)
 			team_override = _group_team(jid, settings)
-			raised_by = f"group+{jid}@{placeholder_domain}"
+			raised_by = f"group+{jid.split('@')[0]}@{placeholder_domain}"
 			ticket_name = _create_ticket(f"WhatsApp Group: {group_label}", raised_by, settings, team_override)
 			frappe.db.set_value("HD Ticket", ticket_name, "baileys_jid", jid, update_modified=False)
 			frappe.db.commit()
