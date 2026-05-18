@@ -262,6 +262,7 @@ def webhook():
 	message = payload.get("message", "")
 	content_type = payload.get("contentType", "text")
 	media_url = payload.get("mediaUrl") or ""
+	quoted_message_id = payload.get("quotedMessageId") or ""
 
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
@@ -338,6 +339,7 @@ def webhook():
 		"content_type": content_type or "text",
 		"media_url": media_url,
 		"message_id": message_id,
+		"reply_to_message_id": quoted_message_id,
 		"status": "Delivered",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket_name,
@@ -358,6 +360,8 @@ def send_baileys_reply(
 	content_type: str = "text",
 	media_url: str | None = None,
 	reply_to_message_id: str | None = None,
+	reply_to_text: str | None = None,
+	reply_to_from_me: bool = False,
 ) -> dict:
 	"""Send a text (or media) reply via the Baileys gateway."""
 	settings = _settings()
@@ -368,8 +372,11 @@ def send_baileys_reply(
 	if not jid:
 		frappe.throw(_("This ticket is not linked to a Baileys chat."))
 
-	agent_suffix = f"\n^{_agent_initials()}"
-	full_message = f"{message}{agent_suffix}" if message else agent_suffix.strip()
+	if settings.append_agent_initials:
+		agent_suffix = f"\n^{_agent_initials()}"
+		full_message = f"{message}{agent_suffix}" if message else agent_suffix.strip()
+	else:
+		full_message = message or ""
 
 	gateway_url = (settings.gateway_url or "").rstrip("/")
 	api_key = settings.api_key or ""
@@ -384,6 +391,8 @@ def send_baileys_reply(
 		payload["mediaUrl"] = media_url
 	if reply_to_message_id:
 		payload["replyToMessageId"] = reply_to_message_id
+		payload["replyToText"] = reply_to_text or ""
+		payload["replyToFromMe"] = bool(reply_to_from_me)
 
 	try:
 		resp = _requests.post(
@@ -408,6 +417,7 @@ def send_baileys_reply(
 		"content_type": content_type,
 		"media_url": media_url or "",
 		"message_id": sent_id,
+		"reply_to_message_id": reply_to_message_id or "",
 		"status": "Sent",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
@@ -469,6 +479,58 @@ def send_baileys_media(ticket: str, message: str = "", content_type: str = "docu
 	)
 
 
+@frappe.whitelist()
+def send_baileys_reaction(ticket: str, target_message_id: str, emoji: str) -> dict:
+	"""Send an emoji reaction to a specific Baileys message."""
+	settings = _settings()
+	if not settings.enabled:
+		frappe.throw(_("Baileys gateway is not enabled."))
+
+	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid:
+		frappe.throw(_("This ticket is not linked to a Baileys chat."))
+
+	gateway_url = (settings.gateway_url or "").rstrip("/")
+	api_key = settings.api_key or ""
+
+	try:
+		resp = _requests.post(
+			f"{gateway_url}/react",
+			json={
+				"sessionName": settings.session_name or "helpdesk",
+				"jid": jid,
+				"messageId": target_message_id,
+				"emoji": emoji,
+				"fromMe": False,
+			},
+			headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+			timeout=10,
+		)
+		resp.raise_for_status()
+	except Exception as e:
+		frappe.throw(_("Baileys reaction failed: {0}").format(str(e)))
+
+	frappe.get_doc({
+		"doctype": "Baileys Message",
+		"direction": "Outgoing",
+		"jid": jid,
+		"sender_jid": "",
+		"sender_name": frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user,
+		"profile_name": "",
+		"message": emoji,
+		"content_type": "reaction",
+		"media_url": "",
+		"message_id": "",
+		"reply_to_message_id": target_message_id,
+		"status": "Sent",
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	}).insert(ignore_permissions=True)
+
+	_publish_event(ticket, is_incoming=False)
+	return {"ok": True}
+
+
 # ── Queries ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
@@ -485,7 +547,7 @@ def get_baileys_messages(ticket: str) -> list[dict]:
 		.select(
 			BM.name, BM.creation, BM.direction, BM.jid, BM.message,
 			BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
-			BM.profile_name, BM.message_id, BM.status, BM.owner,
+			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
 			User.full_name.as_("sender_full_name"),
 		)
 		.where(BM.reference_doctype == "HD Ticket")
@@ -501,9 +563,7 @@ def get_baileys_messages(ticket: str) -> list[dict]:
 		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
 		# Map media_url → attach for bubble media rendering
 		m["attach"] = m.get("media_url") or ""
-		# Bubble shows is_reply / reply_to_message_id — not implemented in v1
-		m["is_reply"] = 0
-		m["reply_to_message_id"] = ""
+		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
 
 	return rows
 
@@ -623,6 +683,24 @@ def fetch_gateway_groups() -> list:
 		return resp.json().get("groups", [])
 	except Exception as e:
 		frappe.throw(_("Failed to fetch groups from gateway: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_connected_phone() -> dict:
+	"""Return phone number of the connected WhatsApp account from the gateway /health endpoint."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		return {"phone": None, "connected": False}
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/health",
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=5,
+		)
+		data = resp.json()
+		return {"phone": data.get("phone"), "connected": data.get("connected", False)}
+	except Exception:
+		return {"phone": None, "connected": False}
 
 
 @frappe.whitelist()
