@@ -130,4 +130,4 @@ app.get("/groups", auth, async (_, res) => {
 	} catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.listen(PORT, () => { logger.info(`Gateway :${PORT}`); connectToWhatsApp(); });
+app.listen(PORT, () => { logger.info({ port: PORT }, "Gateway ready"); connectToWhatsApp(); });
