@@ -69,10 +69,13 @@ async function connectToWhatsApp() {
 				quotedMessageId = mc.imageMessage.contextInfo?.stanzaId || "";
 			} else if (mc.videoMessage) {
 				contentType = "video"; text = mc.videoMessage.caption || "";
+				quotedMessageId = mc.videoMessage.contextInfo?.stanzaId || "";
 			} else if (mc.audioMessage) {
 				contentType = "audio";
+				quotedMessageId = mc.audioMessage.contextInfo?.stanzaId || "";
 			} else if (mc.documentMessage) {
 				contentType = "document"; text = mc.documentMessage.caption || "";
+				quotedMessageId = mc.documentMessage.contextInfo?.stanzaId || "";
 			} else if (mc.reactionMessage) {
 				contentType = "reaction";
 				text = mc.reactionMessage.text || "";
@@ -153,7 +156,7 @@ app.post("/markRead", auth, async (req, res) => {
 app.post("/react", auth, async (req, res) => {
 	if (!isConnected) return res.status(503).json({ error: "Not connected" });
 	const { jid, messageId, emoji, fromMe } = req.body;
-	if (!jid || !messageId) return res.status(400).json({ error: "jid and messageId required" });
+	if (!jid || !messageId || emoji === undefined) return res.status(400).json({ error: "jid, messageId and emoji required" });
 	try {
 		await sock.sendMessage(jid, {
 			react: { text: emoji ?? "", key: { remoteJid: jid, id: messageId, fromMe: fromMe ?? false } },
