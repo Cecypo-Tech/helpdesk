@@ -492,6 +492,7 @@ def send_baileys_reaction(ticket: str, target_message_id: str, emoji: str) -> di
 
 	gateway_url = (settings.gateway_url or "").rstrip("/")
 	api_key = settings.api_key or ""
+	target_direction = frappe.db.get_value("Baileys Message", {"message_id": target_message_id}, "direction") or "Incoming"
 
 	try:
 		resp = _requests.post(
@@ -501,7 +502,7 @@ def send_baileys_reaction(ticket: str, target_message_id: str, emoji: str) -> di
 				"jid": jid,
 				"messageId": target_message_id,
 				"emoji": emoji,
-				"fromMe": False,
+				"fromMe": target_direction == "Outgoing",
 			},
 			headers={"X-API-Key": api_key, "Content-Type": "application/json"},
 			timeout=10,

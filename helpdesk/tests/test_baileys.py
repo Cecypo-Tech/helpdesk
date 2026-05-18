@@ -21,7 +21,7 @@ class TestBaileysInitials(unittest.TestCase):
 		"""send_baileys_reply must append ^XX when append_agent_initials=1."""
 		from helpdesk.integrations import baileys as b
 
-		frappe.db.set_value("Baileys Gateway Settings", None, "append_agent_initials", 1)
+		frappe.db.set_single_value("Baileys Gateway Settings", "append_agent_initials", 1)
 		frappe.clear_cache()
 
 		ticket = self._get_baileys_ticket()
@@ -35,7 +35,8 @@ class TestBaileysInitials(unittest.TestCase):
 		"""send_baileys_reply must NOT append ^XX when append_agent_initials=0."""
 		from helpdesk.integrations import baileys as b
 
-		frappe.db.set_value("Baileys Gateway Settings", None, "append_agent_initials", 0)
+		frappe.db.set_single_value("Baileys Gateway Settings", "append_agent_initials", 0)
+		self.addCleanup(frappe.db.set_single_value, "Baileys Gateway Settings", "append_agent_initials", 1)
 		frappe.clear_cache()
 
 		ticket = self._get_baileys_ticket()
@@ -44,7 +45,4 @@ class TestBaileysInitials(unittest.TestCase):
 			b.send_baileys_reply(ticket=ticket, message="hello")
 			payload = mock_req.post.call_args.kwargs.get("json") or mock_req.post.call_args.args[1]
 
-		# Restore
-		frappe.db.set_value("Baileys Gateway Settings", None, "append_agent_initials", 1)
-		frappe.clear_cache()
 		self.assertNotIn("^", payload["message"])
