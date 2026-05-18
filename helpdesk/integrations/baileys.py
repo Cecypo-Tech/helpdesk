@@ -252,7 +252,7 @@ def send_baileys_reply(
 		"sender_jid": "",
 		"sender_name": frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user,
 		"profile_name": "",
-		"message": message,
+		"message": full_message,
 		"content_type": content_type,
 		"media_url": media_url or "",
 		"message_id": sent_id,
