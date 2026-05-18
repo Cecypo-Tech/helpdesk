@@ -65,11 +65,11 @@
 
       <!-- Bubble -->
       <div
-        class="rounded-lg px-3 py-2 text-sm shadow-sm"
+        class="rounded-lg px-3 py-2 text-sm shadow-sm transition-colors"
         :class="
           isOutgoing
-            ? 'bg-green-100 dark:bg-green-900 text-ink-gray-9'
-            : 'bg-surface-white text-ink-gray-9 border border-outline-gray-2'
+            ? 'bg-green-100 dark:bg-green-900 text-ink-gray-9 group-hover:bg-green-200 dark:group-hover:bg-green-800'
+            : 'bg-surface-white text-ink-gray-9 border border-outline-gray-2 group-hover:bg-surface-gray-1'
         "
       >
         <!-- Profile name for incoming (color-coded per sender for group chats) -->
@@ -239,22 +239,28 @@
         <span
           v-for="r in aggregatedReactions"
           :key="r.emoji"
-          class="group/rxn relative flex cursor-default items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm"
+          class="relative flex cursor-default items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm"
           :class="r.hasOwn ? 'border-blue-300 bg-blue-50' : ''"
+          @mouseenter="(e) => showTooltip(e, r.senders)"
+          @mouseleave="hideTooltip"
         >
           {{ r.emoji }}<span v-if="r.count > 1" class="ml-0.5 text-ink-gray-5">{{ r.count }}</span>
-          <!-- Sender tooltip -->
-          <span
-            v-if="r.senders.length"
-            class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-ink-gray-9 px-2 py-1 text-[10px] text-white opacity-0 shadow-lg transition-opacity group-hover/rxn:opacity-100"
-          >
-            {{ r.senders.join(", ") }}
-          </span>
         </span>
       </div>
 
     </div>
   </div>
+
+  <!-- Reaction sender tooltip (teleported to body to escape overflow:hidden parents) -->
+  <Teleport to="body">
+    <div
+      v-if="tooltip.visible"
+      class="pointer-events-none fixed z-[9999] whitespace-nowrap rounded bg-ink-gray-9 px-2.5 py-1.5 text-[11px] text-white shadow-lg"
+      :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px', transform: 'translateX(-50%)' }"
+    >
+      {{ tooltip.text }}
+    </div>
+  </Teleport>
 
   <!-- Lightbox -->
   <Teleport to="body">
@@ -380,6 +386,21 @@ const formattedTime = computed(() => {
   const d = new Date(props.message.creation);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 });
+
+const tooltip = reactive({ visible: false, text: "", x: 0, y: 0 });
+
+function showTooltip(e: MouseEvent, senders: string[]) {
+  if (!senders.length) return;
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  tooltip.text = senders.join(", ");
+  tooltip.x = rect.left + rect.width / 2;
+  tooltip.y = rect.top - 8;
+  tooltip.visible = true;
+}
+
+function hideTooltip() {
+  tooltip.visible = false;
+}
 
 const copied = ref(false);
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
