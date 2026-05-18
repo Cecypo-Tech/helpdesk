@@ -276,16 +276,26 @@ import LucideSquareDashed from "~icons/lucide/square-dashed";
 import LucideTag from "~icons/lucide/tag";
 import LucideUser from "~icons/lucide/user";
 import LucideX from "~icons/lucide/x";
-import { computed, onActivated, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onActivated, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import KanbanTaskPanel from "./KanbanTaskPanel.vue";
 
 const router = useRouter();
+const route = useRoute();
 
 // ── Panel state ──────────────────────────────────────────────
 const COLLAPSE_KEY = "hd_task_kanban_panel_collapsed";
 const selectedTaskId = ref<string | null>(null);
 const panelCollapsed = ref(false);
+
+function consumeOpenTask() {
+  const taskName = route.query.openTask as string | undefined;
+  if (!taskName) return;
+  selectedTaskId.value = taskName;
+  panelCollapsed.value = false;
+  const { openTask: _omit, ...rest } = route.query;
+  router.replace({ query: rest });
+}
 
 onMounted(() => {
   if (window.innerWidth < 640) {
@@ -293,11 +303,17 @@ onMounted(() => {
   } else {
     panelCollapsed.value = localStorage.getItem(COLLAPSE_KEY) === "true";
   }
+  consumeOpenTask();
   tasks.reload();
   loadAllTags();
 });
 
-onActivated(() => tasks.reload());
+onActivated(() => {
+  consumeOpenTask();
+  tasks.reload();
+});
+
+watch(() => route.query.openTask, (val) => { if (val) consumeOpenTask(); });
 
 function toggleCollapse() {
   panelCollapsed.value = !panelCollapsed.value;

@@ -25,9 +25,12 @@
       <div class="max-h-80 overflow-y-auto divide-y divide-outline-gray-1">
         <div v-for="task in dueTasks" :key="task.name" class="px-3 py-2.5">
           <!-- Title -->
-          <p class="text-xs font-semibold text-ink-gray-9 leading-snug mb-1">
+          <button
+            class="text-xs font-semibold text-ink-gray-9 leading-snug mb-1 text-left hover:text-ink-blue-3 hover:underline transition-colors w-full"
+            @click="goToTask(task.name)"
+          >
             {{ task.title }}
-          </p>
+          </button>
           <!-- Due label + ticket ref -->
           <div class="flex items-center gap-1.5 mb-2">
             <span
@@ -66,10 +69,28 @@
 
 <script setup lang="ts">
 import { useTaskDueAlerts } from "@/composables/useTaskDueAlerts"
+import { views } from "@/composables/useView"
 import { dayjs } from "frappe-ui"
+import { useRouter, useRoute } from "vue-router"
 import LucideX from "~icons/lucide/x"
 
+const router = useRouter()
+const route = useRoute()
 const { dueTasks, visible, snooze, markDone, dismiss } = useTaskDueAlerts()
+
+function goToTask(taskName: string) {
+  const kanbanView = (views.data as any[] | undefined)?.find(
+    (v) => v.type === "kanban" && v.dt === "HD Task"
+  )
+  const query: Record<string, string> = { openTask: taskName }
+  if (kanbanView) {
+    query.view = kanbanView.name
+  } else if (route.query.view) {
+    query.view = route.query.view as string
+  }
+  router.push({ name: "TasksAgent", query })
+  dismiss()
+}
 
 const snoozeOptions: Array<{ label: string; value: number | "tomorrow9am" }> = [
 	{ label: "15 min",   value: 15 },
