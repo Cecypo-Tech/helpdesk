@@ -263,11 +263,14 @@ const messageByMsgId = computed(() => {
 });
 
 const reactionsMap = computed(() => {
-  const map: Record<string, Array<{ emoji: string; type: string }>> = {};
+  const map: Record<string, Array<{ emoji: string; type: string; sender: string }>> = {};
   for (const m of allMessages.value) {
     if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
       if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
-      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type });
+      const sender = m.type === "Outgoing"
+        ? (m.sender_full_name || m.sender_name || "You")
+        : (m.profile_name || m.sender_name || "Customer");
+      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type, sender });
     }
   }
   return map;
@@ -325,7 +328,7 @@ function onMessageSent() {
 
 function handleRealtimeMessage(data: { jid: string; is_incoming: boolean }) {
   if (data.jid === props.jid) {
-    if (props.jid) messages.submit({ jid: props.jid });
+    messages.reload();
     scrollToBottom();
     if (data.is_incoming) {
       localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());

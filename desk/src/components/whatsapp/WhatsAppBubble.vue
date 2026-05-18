@@ -239,10 +239,17 @@
         <span
           v-for="r in aggregatedReactions"
           :key="r.emoji"
-          class="flex items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm"
+          class="group/rxn relative flex cursor-default items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm"
           :class="r.hasOwn ? 'border-blue-300 bg-blue-50' : ''"
         >
           {{ r.emoji }}<span v-if="r.count > 1" class="ml-0.5 text-ink-gray-5">{{ r.count }}</span>
+          <!-- Sender tooltip -->
+          <span
+            v-if="r.senders.length"
+            class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-ink-gray-9 px-2 py-1 text-[10px] text-white opacity-0 shadow-lg transition-opacity group-hover/rxn:opacity-100"
+          >
+            {{ r.senders.join(", ") }}
+          </span>
         </span>
       </div>
 
@@ -285,7 +292,7 @@ const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 const props = defineProps<{
   message: Record<string, any>;
-  reactions?: Array<{ emoji: string; type: string }>;
+  reactions?: Array<{ emoji: string; type: string; sender: string }>;
   replyToMessage?: Record<string, any> | null;
 }>();
 
@@ -336,14 +343,15 @@ function pickEmoji(emoji: string) {
   emit("react", emoji, props.message.message_id || "");
 }
 
-// Aggregate reactions: {emoji → {emoji, count, hasOwn}}
+// Aggregate reactions: {emoji → {emoji, count, hasOwn, senders[]}}
 const aggregatedReactions = computed(() => {
-  const map: Record<string, { emoji: string; count: number; hasOwn: boolean }> = {};
+  const map: Record<string, { emoji: string; count: number; hasOwn: boolean; senders: string[] }> = {};
   for (const r of props.reactions ?? []) {
     if (!r.emoji) continue;
-    if (!map[r.emoji]) map[r.emoji] = { emoji: r.emoji, count: 0, hasOwn: false };
+    if (!map[r.emoji]) map[r.emoji] = { emoji: r.emoji, count: 0, hasOwn: false, senders: [] };
     map[r.emoji].count++;
     if (r.type === "Outgoing") map[r.emoji].hasOwn = true;
+    if (r.sender) map[r.emoji].senders.push(r.sender);
   }
   return Object.values(map);
 });
