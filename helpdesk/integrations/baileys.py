@@ -277,7 +277,7 @@ def webhook():
 	frappe.set_user("Administrator")
 
 	is_grp = _is_group(jid)
-	placeholder_domain = settings.placeholder_email_domain or "baileys.placeholder.local"
+	placeholder_domain = settings.placeholder_email_domain or "whatsapp.placeholder.local"
 
 	if is_grp:
 		ticket_name = _find_open_group_ticket(jid)

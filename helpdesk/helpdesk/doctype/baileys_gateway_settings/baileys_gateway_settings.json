@@ -92,7 +92,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "default": "baileys.placeholder.local",
+   "default": "whatsapp.placeholder.local",
    "fieldname": "placeholder_email_domain",
    "fieldtype": "Data",
    "label": "Placeholder Email Domain",
