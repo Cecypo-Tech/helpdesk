@@ -286,15 +286,13 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
-  if (props.jid) messages.submit({ jid: props.jid });
-  scrollToBottom();
 }
 
 function handleRealtimeMessage(data: { jid: string; is_incoming: boolean }) {
   if (data.jid === props.jid) {
     if (props.jid) messages.submit({ jid: props.jid });
+    scrollToBottom();
     if (data.is_incoming) {
-      scrollToBottom();
       localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());
     }
   }

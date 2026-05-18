@@ -134,9 +134,6 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
-  messages.reload();
-  tabInfo.reload();
-  scrollToBottom();
 }
 
 function markAsRead() {
@@ -147,7 +144,7 @@ function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
   if (String(data.ticket) === String(props.ticketId)) {
     messages.reload();
     tabInfo.reload();
-    if (data.is_incoming) scrollToBottom();
+    scrollToBottom();
     markAsRead();
   }
 }

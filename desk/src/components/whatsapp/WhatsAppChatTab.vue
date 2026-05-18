@@ -270,9 +270,6 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
-  messages.reload();
-  ticketInfo.reload();
-  scrollToBottom();
 }
 
 function sendTemplate() {
@@ -288,7 +285,7 @@ function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
   if (String(data.ticket) === String(props.ticketId)) {
     messages.reload();
     ticketInfo.reload();
-    if (data.is_incoming) scrollToBottom();
+    scrollToBottom();
     markAsRead();
   }
 }
