@@ -1,6 +1,6 @@
 <template>
-  <div class="flex flex-1 min-h-0 overflow-hidden">
-    <Resizer :defaultWidth="240" :minWidth="160" :maxWidth="400" side="left" class="h-full">
+  <div ref="containerRef" class="flex flex-1 min-h-0 overflow-hidden">
+    <Resizer :defaultWidth="240" :minWidth="160" :maxWidth="400" side="left" :parent="containerRef" class="h-full">
       <BaileysConversationList
         ref="convListRef"
         :selectedJid="selectedJid"
@@ -24,6 +24,7 @@ import Resizer from "@/components/Resizer.vue";
 
 defineOptions({ inheritAttrs: false });
 
+const containerRef = ref<HTMLElement | null>(null);
 const selectedJid = ref<string | null>(null);
 const selectedDisplayName = ref<string>("");
 const selectedCompany = ref<string>("");
