@@ -7,7 +7,7 @@
     <p class="text-sm">Select a conversation</p>
   </div>
 
-  <div v-else class="flex flex-1 flex-col overflow-hidden">
+  <div v-else class="flex flex-1 min-h-0 flex-col overflow-hidden">
     <div class="flex items-center gap-3 border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-2.5">
       <WhatsAppIcon class="h-4 w-4 shrink-0 text-green-600" />
       <div class="min-w-0 flex-1">

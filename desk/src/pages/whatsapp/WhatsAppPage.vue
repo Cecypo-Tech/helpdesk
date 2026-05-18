@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full overflow-hidden">
+  <div class="flex flex-1 min-h-0 overflow-hidden">
     <BaileysConversationList
       :selectedJid="selectedJid"
       @select="onSelect"
@@ -12,6 +12,8 @@
 import { ref } from "vue";
 import BaileysConversationList from "@/components/whatsapp/BaileysConversationList.vue";
 import BaileysChat from "@/components/whatsapp/BaileysChat.vue";
+
+defineOptions({ inheritAttrs: false });
 
 const selectedJid = ref<string | null>(null);
 const selectedDisplayName = ref<string>("");
