@@ -24,6 +24,7 @@
   "customer_reply_status",
   "col_break_status",
   "agent_reply_status",
+  "append_agent_initials",
   "section_notifications",
   "notification_quiet_minutes",
   "section_groups",
@@ -144,6 +145,13 @@
    "label": "Status on Agent Reply",
    "options": "HD Ticket Status",
    "description": "Set ticket to this status when an agent replies."
+  },
+  {
+   "default": "1",
+   "fieldname": "append_agent_initials",
+   "fieldtype": "Check",
+   "label": "Append Agent Initials to Outgoing Messages",
+   "description": "When enabled, appends ^XX (agent initials) to every outgoing Baileys message."
   },
   {
    "fieldname": "section_notifications",
