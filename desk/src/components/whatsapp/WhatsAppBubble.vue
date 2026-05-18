@@ -255,8 +255,9 @@
   <Teleport to="body">
     <div
       v-if="tooltip.visible"
-      class="pointer-events-none fixed z-[9999] whitespace-nowrap rounded bg-ink-gray-9 px-2.5 py-1.5 text-[11px] text-white shadow-lg"
-      :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px', transform: 'translateX(-50%)' }"
+      class="pointer-events-none fixed z-[9999] whitespace-nowrap rounded px-2.5 py-1.5 text-[11px] text-white shadow-lg"
+      style="background: rgba(30,30,30,0.95); transform: translateX(-50%) translateY(-100%)"
+      :style="{ top: tooltip.y + 'px', left: tooltip.x + 'px' }"
     >
       {{ tooltip.text }}
     </div>
