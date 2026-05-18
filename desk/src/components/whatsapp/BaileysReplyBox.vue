@@ -55,6 +55,45 @@
       </button>
     </div>
 
+    <!-- Saved replies picker -->
+    <Teleport to="body">
+      <div
+        v-if="showReplies"
+        ref="repliesPopup"
+        class="fixed z-50 flex flex-col rounded-xl border border-outline-gray-2 bg-surface-white shadow-xl"
+        :style="repliesPopupStyle"
+      >
+        <div class="border-b border-outline-gray-2 px-3 py-2 text-xs font-semibold text-ink-gray-7">Saved Replies</div>
+        <div class="px-2 py-1.5">
+          <input
+            v-model="repliesSearch"
+            ref="repliesSearchRef"
+            type="text"
+            placeholder="Search..."
+            class="w-full rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-2 py-1 text-xs text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none"
+            @keydown.esc="showReplies = false"
+          />
+        </div>
+        <div class="max-h-56 overflow-y-auto">
+          <div
+            v-if="!filteredReplies.length"
+            class="px-3 py-4 text-center text-xs text-ink-gray-4"
+          >
+            {{ savedReplies.loading ? "Loading…" : "No saved replies" }}
+          </div>
+          <button
+            v-for="reply in filteredReplies"
+            :key="reply.name"
+            class="flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left hover:bg-surface-gray-1"
+            @click="applyReply(reply)"
+          >
+            <span class="text-xs font-semibold text-ink-gray-8">{{ reply.title }}</span>
+            <span class="line-clamp-2 text-[11px] text-ink-gray-5">{{ reply._plain }}</span>
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
     <div class="flex items-end gap-2">
       <!-- Attach -->
       <button
@@ -64,6 +103,21 @@
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <!-- Saved replies -->
+      <button
+        ref="repliesBtn"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        :class="{ 'bg-surface-gray-1 text-ink-gray-8': showReplies }"
+        title="Saved replies"
+        @click.stop="toggleReplies"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          <line x1="9" y1="10" x2="15" y2="10"/>
+          <line x1="9" y1="14" x2="13" y2="14"/>
         </svg>
       </button>
       <input
@@ -103,8 +157,8 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, toast } from "frappe-ui";
-import { ref, computed, nextTick } from "vue";
+import { createListResource, createResource, toast } from "frappe-ui";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 
 const props = defineProps<{
   ticketId: string;
@@ -175,6 +229,91 @@ function onPaste(e: ClipboardEvent) {
   }
 }
 
+// ── Saved replies ─────────────────────────────────────────────────────────────
+const showReplies = ref(false);
+const repliesSearch = ref("");
+const repliesBtn = ref<HTMLButtonElement | null>(null);
+const repliesPopup = ref<HTMLElement | null>(null);
+const repliesSearchRef = ref<HTMLInputElement | null>(null);
+const repliesPopupStyle = ref<Record<string, string>>({});
+
+const savedReplies = createListResource({
+  doctype: "HD Saved Reply",
+  fields: ["name", "title", "message"],
+  orderBy: "title asc",
+  pageLength: 999,
+  auto: false,
+  transform(rows: any[]) {
+    return rows.map((r) => ({
+      ...r,
+      _plain: htmlToPlain(r.message || ""),
+    }));
+  },
+});
+
+function htmlToPlain(html: string): string {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return (div.innerText || div.textContent || "").trim();
+}
+
+const filteredReplies = computed(() => {
+  const list: any[] = savedReplies.data || [];
+  if (!repliesSearch.value.trim()) return list;
+  const q = repliesSearch.value.toLowerCase();
+  return list.filter(
+    (r) => r.title.toLowerCase().includes(q) || r._plain.toLowerCase().includes(q)
+  );
+});
+
+function positionPopup() {
+  if (!repliesBtn.value) return;
+  const rect = repliesBtn.value.getBoundingClientRect();
+  repliesPopupStyle.value = {
+    bottom: `${window.innerHeight - rect.top + 8}px`,
+    left: `${rect.left}px`,
+    width: "320px",
+  };
+}
+
+function toggleReplies() {
+  if (showReplies.value) {
+    showReplies.value = false;
+    return;
+  }
+  if (!savedReplies.data) savedReplies.reload();
+  showReplies.value = true;
+  nextTick(() => {
+    positionPopup();
+    repliesSearchRef.value?.focus();
+  });
+}
+
+function applyReply(reply: any) {
+  text.value = reply._plain;
+  showReplies.value = false;
+  nextTick(() => {
+    autoResize();
+    textareaRef.value?.focus();
+  });
+}
+
+function onDocClick(e: MouseEvent) {
+  if (
+    showReplies.value &&
+    !repliesPopup.value?.contains(e.target as Node) &&
+    !repliesBtn.value?.contains(e.target as Node)
+  ) {
+    showReplies.value = false;
+  }
+}
+
+onMounted(() => document.addEventListener("click", onDocClick));
+onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+
+watch(showReplies, (v) => { if (!v) repliesSearch.value = ""; });
+
+// ── Send ──────────────────────────────────────────────────────────────────────
 const sendReply = createResource({
   url: "helpdesk.integrations.baileys.send_baileys_reply",
   onSuccess() {
