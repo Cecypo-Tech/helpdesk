@@ -91,7 +91,7 @@
   },
   {
    "fieldname": "media_url",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "Media URL"
   },
   {
@@ -102,8 +102,7 @@
   {
    "fieldname": "reply_to_message_id",
    "fieldtype": "Data",
-   "label": "Reply To Message ID",
-   "read_only": 1
+   "label": "Reply To Message ID"
   },
   {
    "fieldname": "section_meta",

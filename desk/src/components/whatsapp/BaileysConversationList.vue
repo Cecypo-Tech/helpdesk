@@ -1,5 +1,5 @@
 <template>
-  <div class="flex w-60 shrink-0 flex-col border-r border-outline-gray-2 bg-surface-gray-1">
+  <div class="flex w-full h-full flex-col border-r border-outline-gray-2 bg-surface-gray-1">
     <div class="border-b border-outline-gray-2 px-4 py-3">
       <h2 class="text-sm font-semibold text-ink-gray-9">WhatsApp</h2>
     </div>

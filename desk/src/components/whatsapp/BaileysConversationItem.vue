@@ -13,10 +13,10 @@
         {{ avatarLetter }}
       </div>
       <span
+        v-if="isGroup"
         class="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-surface-white ring-1 ring-outline-gray-2"
       >
-        <LucideUsers v-if="isGroup" class="h-2 w-2 text-ink-gray-5" />
-        <LucideUser v-else class="h-2 w-2 text-ink-gray-5" />
+        <LucideUsers class="h-2 w-2 text-ink-gray-5" />
       </span>
     </div>
 
@@ -44,7 +44,6 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import LucideUser from "~icons/lucide/user";
 import LucideUsers from "~icons/lucide/users";
 
 const props = defineProps<{

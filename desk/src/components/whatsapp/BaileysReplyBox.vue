@@ -217,6 +217,10 @@ async function send() {
     });
   } else {
     const msgText = text.value.trim();
+    // Capture reply context BEFORE emit("sent") clears replyingTo in parent
+    const replyToId = props.replyTo?.message_id || "";
+    const replyToText = props.replyTo?.message || "";
+    const replyToFromMe = props.replyTo?.direction === "Outgoing";
     text.value = "";
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     emit("sent");
@@ -224,9 +228,9 @@ async function send() {
       ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
       message: msgText,
       content_type: "text",
-      reply_to_message_id: props.replyTo?.message_id || "",
-      reply_to_text: props.replyTo?.message || "",
-      reply_to_from_me: props.replyTo?.direction === "Outgoing",
+      reply_to_message_id: replyToId,
+      reply_to_text: replyToText,
+      reply_to_from_me: replyToFromMe,
     });
   }
 }

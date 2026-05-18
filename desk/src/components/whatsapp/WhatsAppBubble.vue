@@ -154,8 +154,8 @@
         <div v-if="message.content_type === 'video' && message.attach" class="mb-1">
           <video
             :src="message.attach"
-            class="max-h-60 max-w-full cursor-pointer rounded"
-            @click.prevent="openLightbox(message.attach, 'video')"
+            controls
+            class="max-h-60 max-w-full rounded"
           />
         </div>
 

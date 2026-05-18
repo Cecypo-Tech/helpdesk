@@ -130,10 +130,16 @@ def webhook():
 		return {"error": "Unauthorized"}
 
 	try:
-		payload = frappe.parse_json(frappe.request.data.decode("utf-8"))
+		raw_body = frappe.request.data.decode("utf-8")
+		payload = frappe.parse_json(raw_body)
 	except Exception:
 		frappe.response["http_status_code"] = 400
 		return {"error": "Invalid JSON"}
+
+	# DEBUG: log full payload for incoming media to understand gateway format
+	content_type_raw = payload.get("contentType", "text")
+	if content_type_raw in ("image", "video", "audio", "document"):
+		frappe.logger("baileys").info("MEDIA WEBHOOK PAYLOAD: %s", raw_body[:2000])
 
 	jid = payload.get("jid", "")
 	message_id = payload.get("messageId", "")
@@ -366,6 +372,8 @@ def send_baileys_reaction(
 		_publish_event(ticket, is_incoming=False)
 	else:
 		_publish_baileys_event(jid, is_incoming=False)
+
+	return {}
 
 	return {"ok": True}
 
