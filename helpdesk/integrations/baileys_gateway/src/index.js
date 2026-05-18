@@ -57,18 +57,35 @@ async function connectToWhatsApp() {
 			const sender     = msg.key.participant || jid;
 			const senderName = msg.pushName || sender.split("@")[0];
 			const mc         = msg.message;
-			let text = "", contentType = "text";
-			if      (mc.conversation)          { text = mc.conversation; }
-			else if (mc.extendedTextMessage)   { text = mc.extendedTextMessage.text; }
-			else if (mc.imageMessage)          { contentType = "image";    text = mc.imageMessage.caption || ""; }
-			else if (mc.videoMessage)          { contentType = "video";    text = mc.videoMessage.caption || ""; }
-			else if (mc.audioMessage)          { contentType = "audio"; }
-			else if (mc.documentMessage)       { contentType = "document"; text = mc.documentMessage.caption || ""; }
-			else continue;
+			let text = "", contentType = "text", quotedMessageId = "";
+
+			if (mc.conversation) {
+				text = mc.conversation;
+			} else if (mc.extendedTextMessage) {
+				text = mc.extendedTextMessage.text;
+				quotedMessageId = mc.extendedTextMessage.contextInfo?.stanzaId || "";
+			} else if (mc.imageMessage) {
+				contentType = "image"; text = mc.imageMessage.caption || "";
+				quotedMessageId = mc.imageMessage.contextInfo?.stanzaId || "";
+			} else if (mc.videoMessage) {
+				contentType = "video"; text = mc.videoMessage.caption || "";
+			} else if (mc.audioMessage) {
+				contentType = "audio";
+			} else if (mc.documentMessage) {
+				contentType = "document"; text = mc.documentMessage.caption || "";
+			} else if (mc.reactionMessage) {
+				contentType = "reaction";
+				text = mc.reactionMessage.text || "";
+				quotedMessageId = mc.reactionMessage.key?.id || "";
+			} else {
+				continue;
+			}
+
 			try {
 				await axios.post(WEBHOOK_URL, {
 					jid, messageId: msg.key.id, sender, senderName,
 					message: text, contentType, timestamp: msg.messageTimestamp,
+					quotedMessageId,
 				}, { headers: { "X-API-Key": API_KEY }, timeout: 15000 });
 			} catch (err) { logger.error({ err: err.message, jid }, "Webhook failed"); }
 		}
@@ -80,7 +97,11 @@ app.use(express.json());
 const auth = (req, res, next) =>
 	req.headers["x-api-key"] === API_KEY ? next() : res.status(401).json({ error: "Unauthorized" });
 
-app.get("/health", (_, res) => res.json({ connected: isConnected, hasQr: !!qrString, session: SESSION_NAME }));
+app.get("/health", (_, res) => {
+	const rawId = sock?.user?.id || "";
+	const phone = rawId ? rawId.split(":")[0].split("@")[0] : null;
+	res.json({ connected: isConnected, hasQr: !!qrString, session: SESSION_NAME, phone });
+});
 
 app.get("/qr", async (_, res) => {
 	if (isConnected) return res.json({ connected: true });
@@ -92,21 +113,29 @@ app.get("/qr", async (_, res) => {
 
 app.post("/send", auth, async (req, res) => {
 	if (!isConnected) return res.status(503).json({ error: "Not connected" });
-	const { jid, message, mediaUrl, contentType = "text" } = req.body;
+	const { jid, message, mediaUrl, contentType = "text", replyToMessageId, replyToText, replyToFromMe } = req.body;
 	if (!jid || (!message && !mediaUrl)) return res.status(400).json({ error: "jid and message/mediaUrl required" });
 	try {
-		let sent;
+		let content;
 		if (!mediaUrl || contentType === "text") {
-			sent = await sock.sendMessage(jid, { text: message });
+			content = { text: message };
 		} else if (contentType === "image") {
-			sent = await sock.sendMessage(jid, { image: { url: mediaUrl }, caption: message || "" });
+			content = { image: { url: mediaUrl }, caption: message || "" };
 		} else if (contentType === "video") {
-			sent = await sock.sendMessage(jid, { video: { url: mediaUrl }, caption: message || "" });
+			content = { video: { url: mediaUrl }, caption: message || "" };
 		} else if (contentType === "audio") {
-			sent = await sock.sendMessage(jid, { audio: { url: mediaUrl }, mimetype: "audio/mp4" });
+			content = { audio: { url: mediaUrl }, mimetype: "audio/mp4" };
 		} else {
-			sent = await sock.sendMessage(jid, { document: { url: mediaUrl }, fileName: message || "file" });
+			content = { document: { url: mediaUrl }, fileName: message || "file" };
 		}
+		const options = {};
+		if (replyToMessageId) {
+			options.quoted = {
+				key: { remoteJid: jid, id: replyToMessageId, fromMe: replyToFromMe ?? false },
+				message: { conversation: replyToText || "" },
+			};
+		}
+		const sent = await sock.sendMessage(jid, content, options);
 		res.json({ messageId: sent.key.id });
 	} catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -117,6 +146,18 @@ app.post("/markRead", auth, async (req, res) => {
 	if (!jid || !Array.isArray(messageIds)) return res.status(400).json({ error: "jid and messageIds[] required" });
 	try {
 		await sock.readMessages(messageIds.map((id) => ({ remoteJid: jid, id, fromMe: false })));
+		res.json({ ok: true });
+	} catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/react", auth, async (req, res) => {
+	if (!isConnected) return res.status(503).json({ error: "Not connected" });
+	const { jid, messageId, emoji, fromMe } = req.body;
+	if (!jid || !messageId) return res.status(400).json({ error: "jid and messageId required" });
+	try {
+		await sock.sendMessage(jid, {
+			react: { text: emoji ?? "", key: { remoteJid: jid, id: messageId, fromMe: fromMe ?? false } },
+		});
 		res.json({ ok: true });
 	} catch (err) { res.status(500).json({ error: err.message }); }
 });
