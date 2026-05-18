@@ -5,14 +5,18 @@ from frappe.tests.utils import FrappeTestCase
 class TestBaileysStandalone(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
+		self._orig_enabled = frappe.db.get_single_value("Baileys Gateway Settings", "enabled")
+		self._orig_api_key = frappe.db.get_single_value("Baileys Gateway Settings", "api_key")
+		self._orig_gateway_url = frappe.db.get_single_value("Baileys Gateway Settings", "gateway_url")
 		self.addCleanup(self._restore_settings)
 		frappe.db.set_single_value("Baileys Gateway Settings", "enabled", 1)
 		frappe.db.set_single_value("Baileys Gateway Settings", "api_key", "testkey")
 		frappe.db.set_single_value("Baileys Gateway Settings", "gateway_url", "http://localhost:9999")
 
 	def _restore_settings(self):
-		frappe.db.set_single_value("Baileys Gateway Settings", "enabled", 0)
-		frappe.db.set_single_value("Baileys Gateway Settings", "api_key", "")
+		frappe.db.set_single_value("Baileys Gateway Settings", "enabled", self._orig_enabled)
+		frappe.db.set_single_value("Baileys Gateway Settings", "api_key", self._orig_api_key or "")
+		frappe.db.set_single_value("Baileys Gateway Settings", "gateway_url", self._orig_gateway_url or "")
 
 	def _make_message(self, jid="120363test@g.us", direction="Incoming", message="hello", content_type="text", msg_id=None):
 		doc = frappe.get_doc({
