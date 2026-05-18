@@ -160,6 +160,16 @@ export const useNotificationStore = defineStore("notification", () => {
     }
   });
 
+  $socket.on("helpdesk:baileys-notification", (data: { jid: string; message: string; sender: string }) => {
+    if (isCustomerPortal.value) return;
+    resource.reload();
+    try {
+      const audio = new Audio("/assets/frappe/sounds/alert.mp3");
+      audio.volume = 0.4;
+      audio.play();
+    } catch (_) {}
+  });
+
   return {
     clear,
     data,
