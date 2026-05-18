@@ -146,8 +146,7 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { globalStore } from "@/stores/globalStore";
+import { computed, nextTick, ref, watch } from "vue";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import BaileysReplyBox from "./BaileysReplyBox.vue";
@@ -163,7 +162,6 @@ const emit = defineEmits<{
   (e: "contactSaved", data: { custom_name: string; company: string; assigned_team: string }): void;
 }>();
 
-const { $socket } = globalStore();
 const messagesContainer = ref<HTMLElement | null>(null);
 const replyingTo = ref<Record<string, any> | null>(null);
 
@@ -351,23 +349,12 @@ function onMessageSent() {
   scrollToBottom();
 }
 
-function handleRealtimeMessage(data: { jid: string; is_incoming: boolean }) {
-  if (data.jid === props.jid) {
-    loadMessages();
-    scrollToBottom();
-    if (data.is_incoming) {
-      localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());
-    }
-  }
-}
-
 watch(messageList, () => { scrollToBottom(); });
 
-onMounted(() => {
-  $socket.on("helpdesk:baileys-message", handleRealtimeMessage);
-});
-
-onBeforeUnmount(() => {
-  $socket.off("helpdesk:baileys-message", handleRealtimeMessage);
+defineExpose({
+  refresh() {
+    loadMessages();
+    scrollToBottom();
+  },
 });
 </script>

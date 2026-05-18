@@ -78,8 +78,7 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator } from "frappe-ui";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { globalStore } from "@/stores/globalStore";
+import { computed, ref, watch } from "vue";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ selectedJid: string | null }>();
@@ -87,8 +86,12 @@ const emit = defineEmits<{
   (e: "select", jid: string, displayName: string, company: string, assignedTeam: string): void;
 }>();
 
-const { $socket } = globalStore();
 const search = ref("");
+const lastReadMap = ref<Record<string, number>>({});
+
+watch(() => props.selectedJid, (jid) => {
+  if (jid) lastReadMap.value[jid] = Date.now();
+});
 const showNewChat = ref(false);
 const newChatPhone = ref("");
 const newChatError = ref("");
@@ -112,10 +115,12 @@ const filteredList = computed(() => {
 function isUnread(conv: any): boolean {
   if (conv.last_direction !== "Incoming") return false;
   if (conv.jid === props.selectedJid) return false;
-  const key = `baileys_last_read_${conv.jid}`;
-  const lastRead = localStorage.getItem(key);
-  if (!lastRead) return true;
-  return new Date(conv.last_message_time) > new Date(lastRead);
+  const msgTime = new Date(conv.last_message_time).getTime();
+  const readTime = lastReadMap.value[conv.jid];
+  if (readTime) return msgTime > readTime;
+  const stored = localStorage.getItem(`baileys_last_read_${conv.jid}`);
+  if (!stored) return true;
+  return msgTime > new Date(stored).getTime();
 }
 
 function startNewChat() {
@@ -130,18 +135,6 @@ function startNewChat() {
   newChatPhone.value = "";
   emit("select", jid, `+${digits}`, "", "");
 }
-
-function handleNewMessage() {
-  conversations.reload();
-}
-
-onMounted(() => {
-  $socket.on("helpdesk:baileys-message", handleNewMessage);
-});
-
-onBeforeUnmount(() => {
-  $socket.off("helpdesk:baileys-message", handleNewMessage);
-});
 
 defineExpose({ reload: () => conversations.reload() });
 </script>

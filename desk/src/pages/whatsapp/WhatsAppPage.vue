@@ -24,6 +24,7 @@
     </div>
 
     <BaileysChat
+      ref="baileysChat"
       :jid="selectedJid"
       :displayName="selectedDisplayName"
       :company="selectedCompany"
@@ -37,6 +38,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import BaileysConversationList from "@/components/whatsapp/BaileysConversationList.vue";
 import BaileysChat from "@/components/whatsapp/BaileysChat.vue";
+import { globalStore } from "@/stores/globalStore";
 
 defineOptions({ inheritAttrs: false });
 
@@ -45,6 +47,8 @@ const MIN_WIDTH = 160;
 const MAX_WIDTH = 420;
 const DEFAULT_WIDTH = 240;
 
+const { $socket } = globalStore();
+
 const containerRef = ref<HTMLElement | null>(null);
 const panelWidth = ref(Number(localStorage.getItem(STORAGE_KEY)) || DEFAULT_WIDTH);
 const selectedJid = ref<string | null>(null);
@@ -52,6 +56,7 @@ const selectedDisplayName = ref<string>("");
 const selectedCompany = ref<string>("");
 const selectedTeam = ref<string>("");
 const convListRef = ref<InstanceType<typeof BaileysConversationList> | null>(null);
+const baileysChat = ref<InstanceType<typeof BaileysChat> | null>(null);
 
 let resizing = false;
 
@@ -76,17 +81,25 @@ function onMouseUp() {
   localStorage.setItem(STORAGE_KEY, String(panelWidth.value));
 }
 
-// Stop resize if mouse released outside the container
 function onDocumentMouseUp() {
   onMouseUp();
 }
 
+function handleBaileysMessage(data: { jid: string; is_incoming: boolean }) {
+  convListRef.value?.reload();
+  if (data.jid === selectedJid.value) {
+    baileysChat.value?.refresh();
+  }
+}
+
 onMounted(() => {
   document.addEventListener("mouseup", onDocumentMouseUp);
+  $socket.on("helpdesk:baileys-message", handleBaileysMessage);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onDocumentMouseUp);
+  $socket.off("helpdesk:baileys-message", handleBaileysMessage);
 });
 
 function onSelect(jid: string, displayName: string, company: string, team: string) {
