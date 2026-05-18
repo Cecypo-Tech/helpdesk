@@ -27,6 +27,7 @@
       :jid="selectedJid"
       :displayName="selectedDisplayName"
       :company="selectedCompany"
+      :assignedTeam="selectedTeam"
       @contactSaved="onContactSaved"
     />
   </div>
@@ -49,6 +50,7 @@ const panelWidth = ref(Number(localStorage.getItem(STORAGE_KEY)) || DEFAULT_WIDT
 const selectedJid = ref<string | null>(null);
 const selectedDisplayName = ref<string>("");
 const selectedCompany = ref<string>("");
+const selectedTeam = ref<string>("");
 const convListRef = ref<InstanceType<typeof BaileysConversationList> | null>(null);
 
 let resizing = false;
@@ -87,15 +89,17 @@ onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onDocumentMouseUp);
 });
 
-function onSelect(jid: string, displayName: string, company: string) {
+function onSelect(jid: string, displayName: string, company: string, team: string) {
   selectedJid.value = jid;
   selectedDisplayName.value = displayName;
   selectedCompany.value = company;
+  selectedTeam.value = team;
 }
 
-function onContactSaved(data: { custom_name: string; company: string }) {
+function onContactSaved(data: { custom_name: string; company: string; assigned_team: string }) {
   if (data.custom_name) selectedDisplayName.value = data.custom_name;
   selectedCompany.value = data.company;
+  selectedTeam.value = data.assigned_team || "";
   convListRef.value?.reload();
 }
 </script>

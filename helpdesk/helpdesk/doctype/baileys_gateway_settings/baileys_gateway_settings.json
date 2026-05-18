@@ -25,6 +25,8 @@
   "col_break_status",
   "agent_reply_status",
   "append_agent_initials",
+  "section_access",
+  "restrict_chats_by_team",
   "section_notifications",
   "notification_quiet_minutes",
   "section_groups",
@@ -152,6 +154,18 @@
    "fieldtype": "Check",
    "label": "Append Agent Initials to Outgoing Messages",
    "description": "When enabled, appends ^XX (agent initials) to every outgoing Baileys message."
+  },
+  {
+   "fieldname": "section_access",
+   "fieldtype": "Section Break",
+   "label": "Chat Access Control"
+  },
+  {
+   "default": "0",
+   "fieldname": "restrict_chats_by_team",
+   "fieldtype": "Check",
+   "label": "Restrict Chats by Team Assignment",
+   "description": "When enabled, agents only see chats assigned to their team. Unassigned chats are visible to all. Agents with no team see everything."
   },
   {
    "fieldname": "section_notifications",

@@ -582,13 +582,28 @@ def get_baileys_conversations() -> list[dict]:
 	jids = list(seen.keys())
 	contacts: dict[str, dict] = {}
 	if jids and frappe.db.exists("DocType", "Baileys Contact"):
-		for c in frappe.get_all("Baileys Contact", filters={"jid": ["in", jids]}, fields=["jid", "custom_name", "company"]):
+		for c in frappe.get_all("Baileys Contact", filters={"jid": ["in", jids]}, fields=["jid", "custom_name", "company", "assigned_team"]):
 			contacts[c.jid] = c
+
+	# Team-based access control
+	restrict = settings.get("restrict_chats_by_team")
+	user_teams: set[str] = set()
+	user_has_any_team = False
+	if restrict:
+		tm_rows = frappe.get_all("HD Team Member", filters={"user": frappe.session.user}, pluck="parent")
+		user_teams = set(tm_rows)
+		user_has_any_team = bool(user_teams)
 
 	result = []
 	for jid, r in seen.items():
 		is_grp = _is_group(jid)
 		contact = contacts.get(jid, {})
+		assigned_team = contact.get("assigned_team") or ""
+
+		# Access control: skip chats this user's team is not assigned to
+		if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
+			continue
+
 		display_name = (
 			contact.get("custom_name")
 			or (group_names.get(jid) if is_grp else None)
@@ -599,6 +614,7 @@ def get_baileys_conversations() -> list[dict]:
 			"jid": jid,
 			"display_name": display_name or jid,
 			"company": contact.get("company") or "",
+			"assigned_team": assigned_team,
 			"is_group": is_grp,
 			"last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
 			"last_message_time": str(r["creation"]),
@@ -610,15 +626,17 @@ def get_baileys_conversations() -> list[dict]:
 
 
 @frappe.whitelist()
-def save_baileys_contact(jid: str, custom_name: str = "", company: str = "") -> dict:
+def save_baileys_contact(jid: str, custom_name: str = "", company: str = "", assigned_team: str = "") -> dict:
 	"""Create or update a Baileys Contact override for a JID."""
 	custom_name = (custom_name or "").strip()
 	company = (company or "").strip()
+	assigned_team = (assigned_team or "").strip()
 
 	if frappe.db.exists("Baileys Contact", {"jid": jid}):
 		doc = frappe.get_doc("Baileys Contact", {"jid": jid})
 		doc.custom_name = custom_name
 		doc.company = company
+		doc.assigned_team = assigned_team
 		doc.save(ignore_permissions=True)
 	else:
 		frappe.get_doc({
@@ -627,6 +645,7 @@ def save_baileys_contact(jid: str, custom_name: str = "", company: str = "") -> 
 			"phone": _phone_from_jid(jid) if not _is_group(jid) else "",
 			"custom_name": custom_name,
 			"company": company,
+			"assigned_team": assigned_team,
 		}).insert(ignore_permissions=True)
 
 	return {"status": "ok", "jid": jid, "custom_name": custom_name, "company": company}
@@ -637,8 +656,19 @@ def get_baileys_contact(jid: str) -> dict:
 	"""Return stored contact overrides for a JID, or empty defaults."""
 	if not frappe.db.exists("DocType", "Baileys Contact"):
 		return {"jid": jid, "custom_name": "", "company": ""}
-	row = frappe.db.get_value("Baileys Contact", {"jid": jid}, ["custom_name", "company"], as_dict=True)
-	return {"jid": jid, "custom_name": (row or {}).get("custom_name") or "", "company": (row or {}).get("company") or ""}
+	row = frappe.db.get_value("Baileys Contact", {"jid": jid}, ["custom_name", "company", "assigned_team"], as_dict=True)
+	return {
+		"jid": jid,
+		"custom_name": (row or {}).get("custom_name") or "",
+		"company": (row or {}).get("company") or "",
+		"assigned_team": (row or {}).get("assigned_team") or "",
+	}
+
+
+@frappe.whitelist()
+def get_hd_teams() -> list[dict]:
+	"""Return all HD Teams for the team assignment dropdown."""
+	return frappe.get_all("HD Team", fields=["name"], order_by="name asc")
 
 
 @frappe.whitelist()

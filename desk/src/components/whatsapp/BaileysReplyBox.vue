@@ -177,6 +177,9 @@ function onPaste(e: ClipboardEvent) {
 
 const sendReply = createResource({
   url: "helpdesk.integrations.baileys.send_baileys_reply",
+  onSuccess() {
+    emit("sent");
+  },
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send message");
   },
@@ -223,7 +226,6 @@ async function send() {
     const replyToFromMe = props.replyTo?.direction === "Outgoing";
     text.value = "";
     if (textareaRef.value) textareaRef.value.style.height = "auto";
-    emit("sent");
     sendReply.submit({
       ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
       message: msgText,

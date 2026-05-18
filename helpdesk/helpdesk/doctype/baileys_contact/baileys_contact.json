@@ -9,7 +9,9 @@
   "phone",
   "col_break_1",
   "custom_name",
-  "company"
+  "company",
+  "section_assignment",
+  "assigned_team"
  ],
  "fields": [
   {
@@ -43,6 +45,19 @@
    "fieldtype": "Data",
    "label": "Company",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "section_assignment",
+   "fieldtype": "Section Break",
+   "label": "Team Assignment"
+  },
+  {
+   "fieldname": "assigned_team",
+   "fieldtype": "Link",
+   "label": "Assigned Team",
+   "options": "HD Team",
+   "in_list_view": 1,
+   "description": "Restrict this chat to members of this team. Leave blank for all agents."
   }
  ],
  "links": [],

@@ -15,9 +15,13 @@
         <div class="truncate text-sm font-semibold text-ink-gray-9">
           {{ displayName || jid.split("@")[0] }}
         </div>
-        <div v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</div>
-        <div v-else-if="phoneDisplay" class="text-[11px] text-ink-gray-5">
-          Connected: {{ phoneDisplay }}
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</span>
+          <span v-else-if="phoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ phoneDisplay }}</span>
+          <span
+            v-if="assignedTeam"
+            class="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+          >{{ assignedTeam }}</span>
         </div>
       </div>
       <!-- Edit contact button -->
@@ -58,6 +62,16 @@
               @keydown.enter="saveContact"
               @keydown.esc="editingContact = false"
             />
+          </div>
+          <div>
+            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Assigned Team</label>
+            <select
+              v-model="editTeam"
+              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+            >
+              <option value="">— All agents —</option>
+              <option v-for="t in (teamsResource.data || [])" :key="t.name" :value="t.name">{{ t.name }}</option>
+            </select>
           </div>
         </div>
         <div class="flex gap-1.5 pb-0.5">
@@ -142,10 +156,11 @@ const props = defineProps<{
   jid: string | null;
   displayName: string;
   company?: string;
+  assignedTeam?: string;
 }>();
 
 const emit = defineEmits<{
-  (e: "contactSaved", data: { custom_name: string; company: string }): void;
+  (e: "contactSaved", data: { custom_name: string; company: string; assigned_team: string }): void;
 }>();
 
 const { $socket } = globalStore();
@@ -155,6 +170,7 @@ const replyingTo = ref<Record<string, any> | null>(null);
 const editingContact = ref(false);
 const editName = ref("");
 const editCompany = ref("");
+const editTeam = ref("");
 const savingContact = ref(false);
 
 const PAGE_SIZE = 40;
@@ -180,7 +196,7 @@ const sendReactionResource = createResource({
 
 const saveContactResource = createResource({
   url: "helpdesk.integrations.baileys.save_baileys_contact",
-  onSuccess(data: { custom_name: string; company: string }) {
+  onSuccess(data: { custom_name: string; company: string; assigned_team: string }) {
     savingContact.value = false;
     editingContact.value = false;
     emit("contactSaved", data);
@@ -190,6 +206,11 @@ const saveContactResource = createResource({
     savingContact.value = false;
     toast.error(e?.messages?.[0] || "Failed to save contact");
   },
+});
+
+const teamsResource = createResource({
+  url: "helpdesk.integrations.baileys.get_hd_teams",
+  auto: true,
 });
 
 function loadMore() {
@@ -210,6 +231,7 @@ function loadMore() {
 function openEdit() {
   editName.value = props.displayName || "";
   editCompany.value = props.company || "";
+  editTeam.value = props.assignedTeam || "";
   editingContact.value = true;
 }
 
@@ -220,6 +242,7 @@ function saveContact() {
     jid: props.jid,
     custom_name: editName.value.trim(),
     company: editCompany.value.trim(),
+    assigned_team: editTeam.value,
   });
 }
 
@@ -324,11 +347,13 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
+  loadMessages();
+  scrollToBottom();
 }
 
 function handleRealtimeMessage(data: { jid: string; is_incoming: boolean }) {
   if (data.jid === props.jid) {
-    messages.reload();
+    loadMessages();
     scrollToBottom();
     if (data.is_incoming) {
       localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());

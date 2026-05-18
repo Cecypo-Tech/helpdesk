@@ -2,7 +2,7 @@
   <div
     class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="selected ? 'bg-surface-gray-2' : ''"
-    @click="$emit('select', jid, displayName, company || '')"
+    @click="$emit('select', jid, displayName, company || '', assignedTeam || '')"
   >
     <!-- Avatar with type badge -->
     <div class="relative shrink-0">
@@ -25,7 +25,13 @@
         <span class="truncate text-sm font-semibold text-ink-gray-9">{{ displayName }}</span>
         <span class="shrink-0 text-[11px] text-ink-gray-5">{{ formattedTime }}</span>
       </div>
-      <div v-if="company" class="truncate text-[11px] text-ink-gray-4">{{ company }}</div>
+      <div class="flex items-center gap-1">
+        <span v-if="company" class="truncate text-[11px] text-ink-gray-4">{{ company }}</span>
+        <span
+          v-if="assignedTeam"
+          class="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+        >{{ assignedTeam }}</span>
+      </div>
       <div class="mt-0.5 flex items-center justify-between gap-1">
         <span class="truncate text-xs text-ink-gray-5">
           <span v-if="lastDirection === 'Outgoing'" class="text-ink-gray-4">✓✓ </span>
@@ -51,6 +57,7 @@ const props = defineProps<{
   jid: string;
   displayName: string;
   company?: string;
+  assignedTeam?: string;
   isGroup: boolean;
   lastMessage: string;
   lastMessageTime: string;
@@ -61,7 +68,7 @@ const props = defineProps<{
 }>();
 
 defineEmits<{
-  (e: "select", jid: string, displayName: string, company: string): void;
+  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string): void;
 }>();
 
 const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());

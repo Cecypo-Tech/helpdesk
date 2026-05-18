@@ -62,6 +62,7 @@
         :jid="conv.jid"
         :displayName="conv.display_name"
         :company="conv.company"
+        :assignedTeam="conv.assigned_team"
         :isGroup="conv.is_group"
         :lastMessage="conv.last_message"
         :lastMessageTime="conv.last_message_time"
@@ -69,7 +70,7 @@
         :contentType="conv.content_type"
         :hasUnread="isUnread(conv)"
         :selected="conv.jid === selectedJid"
-        @select="(jid, name, company) => $emit('select', jid, name, company)"
+        @select="(jid, name, company, team) => $emit('select', jid, name, company, team)"
       />
     </div>
   </div>
@@ -83,7 +84,7 @@ import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ selectedJid: string | null }>();
 const emit = defineEmits<{
-  (e: "select", jid: string, displayName: string, company: string): void;
+  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string): void;
 }>();
 
 const { $socket } = globalStore();
@@ -127,7 +128,7 @@ function startNewChat() {
   const jid = `${digits}@s.whatsapp.net`;
   showNewChat.value = false;
   newChatPhone.value = "";
-  emit("select", jid, `+${digits}`, "");
+  emit("select", jid, `+${digits}`, "", "");
 }
 
 function handleNewMessage() {
