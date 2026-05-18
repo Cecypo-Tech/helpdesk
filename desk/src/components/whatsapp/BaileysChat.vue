@@ -8,19 +8,73 @@
   </div>
 
   <div v-else class="flex flex-1 min-h-0 flex-col overflow-hidden">
+    <!-- Header -->
     <div class="flex items-center gap-3 border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-2.5">
       <WhatsAppIcon class="h-4 w-4 shrink-0 text-green-600" />
       <div class="min-w-0 flex-1">
         <div class="truncate text-sm font-semibold text-ink-gray-9">
           {{ displayName || jid.split("@")[0] }}
         </div>
-        <div v-if="phoneDisplay" class="text-[11px] text-ink-gray-5">
+        <div v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</div>
+        <div v-else-if="phoneDisplay" class="text-[11px] text-ink-gray-5">
           Connected: {{ phoneDisplay }}
+        </div>
+      </div>
+      <!-- Edit contact button -->
+      <button
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+        title="Edit contact name / company"
+        @click="openEdit"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Inline contact edit form -->
+    <div v-if="editingContact" class="border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-3">
+      <div class="flex items-end gap-2">
+        <div class="flex-1 space-y-1.5">
+          <div>
+            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Display Name</label>
+            <input
+              v-model="editName"
+              type="text"
+              placeholder="Contact name..."
+              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+              @keydown.enter="saveContact"
+              @keydown.esc="editingContact = false"
+            />
+          </div>
+          <div>
+            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Company</label>
+            <input
+              v-model="editCompany"
+              type="text"
+              placeholder="Company name..."
+              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+              @keydown.enter="saveContact"
+              @keydown.esc="editingContact = false"
+            />
+          </div>
+        </div>
+        <div class="flex gap-1.5 pb-0.5">
+          <button
+            class="rounded-lg bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            :disabled="savingContact"
+            @click="saveContact"
+          >Save</button>
+          <button
+            class="rounded-lg border border-outline-gray-3 px-2.5 py-1 text-xs text-ink-gray-6 hover:bg-surface-gray-2"
+            @click="editingContact = false"
+          >Cancel</button>
         </div>
       </div>
     </div>
 
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto bg-[#e5ddd5] px-5 py-4">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto bg-[#e5ddd5] dark:bg-surface-gray-2 px-5 py-4">
       <div v-if="messages.loading && !messages.data" class="flex justify-center py-10">
         <LoadingIndicator :scale="6" class="text-ink-gray-5" />
       </div>
@@ -29,7 +83,7 @@
         v-else-if="!messageList.length"
         class="flex flex-col items-center justify-center py-16 text-ink-gray-5"
       >
-        <WhatsAppIcon class="mb-3 h-10 w-10 text-ink-gray-4" />
+        <WhatsAppIcon class="mb-3 h-8 w-8 text-ink-gray-4" />
         <p class="text-sm">No messages yet</p>
       </div>
 
@@ -78,11 +132,21 @@ import BaileysReplyBox from "./BaileysReplyBox.vue";
 const props = defineProps<{
   jid: string | null;
   displayName: string;
+  company?: string;
+}>();
+
+const emit = defineEmits<{
+  (e: "contactSaved", data: { custom_name: string; company: string }): void;
 }>();
 
 const { $socket } = globalStore();
 const messagesContainer = ref<HTMLElement | null>(null);
 const replyingTo = ref<Record<string, any> | null>(null);
+
+const editingContact = ref(false);
+const editName = ref("");
+const editCompany = ref("");
+const savingContact = ref(false);
 
 const connectedPhone = createResource({
   url: "helpdesk.integrations.baileys.get_connected_phone",
@@ -100,6 +164,36 @@ const sendReactionResource = createResource({
     toast.error(e?.messages?.[0] || "Failed to send reaction");
   },
 });
+
+const saveContactResource = createResource({
+  url: "helpdesk.integrations.baileys.save_baileys_contact",
+  onSuccess(data: { custom_name: string; company: string }) {
+    savingContact.value = false;
+    editingContact.value = false;
+    emit("contactSaved", data);
+    toast.success("Contact saved");
+  },
+  onError(e: any) {
+    savingContact.value = false;
+    toast.error(e?.messages?.[0] || "Failed to save contact");
+  },
+});
+
+function openEdit() {
+  editName.value = props.displayName || "";
+  editCompany.value = props.company || "";
+  editingContact.value = true;
+}
+
+function saveContact() {
+  if (!props.jid || savingContact.value) return;
+  savingContact.value = true;
+  saveContactResource.submit({
+    jid: props.jid,
+    custom_name: editName.value.trim(),
+    company: editCompany.value.trim(),
+  });
+}
 
 function loadMessages() {
   if (props.jid) {

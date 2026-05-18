@@ -2,7 +2,7 @@
   <div
     class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="selected ? 'bg-surface-gray-2' : ''"
-    @click="$emit('select', jid, displayName)"
+    @click="$emit('select', jid, displayName, company || '')"
   >
     <!-- Avatar with type badge -->
     <div class="relative shrink-0">
@@ -25,6 +25,7 @@
         <span class="truncate text-sm font-semibold text-ink-gray-9">{{ displayName }}</span>
         <span class="shrink-0 text-[11px] text-ink-gray-5">{{ formattedTime }}</span>
       </div>
+      <div v-if="company" class="truncate text-[11px] text-ink-gray-4">{{ company }}</div>
       <div class="mt-0.5 flex items-center justify-between gap-1">
         <span class="truncate text-xs text-ink-gray-5">
           <span v-if="lastDirection === 'Outgoing'" class="text-ink-gray-4">✓✓ </span>
@@ -49,6 +50,7 @@ import LucideUsers from "~icons/lucide/users";
 const props = defineProps<{
   jid: string;
   displayName: string;
+  company?: string;
   isGroup: boolean;
   lastMessage: string;
   lastMessageTime: string;
@@ -59,7 +61,7 @@ const props = defineProps<{
 }>();
 
 defineEmits<{
-  (e: "select", jid: string, displayName: string): void;
+  (e: "select", jid: string, displayName: string, company: string): void;
 }>();
 
 const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());

@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
         v-else-if="!messageList.length"
         class="flex flex-col items-center justify-center py-16 text-ink-gray-5"
       >
-        <WhatsAppIcon class="mb-3 h-10 w-10 text-ink-gray-4" />
+        <WhatsAppIcon class="mb-3 h-8 w-8 text-ink-gray-4" />
         <p class="text-sm">No messages yet</p>
       </div>
 

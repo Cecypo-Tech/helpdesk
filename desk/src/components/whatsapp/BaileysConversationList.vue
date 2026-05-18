@@ -28,6 +28,7 @@
         :key="conv.jid"
         :jid="conv.jid"
         :displayName="conv.display_name"
+        :company="conv.company"
         :isGroup="conv.is_group"
         :lastMessage="conv.last_message"
         :lastMessageTime="conv.last_message_time"
@@ -35,7 +36,7 @@
         :contentType="conv.content_type"
         :hasUnread="isUnread(conv)"
         :selected="conv.jid === selectedJid"
-        @select="(jid, name) => $emit('select', jid, name)"
+        @select="(jid, name, company) => $emit('select', jid, name, company)"
       />
     </div>
   </div>
@@ -48,7 +49,7 @@ import { globalStore } from "@/stores/globalStore";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ selectedJid: string | null }>();
-const emit = defineEmits<{ (e: "select", jid: string, displayName: string): void }>();
+const emit = defineEmits<{ (e: "select", jid: string, displayName: string, company: string): void }>();
 
 const { $socket } = globalStore();
 const search = ref("");
@@ -89,4 +90,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-message", handleNewMessage);
 });
+
+defineExpose({ reload: () => conversations.reload() });
 </script>
