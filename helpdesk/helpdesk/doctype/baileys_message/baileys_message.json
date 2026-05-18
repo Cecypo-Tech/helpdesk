@@ -18,6 +18,7 @@
   "col_break_media",
   "media_url",
   "message_id",
+  "reply_to_message_id",
   "section_meta",
   "status",
   "profile_name"
@@ -82,7 +83,7 @@
    "fieldname": "content_type",
    "fieldtype": "Select",
    "label": "Content Type",
-   "options": "text\nimage\nvideo\naudio\ndocument"
+   "options": "text\nimage\nvideo\naudio\ndocument\nreaction"
   },
   {
    "fieldname": "col_break_media",
@@ -97,6 +98,12 @@
    "fieldname": "message_id",
    "fieldtype": "Data",
    "label": "Message ID"
+  },
+  {
+   "fieldname": "reply_to_message_id",
+   "fieldtype": "Data",
+   "label": "Reply To Message ID",
+   "read_only": 1
   },
   {
    "fieldname": "section_meta",
