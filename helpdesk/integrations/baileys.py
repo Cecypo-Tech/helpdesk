@@ -470,23 +470,21 @@ def get_ticket_baileys_info(ticket: str) -> dict:
 
 
 @frappe.whitelist()
-def mark_baileys_messages_read(ticket: str) -> int:
+def mark_baileys_messages_read(ticket: str = None, jid: str = None) -> int:
 	"""Mark unread incoming Baileys Messages as read, send read receipts to gateway."""
 	settings = _settings()
-	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+
+	if not jid and ticket:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
 	if not jid:
 		return 0
 
-	unread = frappe.get_all(
-		"Baileys Message",
-		filters={
-			"reference_doctype": "HD Ticket",
-			"reference_name": ticket,
-			"direction": "Incoming",
-			"status": ["not in", ["Read"]],
-		},
-		fields=["name", "message_id"],
-	)
+	filters: dict = {"jid": jid, "direction": "Incoming", "status": ["not in", ["Read"]]}
+	if ticket:
+		filters["reference_doctype"] = "HD Ticket"
+		filters["reference_name"] = ticket
+
+	unread = frappe.get_all("Baileys Message", filters=filters, fields=["name", "message_id"])
 
 	if not unread:
 		return 0
@@ -509,16 +507,16 @@ def mark_baileys_messages_read(ticket: str) -> int:
 	for row in unread:
 		frappe.db.set_value("Baileys Message", row.name, "status", "Read", update_modified=False)
 
-	# Clear HD Notifications
-	try:
-		for notif in frappe.get_all(
-			"HD Notification",
-			filters={"user_to": frappe.session.user, "reference_ticket": ticket, "notification_type": "WhatsApp", "read": 0},
-			pluck="name",
-		):
-			frappe.db.set_value("HD Notification", notif, "read", 1, update_modified=False)
-	except Exception:
-		pass
+	if ticket:
+		try:
+			for notif in frappe.get_all(
+				"HD Notification",
+				filters={"user_to": frappe.session.user, "reference_ticket": ticket, "notification_type": "WhatsApp", "read": 0},
+				pluck="name",
+			):
+				frappe.db.set_value("HD Notification", notif, "read", 1, update_modified=False)
+		except Exception:
+			pass
 
 	return len(unread)
 

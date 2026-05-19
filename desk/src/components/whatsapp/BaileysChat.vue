@@ -185,6 +185,10 @@ const messages = createResource({
   auto: false,
 });
 
+const markReadResource = createResource({
+  url: "helpdesk.integrations.baileys.mark_baileys_messages_read",
+});
+
 const sendReactionResource = createResource({
   url: "helpdesk.integrations.baileys.send_baileys_reaction",
   onError(e: any) {
@@ -247,6 +251,7 @@ function saveContact() {
 function loadMessages() {
   if (props.jid) {
     messages.submit({ jid: props.jid });
+    markReadResource.submit({ jid: props.jid });
     localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());
   }
 }
@@ -355,6 +360,11 @@ defineExpose({
   refresh() {
     loadMessages();
     scrollToBottom();
+  },
+  patchMessageStatus(messageId: string, status: string) {
+    const list: Record<string, any>[] = messages.data || [];
+    const msg = list.find((m) => m.message_id === messageId);
+    if (msg) msg.status = status;
   },
 });
 </script>
