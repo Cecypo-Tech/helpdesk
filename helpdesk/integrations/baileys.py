@@ -210,6 +210,59 @@ def webhook():
 	return {"status": "ok"}
 
 
+@frappe.whitelist(allow_guest=True)
+def status_webhook():
+	"""Receive delivery status updates (Sent→Delivered→Read) from the Baileys gateway."""
+	if not frappe.db.exists("DocType", "Baileys Gateway Settings"):
+		frappe.response["http_status_code"] = 503
+		return {"error": "not configured"}
+
+	settings = _settings()
+	if not settings.enabled:
+		return {"status": "disabled"}
+
+	api_key = frappe.get_request_header("X-API-Key") or frappe.get_request_header("x-api-key")
+	stored_key = settings.api_key or ""
+	if not stored_key or api_key != stored_key:
+		frappe.response["http_status_code"] = 401
+		return {"error": "Unauthorized"}
+
+	try:
+		payload = frappe.parse_json(frappe.request.data.decode("utf-8"))
+	except Exception:
+		frappe.response["http_status_code"] = 400
+		return {"error": "Invalid JSON"}
+
+	message_id = payload.get("messageId") or ""
+	raw_status = (payload.get("status") or "").lower()
+	status_map = {"sent": "Sent", "delivered": "Delivered", "read": "Read", "failed": "Failed"}
+	status = status_map.get(raw_status)
+
+	if not message_id or not status:
+		return {"status": "skipped", "reason": "missing messageId or status"}
+
+	msg = frappe.db.get_value(
+		"Baileys Message",
+		{"message_id": message_id},
+		["name", "jid", "reference_doctype", "reference_name"],
+		as_dict=True,
+	)
+	if not msg:
+		return {"status": "skipped", "reason": "message not found"}
+
+	frappe.set_user("Administrator")
+	frappe.db.set_value("Baileys Message", msg.name, "status", status, update_modified=False)
+	frappe.db.commit()
+
+	frappe.publish_realtime(
+		"helpdesk:baileys-status-update",
+		message={"message_id": message_id, "status": status, "jid": msg.jid},
+		after_commit=True,
+	)
+
+	return {"status": "ok"}
+
+
 # ── Agent send ────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()

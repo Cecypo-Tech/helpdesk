@@ -51,6 +51,20 @@
           <div class="mt-4 max-w-xs">
             <FormControl type="text" :label="__('Session Name')" v-model="settings.doc.session_name" />
           </div>
+          <div class="mt-4">
+            <div class="mb-1 text-xs font-medium text-ink-gray-6">
+              {{ __("Status Webhook URL") }}
+              <span class="ml-1 font-normal text-ink-gray-4">{{ __("— copy to your gateway config for delivery tick updates") }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <input
+                :value="statusWebhookUrl"
+                readonly
+                class="flex-1 rounded border border-outline-gray-3 bg-surface-gray-1 px-2 py-1.5 font-mono text-xs text-ink-gray-7 focus:outline-none"
+              />
+              <Button size="sm" :label="__('Copy')" @click="copyWebhookUrl" />
+            </div>
+          </div>
         </div>
 
         <hr />
@@ -157,6 +171,15 @@ const statusResource = createResource({
 function checkStatus() {
   statusResult.value = null;
   statusResource.fetch();
+}
+
+const statusWebhookUrl = computed(
+  () => `${window.location.origin}/api/method/helpdesk.integrations.baileys.status_webhook`
+);
+
+function copyWebhookUrl() {
+  navigator.clipboard.writeText(statusWebhookUrl.value);
+  toast.success(__("Copied!"));
 }
 
 const isDirty = computed(() => {

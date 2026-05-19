@@ -92,14 +92,22 @@ function handleBaileysMessage(data: { jid: string; is_incoming: boolean }) {
   }
 }
 
+function handleBaileysStatusUpdate(data: { message_id: string; status: string; jid: string }) {
+  if (data.jid === selectedJid.value) {
+    baileysChat.value?.patchMessageStatus(data.message_id, data.status);
+  }
+}
+
 onMounted(() => {
   document.addEventListener("mouseup", onDocumentMouseUp);
   $socket.on("helpdesk:baileys-message", handleBaileysMessage);
+  $socket.on("helpdesk:baileys-status-update", handleBaileysStatusUpdate);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onDocumentMouseUp);
   $socket.off("helpdesk:baileys-message", handleBaileysMessage);
+  $socket.off("helpdesk:baileys-status-update", handleBaileysStatusUpdate);
 });
 
 function onSelect(jid: string, displayName: string, company: string, team: string) {

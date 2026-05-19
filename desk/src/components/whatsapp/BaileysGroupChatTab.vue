@@ -149,16 +149,24 @@ function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
   }
 }
 
+function handleStatusUpdate(data: { message_id: string; status: string }) {
+  const list: Record<string, any>[] = messages.data || [];
+  const msg = list.find((m) => m.message_id === data.message_id);
+  if (msg) msg.status = data.status;
+}
+
 watch(messageList, () => { scrollToBottom(); });
 
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
+  $socket.on("helpdesk:baileys-status-update", handleStatusUpdate);
   scrollToBottom();
   markAsRead();
 });
 
 onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
+  $socket.off("helpdesk:baileys-status-update", handleStatusUpdate);
 });
 </script>
 
