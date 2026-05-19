@@ -763,41 +763,77 @@ def get_hd_teams() -> list[dict]:
 
 @frappe.whitelist()
 def search_baileys_contacts(query: str = "") -> list[dict]:
-	"""Search Baileys Contacts by name, phone, or company. Returns up to 20 matches."""
+	"""Search Baileys Contacts and standard Contacts by name/phone. Returns up to 30 matches."""
 	q = (query or "").strip()
-	filters = [["Baileys Contact", "jid", "not like", "%@broadcast"]]
+	like = f"%{q}%"
+
+	# 1. Baileys Contacts (have a known JID / chat history)
 	if q:
-		filters = [
-			["Baileys Contact", "jid", "not like", "%@broadcast"],
-			[
-				"Baileys Contact",
-				"custom_name" if not q.replace("+", "").replace(" ", "").isdigit() else "phone",
-				"like",
-				f"%{q}%",
-			],
-		]
-		# If query could match either name or phone, use OR via raw query
-		rows = frappe.db.sql(
+		baileys_rows = frappe.db.sql(
 			"""
 			SELECT jid, custom_name, phone, company
 			FROM `tabBaileys Contact`
-			WHERE jid NOT LIKE %s
+			WHERE jid NOT LIKE '%%@broadcast'
 			  AND (custom_name LIKE %s OR phone LIKE %s OR company LIKE %s)
 			ORDER BY custom_name ASC
-			LIMIT 20
+			LIMIT 30
 			""",
-			(f"%@broadcast", f"%{q}%", f"%{q}%", f"%{q}%"),
+			(like, like, like),
 			as_dict=True,
 		)
 	else:
-		rows = frappe.get_all(
+		baileys_rows = frappe.get_all(
 			"Baileys Contact",
 			filters=[["jid", "not like", "%@broadcast"]],
 			fields=["jid", "custom_name", "phone", "company"],
 			order_by="custom_name asc",
-			limit=20,
+			limit=30,
 		)
-	return rows
+
+	seen_phones: set[str] = {_normalize_phone(r.phone) for r in baileys_rows if r.phone}
+	result = list(baileys_rows)
+
+	# 2. Standard Frappe Contacts with a mobile number
+	if q:
+		frappe_rows = frappe.db.sql(
+			"""
+			SELECT c.full_name, c.mobile_no, c.company_name
+			FROM `tabContact` c
+			WHERE c.mobile_no IS NOT NULL AND c.mobile_no != ''
+			  AND (c.full_name LIKE %s OR c.mobile_no LIKE %s OR c.company_name LIKE %s)
+			ORDER BY c.full_name ASC
+			LIMIT 50
+			""",
+			(like, like, like),
+			as_dict=True,
+		)
+	else:
+		frappe_rows = frappe.db.sql(
+			"""
+			SELECT c.full_name, c.mobile_no, c.company_name
+			FROM `tabContact` c
+			WHERE c.mobile_no IS NOT NULL AND c.mobile_no != ''
+			ORDER BY c.full_name ASC
+			LIMIT 50
+			""",
+			as_dict=True,
+		)
+
+	for r in frappe_rows:
+		phone = _normalize_phone(r.mobile_no)
+		if not phone or phone in seen_phones:
+			continue
+		seen_phones.add(phone)
+		result.append({
+			"jid": f"{phone}@s.whatsapp.net",
+			"custom_name": r.full_name or "",
+			"phone": phone,
+			"company": r.company_name or "",
+		})
+		if len(result) >= 30:
+			break
+
+	return result
 
 
 @frappe.whitelist()
