@@ -762,6 +762,45 @@ def get_hd_teams() -> list[dict]:
 
 
 @frappe.whitelist()
+def search_baileys_contacts(query: str = "") -> list[dict]:
+	"""Search Baileys Contacts by name, phone, or company. Returns up to 20 matches."""
+	q = (query or "").strip()
+	filters = [["Baileys Contact", "jid", "not like", "%@broadcast"]]
+	if q:
+		filters = [
+			["Baileys Contact", "jid", "not like", "%@broadcast"],
+			[
+				"Baileys Contact",
+				"custom_name" if not q.replace("+", "").replace(" ", "").isdigit() else "phone",
+				"like",
+				f"%{q}%",
+			],
+		]
+		# If query could match either name or phone, use OR via raw query
+		rows = frappe.db.sql(
+			"""
+			SELECT jid, custom_name, phone, company
+			FROM `tabBaileys Contact`
+			WHERE jid NOT LIKE %s
+			  AND (custom_name LIKE %s OR phone LIKE %s OR company LIKE %s)
+			ORDER BY custom_name ASC
+			LIMIT 20
+			""",
+			(f"%@broadcast", f"%{q}%", f"%{q}%", f"%{q}%"),
+			as_dict=True,
+		)
+	else:
+		rows = frappe.get_all(
+			"Baileys Contact",
+			filters=[["jid", "not like", "%@broadcast"]],
+			fields=["jid", "custom_name", "phone", "company"],
+			order_by="custom_name asc",
+			limit=20,
+		)
+	return rows
+
+
+@frappe.whitelist()
 def check_baileys_number(phone: str) -> dict:
 	"""Normalise a phone number to a JID and check if it is registered on WhatsApp."""
 	phone = _normalize_phone(phone)

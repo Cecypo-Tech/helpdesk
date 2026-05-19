@@ -13,28 +13,62 @@
       </button>
     </div>
 
-    <!-- New chat input -->
+    <!-- New chat panel -->
     <div v-if="showNewChat" class="border-b border-outline-gray-2 bg-surface-white px-3 py-2.5">
-      <div class="text-[11px] font-medium text-ink-gray-5 mb-1.5">Start new chat (phone number)</div>
-      <div class="flex gap-1.5">
-        <input
-          v-model="newChatPhone"
-          type="tel"
-          placeholder="+254712345678"
-          class="flex-1 rounded border border-outline-gray-3 px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
-          @keydown.enter="startNewChat"
-          @keydown.esc="showNewChat = false; newChatPhone = ''"
-        />
-        <button
-          class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700"
-          @click="startNewChat"
-        >Go</button>
-        <button
-          class="rounded border border-outline-gray-3 px-2 py-1 text-xs text-ink-gray-6 hover:bg-surface-gray-2"
-          @click="showNewChat = false; newChatPhone = ''"
-        >✕</button>
+      <div class="mb-1.5 flex items-center justify-between">
+        <span class="text-[11px] font-medium text-ink-gray-5">New chat</span>
+        <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="closeNewChat">✕</button>
       </div>
+      <input
+        ref="newChatInputRef"
+        v-model="newChatQuery"
+        type="text"
+        placeholder="Search contacts or enter phone..."
+        class="w-full rounded border border-outline-gray-3 px-2 py-1.5 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+        @keydown.esc="closeNewChat"
+        @keydown.enter="onNewChatEnter"
+      />
       <div v-if="newChatError" class="mt-1 text-[11px] text-red-500">{{ newChatError }}</div>
+
+      <!-- Contact suggestions -->
+      <div v-if="contactSuggestions.length || phoneOption" class="mt-1.5 max-h-48 overflow-y-auto rounded border border-outline-gray-2 bg-surface-white shadow-sm">
+        <!-- Existing contacts -->
+        <button
+          v-for="c in contactSuggestions"
+          :key="c.jid"
+          class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-1"
+          @click="selectContact(c)"
+        >
+          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-[10px] font-bold text-green-700">
+            {{ (c.custom_name || c.phone || "?")[0].toUpperCase() }}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-xs font-medium text-ink-gray-8">{{ c.custom_name || c.phone }}</div>
+            <div v-if="c.company" class="truncate text-[10px] text-ink-gray-5">{{ c.company }}</div>
+            <div class="truncate text-[10px] text-ink-gray-4">{{ c.phone }}</div>
+          </div>
+        </button>
+
+        <!-- Raw phone number fallback -->
+        <button
+          v-if="phoneOption"
+          class="flex w-full items-center gap-2 border-t border-outline-gray-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-1"
+          @click="startWithPhone(phoneOption)"
+        >
+          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-[10px] text-ink-gray-5">
+            #
+          </div>
+          <div class="text-xs text-ink-gray-6">Start chat with <span class="font-medium text-ink-gray-8">+{{ phoneOption }}</span></div>
+        </button>
+      </div>
+
+      <!-- Empty state when typing but no matches -->
+      <div
+        v-else-if="newChatQuery.trim() && !contactsResource.loading"
+        class="mt-1.5 rounded border border-outline-gray-2 bg-surface-white px-3 py-2 text-[11px] text-ink-gray-5"
+      >
+        No contacts found. Enter a valid phone number to start a new chat.
+      </div>
     </div>
 
     <div class="border-b border-outline-gray-2 px-3 py-2">
@@ -78,7 +112,7 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ selectedJid: string | null }>();
@@ -92,9 +126,67 @@ const lastReadMap = ref<Record<string, number>>({});
 watch(() => props.selectedJid, (jid) => {
   if (jid) lastReadMap.value[jid] = Date.now();
 });
+
+// ── New chat ────────────────────────────────────────────────────────────────
+
 const showNewChat = ref(false);
-const newChatPhone = ref("");
+const newChatQuery = ref("");
 const newChatError = ref("");
+const newChatInputRef = ref<HTMLInputElement | null>(null);
+
+const contactsResource = createResource({
+  url: "helpdesk.integrations.baileys.search_baileys_contacts",
+  auto: false,
+});
+
+watch(newChatQuery, (q) => {
+  newChatError.value = "";
+  contactsResource.submit({ query: q.trim() });
+});
+
+watch(showNewChat, (open) => {
+  if (open) {
+    newChatQuery.value = "";
+    newChatError.value = "";
+    contactsResource.submit({ query: "" });
+    nextTick(() => newChatInputRef.value?.focus());
+  }
+});
+
+const contactSuggestions = computed<any[]>(() => contactsResource.data || []);
+
+const phoneOption = computed<string | null>(() => {
+  const raw = newChatQuery.value.trim().replace(/[\s\-()]/g, "").replace(/^\+/, "");
+  return /^\d{7,15}$/.test(raw) ? raw : null;
+});
+
+function closeNewChat() {
+  showNewChat.value = false;
+  newChatQuery.value = "";
+  newChatError.value = "";
+}
+
+function selectContact(c: { jid: string; custom_name: string; phone: string; company: string }) {
+  closeNewChat();
+  emit("select", c.jid, c.custom_name || c.phone, c.company || "", "");
+}
+
+function startWithPhone(digits: string) {
+  closeNewChat();
+  emit("select", `${digits}@s.whatsapp.net`, `+${digits}`, "", "");
+}
+
+function onNewChatEnter() {
+  if (contactSuggestions.value.length === 1) {
+    selectContact(contactSuggestions.value[0]);
+  } else if (phoneOption.value) {
+    startWithPhone(phoneOption.value);
+  } else {
+    newChatError.value = "Select a contact or enter a valid phone number";
+  }
+}
+
+// ── Conversations list ──────────────────────────────────────────────────────
 
 const conversations = createResource({
   url: "helpdesk.integrations.baileys.get_baileys_conversations",
@@ -121,19 +213,6 @@ function isUnread(conv: any): boolean {
   const stored = localStorage.getItem(`baileys_last_read_${conv.jid}`);
   if (!stored) return true;
   return msgTime > new Date(stored).getTime();
-}
-
-function startNewChat() {
-  newChatError.value = "";
-  const raw = newChatPhone.value.trim().replace(/[\s\-()]/g, "");
-  if (!raw) { newChatError.value = "Enter a phone number"; return; }
-  // Normalise: strip leading +
-  const digits = raw.replace(/^\+/, "");
-  if (!/^\d{7,15}$/.test(digits)) { newChatError.value = "Invalid phone number"; return; }
-  const jid = `${digits}@s.whatsapp.net`;
-  showNewChat.value = false;
-  newChatPhone.value = "";
-  emit("select", jid, `+${digits}`, "", "");
 }
 
 defineExpose({ reload: () => conversations.reload() });
