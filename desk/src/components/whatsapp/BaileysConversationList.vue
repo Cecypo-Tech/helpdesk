@@ -14,7 +14,7 @@
     </div>
 
     <!-- New chat panel -->
-    <div v-if="showNewChat" class="border-b border-outline-gray-2 bg-surface-white px-3 py-2.5">
+    <div v-if="showNewChat" class="border-b border-outline-gray-2 bg-surface-gray-1 px-3 py-2.5">
       <div class="mb-1.5 flex items-center justify-between">
         <span class="text-[11px] font-medium text-ink-gray-5">New chat</span>
         <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="closeNewChat">✕</button>
@@ -24,22 +24,22 @@
         v-model="newChatQuery"
         type="text"
         placeholder="Search contacts or enter phone..."
-        class="w-full rounded border border-outline-gray-3 px-2 py-1.5 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+        class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1.5 text-xs text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none"
         @keydown.esc="closeNewChat"
         @keydown.enter="onNewChatEnter"
       />
       <div v-if="newChatError" class="mt-1 text-[11px] text-red-500">{{ newChatError }}</div>
 
       <!-- Contact suggestions -->
-      <div v-if="contactSuggestions.length || phoneOption" class="mt-1.5 max-h-48 overflow-y-auto rounded border border-outline-gray-2 bg-surface-white shadow-sm">
+      <div v-if="contactSuggestions.length || phoneOption" class="mt-1.5 max-h-48 overflow-y-auto rounded border border-outline-gray-2 bg-surface-gray-1 shadow-sm">
         <!-- Existing contacts -->
         <button
           v-for="c in contactSuggestions"
           :key="c.jid"
-          class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-1"
+          class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-2"
           @click="selectContact(c)"
         >
-          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-[10px] font-bold text-green-700">
+          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-gray-3 text-[10px] font-bold text-ink-gray-7">
             {{ (c.custom_name || c.phone || "?")[0].toUpperCase() }}
           </div>
           <div class="min-w-0 flex-1">
@@ -52,10 +52,10 @@
         <!-- Raw phone number fallback -->
         <button
           v-if="phoneOption"
-          class="flex w-full items-center gap-2 border-t border-outline-gray-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-1"
+          class="flex w-full items-center gap-2 border-t border-outline-gray-2 px-2.5 py-1.5 text-left hover:bg-surface-gray-2"
           @click="startWithPhone(phoneOption)"
         >
-          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-[10px] text-ink-gray-5">
+          <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-gray-3 text-[10px] text-ink-gray-5">
             #
           </div>
           <div class="text-xs text-ink-gray-6">Start chat with <span class="font-medium text-ink-gray-8">+{{ phoneOption }}</span></div>
@@ -65,7 +65,7 @@
       <!-- Empty state when typing but no matches -->
       <div
         v-else-if="newChatQuery.trim() && !contactsResource.loading"
-        class="mt-1.5 rounded border border-outline-gray-2 bg-surface-white px-3 py-2 text-[11px] text-ink-gray-5"
+        class="mt-1.5 rounded border border-outline-gray-2 bg-surface-gray-1 px-3 py-2 text-[11px] text-ink-gray-5"
       >
         No contacts found. Enter a valid phone number to start a new chat.
       </div>
