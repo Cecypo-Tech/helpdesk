@@ -42,14 +42,13 @@
    "fieldname": "custom_related_to",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Related to",
-   "reqd": 1
+   "label": "Related to"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-14 12:54:11.044508",
+ "modified": "2026-05-19 00:00:00.000000",
  "modified_by": "kushal@cecypo.tech",
  "module": "Helpdesk",
  "name": "HD Ticket Template",
