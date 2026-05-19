@@ -553,32 +553,51 @@ def get_connected_phone() -> dict:
 def get_baileys_conversations() -> list[dict]:
 	"""Return one entry per unique JID sorted by most-recent message first."""
 	from frappe.query_builder import DocType
+	from frappe.query_builder.functions import Max
 
 	BM = DocType("Baileys Message")
-	rows = (
+
+	latest = (
 		frappe.qb.from_(BM)
-		.select(BM.jid, BM.sender_name, BM.message, BM.content_type, BM.direction, BM.creation)
-		.orderby(BM.creation, order=frappe.qb.desc)
+		.select(BM.jid, Max(BM.creation).as_("latest_creation"))
+		.where(~BM.jid.like("%@broadcast"))
+		.groupby(BM.jid)
+	)
+
+	BM2 = DocType("Baileys Message")
+	rows = (
+		frappe.qb.from_(BM2)
+		.join(latest).on(
+			(BM2.jid == latest.jid) & (BM2.creation == latest.latest_creation)
+		)
+		.select(
+			BM2.jid, BM2.sender_name, BM2.message,
+			BM2.content_type, BM2.direction, BM2.creation,
+		)
+		.orderby(BM2.creation, order=frappe.qb.desc)
 		.run(as_dict=True)
 	)
 
-	seen: dict[str, dict] = {}
+	seen: set[str] = set()
+	deduped = []
 	for r in rows:
-		jid_val = r.get("jid") or ""
-		if jid_val and jid_val not in seen and not jid_val.endswith("@broadcast"):
-			seen[jid_val] = r
+		if r.jid and r.jid not in seen:
+			seen.add(r.jid)
+			deduped.append(r)
 
 	settings = _settings()
 	group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
 
-	# Bulk-load custom contact overrides
-	jids = list(seen.keys())
+	jids = [r.jid for r in deduped]
 	contacts: dict[str, dict] = {}
 	if jids and frappe.db.exists("DocType", "Baileys Contact"):
-		for c in frappe.get_all("Baileys Contact", filters={"jid": ["in", jids]}, fields=["jid", "custom_name", "company", "assigned_team"]):
+		for c in frappe.get_all(
+			"Baileys Contact",
+			filters={"jid": ["in", jids]},
+			fields=["jid", "custom_name", "company", "assigned_team"],
+		):
 			contacts[c.jid] = c
 
-	# Team-based access control
 	restrict = settings.get("restrict_chats_by_team")
 	user_teams: set[str] = set()
 	user_has_any_team = False
@@ -588,12 +607,12 @@ def get_baileys_conversations() -> list[dict]:
 		user_has_any_team = bool(user_teams)
 
 	result = []
-	for jid, r in seen.items():
+	for r in deduped:
+		jid = r.jid
 		is_grp = _is_group(jid)
 		contact = contacts.get(jid, {})
 		assigned_team = contact.get("assigned_team") or ""
 
-		# Access control: skip chats this user's team is not assigned to
 		if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
 			continue
 
