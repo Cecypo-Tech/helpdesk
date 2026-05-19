@@ -110,6 +110,31 @@ def _group_label(jid: str, settings) -> str:
 	return jid
 
 
+def _upsert_contact_name(jid: str, sender_name: str) -> None:
+	"""Silently record sender_name in Baileys Contact if no custom override exists."""
+	if not jid or not sender_name or _is_group(jid):
+		return
+	try:
+		if frappe.db.exists("Baileys Contact", {"jid": jid}):
+			existing = frappe.db.get_value("Baileys Contact", {"jid": jid}, "custom_name")
+			if existing:
+				return
+			frappe.db.set_value(
+				"Baileys Contact", {"jid": jid}, "custom_name", sender_name, update_modified=False
+			)
+		else:
+			frappe.get_doc({
+				"doctype": "Baileys Contact",
+				"jid": jid,
+				"phone": _phone_from_jid(jid),
+				"custom_name": sender_name,
+				"company": "",
+				"assigned_team": "",
+			}).insert(ignore_permissions=True)
+	except Exception:
+		pass
+
+
 # ── Webhook ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True)
@@ -177,8 +202,10 @@ def webhook():
 		"reference_name": "",
 	}).insert(ignore_permissions=True)
 
+	_upsert_contact_name(jid, sender_name)
 	_publish_baileys_event(jid, is_incoming=True)
-	_notify_agents_baileys(jid, message, sender_name)
+	if content_type != "reaction":
+		_notify_agents_baileys(jid, message, sender_name)
 
 	return {"status": "ok"}
 
