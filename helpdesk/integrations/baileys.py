@@ -53,10 +53,10 @@ def _publish_event(ticket_name: str, is_incoming: bool) -> None:
 
 
 def _publish_baileys_event(jid: str, is_incoming: bool) -> None:
-	frappe.db.commit()
 	frappe.publish_realtime(
 		"helpdesk:baileys-message",
 		message={"jid": jid, "is_incoming": is_incoming},
+		after_commit=True,
 	)
 
 
