@@ -837,6 +837,198 @@ def search_baileys_contacts(query: str = "") -> list[dict]:
 
 
 @frappe.whitelist()
+def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
+	"""Return WhatsApp analytics for the given date range."""
+	from collections import defaultdict
+	from frappe.utils import add_days, today
+
+	if not from_date:
+		from_date = add_days(today(), -30)
+	if not to_date:
+		to_date = today()
+
+	from_dt = f"{from_date} 00:00:00"
+	to_dt = f"{to_date} 23:59:59"
+
+	# Summary counts
+	summary = frappe.db.sql(
+		"""
+		SELECT
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing,
+			COUNT(DISTINCT jid) as conversations
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %s AND %s
+		  AND content_type != 'reaction'
+		""",
+		(from_dt, to_dt),
+		as_dict=True,
+	)[0]
+
+	# Messages per day
+	daily = frappe.db.sql(
+		"""
+		SELECT
+			DATE(creation) as date,
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %s AND %s
+		  AND content_type != 'reaction'
+		GROUP BY DATE(creation)
+		ORDER BY date ASC
+		""",
+		(from_dt, to_dt),
+		as_dict=True,
+	)
+
+	# Messages by hour of day
+	hourly = frappe.db.sql(
+		"""
+		SELECT HOUR(creation) as hour, COUNT(*) as total
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %s AND %s
+		  AND content_type != 'reaction'
+		GROUP BY HOUR(creation)
+		ORDER BY hour ASC
+		""",
+		(from_dt, to_dt),
+		as_dict=True,
+	)
+	hourly_map = {r.hour: r.total for r in hourly}
+	hourly_full = [{"hour": h, "total": hourly_map.get(h, 0)} for h in range(24)]
+
+	# Top active contacts/groups
+	top_raw = frappe.db.sql(
+		"""
+		SELECT
+			jid,
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing,
+			MAX(sender_name) as sender_name
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %s AND %s
+		  AND jid NOT LIKE '%%@broadcast'
+		  AND content_type != 'reaction'
+		GROUP BY jid
+		ORDER BY total DESC
+		LIMIT 15
+		""",
+		(from_dt, to_dt),
+		as_dict=True,
+	)
+
+	jids = [r.jid for r in top_raw]
+	contacts: dict = {}
+	if jids and frappe.db.exists("DocType", "Baileys Contact"):
+		for c in frappe.get_all(
+			"Baileys Contact",
+			filters={"jid": ["in", jids]},
+			fields=["jid", "custom_name", "company"],
+		):
+			contacts[c.jid] = c
+
+	settings = _settings()
+	group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
+
+	top_contacts = []
+	for r in top_raw:
+		contact = contacts.get(r.jid, {})
+		is_grp = _is_group(r.jid)
+		display_name = (
+			contact.get("custom_name")
+			or (group_names.get(r.jid) if is_grp else None)
+			or r.get("sender_name")
+			or r.jid.split("@")[0]
+		)
+		top_contacts.append({
+			"jid": r.jid,
+			"display_name": display_name,
+			"company": contact.get("company") or "",
+			"is_group": is_grp,
+			"total": r.total,
+			"incoming": r.incoming or 0,
+			"outgoing": r.outgoing or 0,
+		})
+
+	# Agent response times
+	# For each outgoing message, find the most recent incoming before it (same JID, within 24h)
+	raw_replies = frappe.db.sql(
+		"""
+		SELECT
+			bm_out.owner AS agent_user,
+			bm_out.sender_name AS agent_name,
+			TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) AS response_minutes
+		FROM `tabBaileys Message` bm_out
+		INNER JOIN `tabBaileys Message` bm_in ON (
+			bm_in.jid = bm_out.jid
+			AND bm_in.direction = 'Incoming'
+			AND bm_in.content_type != 'reaction'
+			AND bm_in.creation = (
+				SELECT MAX(b2.creation)
+				FROM `tabBaileys Message` b2
+				WHERE b2.jid = bm_out.jid
+				  AND b2.direction = 'Incoming'
+				  AND b2.content_type != 'reaction'
+				  AND b2.creation < bm_out.creation
+			)
+		)
+		WHERE bm_out.direction = 'Outgoing'
+		  AND bm_out.content_type NOT IN ('reaction')
+		  AND bm_out.creation BETWEEN %s AND %s
+		  AND TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) BETWEEN 0 AND 1440
+		""",
+		(from_dt, to_dt),
+		as_dict=True,
+	)
+
+	agent_map: dict = defaultdict(lambda: {"replies": 0, "total_minutes": 0, "lt5": 0, "lt30": 0, "lt120": 0, "gt120": 0})
+	agent_names: dict = {}
+	for r in raw_replies:
+		key = r.agent_user or r.agent_name or "Unknown"
+		agent_names[key] = r.agent_name or r.agent_user or "Unknown"
+		agent_map[key]["replies"] += 1
+		m = r.response_minutes or 0
+		agent_map[key]["total_minutes"] += m
+		if m < 5:
+			agent_map[key]["lt5"] += 1
+		elif m < 30:
+			agent_map[key]["lt30"] += 1
+		elif m < 120:
+			agent_map[key]["lt120"] += 1
+		else:
+			agent_map[key]["gt120"] += 1
+
+	agent_stats = sorted(
+		[
+			{
+				"agent_name": agent_names.get(k, k),
+				"replies": v["replies"],
+				"avg_minutes": round(v["total_minutes"] / v["replies"]) if v["replies"] else 0,
+				"lt5": v["lt5"],
+				"lt30": v["lt30"],
+				"lt120": v["lt120"],
+				"gt120": v["gt120"],
+			}
+			for k, v in agent_map.items()
+		],
+		key=lambda x: x["replies"],
+		reverse=True,
+	)
+
+	return {
+		"summary": {k: (int(v) if v is not None else 0) for k, v in summary.items()},
+		"daily": [dict(r) for r in daily],
+		"hourly": hourly_full,
+		"top_contacts": top_contacts,
+		"agent_stats": agent_stats,
+	}
+
+
+@frappe.whitelist()
 def check_baileys_number(phone: str) -> dict:
 	"""Normalise a phone number to a JID and check if it is registered on WhatsApp."""
 	phone = _normalize_phone(phone)
