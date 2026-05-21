@@ -15,9 +15,23 @@
         <div class="truncate text-sm font-semibold text-ink-gray-9">
           {{ displayName || jid.split("@")[0] }}
         </div>
+        <!-- Phone number row — DM chats only -->
+        <div v-if="!isGroup" class="flex items-center gap-1.5">
+          <span v-if="contactPhone" class="text-[11px] font-medium text-ink-gray-6">{{ contactPhone }}</span>
+          <button
+            v-if="contactPhone"
+            class="text-ink-gray-3 hover:text-ink-gray-6"
+            title="Copy phone"
+            @click.stop="copyContactPhone"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+          <span v-else class="text-[10px] italic text-ink-gray-3">no phone — sync to resolve</span>
+        </div>
         <div class="flex flex-wrap items-center gap-1.5">
           <span v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</span>
-          <span v-if="contactPhone" class="text-[11px] text-ink-gray-5">{{ contactPhone }}</span>
           <span
             v-if="assignedTeam"
             class="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300"
@@ -264,6 +278,12 @@ function memberColor(jid: string) {
 
 function copyPhone(phone: string) {
   navigator.clipboard.writeText(`+${phone}`).then(() => toast.success(`+${phone} copied`));
+}
+
+function copyContactPhone() {
+  if (contactPhone.value) {
+    navigator.clipboard.writeText(contactPhone.value).then(() => toast.success(`${contactPhone.value} copied`));
+  }
 }
 
 // Reset members panel when switching conversations
