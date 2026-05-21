@@ -753,12 +753,18 @@ def get_baileys_conversations() -> list[dict]:
 		if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
 			continue
 
-		display_name = (
-			contact.get("custom_name")
-			or (group_names.get(jid) if is_grp else None)
-			or r.get("sender_name")
-			or jid.split("@")[0]
-		)
+		if is_grp:
+			display_name = (
+				contact.get("custom_name")
+				or group_names.get(jid)
+				or f"Group {jid.split('@')[0][-10:]}"
+			)
+		else:
+			display_name = (
+				contact.get("custom_name")
+				or r.get("sender_name")
+				or jid.split("@")[0]
+			)
 		result.append({
 			"jid": jid,
 			"display_name": display_name or jid,
@@ -767,6 +773,7 @@ def get_baileys_conversations() -> list[dict]:
 			"phone": contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
 			"is_group": is_grp,
 			"last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
+			"last_sender_name": r.get("sender_name") or "" if is_grp else "",
 			"last_message_time": str(r["creation"]),
 			"last_direction": r.get("direction", "Incoming"),
 			"content_type": r.get("content_type", "text"),
@@ -899,6 +906,53 @@ def sync_baileys_contacts() -> dict:
 
 	frappe.db.commit()
 	return {"updated": updated, "created": created, "total": len(contacts)}
+
+
+@frappe.whitelist()
+def sync_baileys_groups() -> dict:
+	"""Pull group subjects from the gateway and store them as Baileys Contact custom_name entries."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		frappe.throw(_("Gateway not configured or disabled"))
+
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/groups",
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=15,
+		)
+		resp.raise_for_status()
+		groups = resp.json().get("groups", [])
+	except Exception as e:
+		frappe.throw(_("Failed to fetch groups from gateway: {0}").format(str(e)))
+
+	updated = created = 0
+	for g in groups:
+		jid = (g.get("jid") or "").strip()
+		name = (g.get("subject") or "").strip()
+		if not jid or not _is_group(jid) or not name:
+			continue
+		try:
+			if frappe.db.exists("Baileys Contact", {"jid": jid}):
+				existing_name = frappe.db.get_value("Baileys Contact", {"jid": jid}, "custom_name") or ""
+				if existing_name != name:
+					frappe.db.set_value("Baileys Contact", {"jid": jid}, "custom_name", name, update_modified=False)
+					updated += 1
+			else:
+				frappe.get_doc({
+					"doctype": "Baileys Contact",
+					"jid": jid,
+					"phone": "",
+					"custom_name": name,
+					"company": "",
+					"assigned_team": "",
+				}).insert(ignore_permissions=True)
+				created += 1
+		except Exception:
+			pass
+
+	frappe.db.commit()
+	return {"updated": updated, "created": created, "total": len(groups)}
 
 
 @frappe.whitelist()

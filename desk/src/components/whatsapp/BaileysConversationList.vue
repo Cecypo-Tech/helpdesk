@@ -129,6 +129,7 @@
         :phone="conv.phone"
         :isGroup="conv.is_group"
         :lastMessage="conv.last_message"
+        :lastSenderName="conv.last_sender_name"
         :lastMessageTime="conv.last_message_time"
         :lastDirection="conv.last_direction"
         :contentType="conv.content_type"
@@ -170,13 +171,25 @@ const syncingContacts = ref(false);
 const syncContactsResource = createResource({
   url: "helpdesk.integrations.baileys.sync_baileys_contacts",
   onSuccess(data: { updated: number; created: number; total: number }) {
-    syncingContacts.value = false;
-    toast.success(`Synced ${data.total} contacts (${data.updated} updated, ${data.created} new)`);
-    conversations.reload();
+    syncGroupsResource.submit({});
   },
   onError(e: any) {
     syncingContacts.value = false;
     toast.error(e?.messages?.[0] || "Contact sync failed");
+  },
+});
+
+const syncGroupsResource = createResource({
+  url: "helpdesk.integrations.baileys.sync_baileys_groups",
+  onSuccess(data: { updated: number; created: number; total: number }) {
+    syncingContacts.value = false;
+    toast.success(`Synced contacts & ${data.total} groups`);
+    conversations.reload();
+  },
+  onError(e: any) {
+    syncingContacts.value = false;
+    toast.error(e?.messages?.[0] || "Group sync failed");
+    conversations.reload();
   },
 });
 
