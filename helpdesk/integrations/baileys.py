@@ -330,6 +330,7 @@ def send_baileys_reply(
 	reply_to_message_id: str | None = None,
 	reply_to_text: str | None = None,
 	reply_to_from_me: bool = False,
+	mentioned_jids: str | None = None,
 ) -> dict:
 	"""Send a text (or media) reply via the Baileys gateway."""
 	settings = _settings()
@@ -362,6 +363,9 @@ def send_baileys_reply(
 		payload["replyToMessageId"] = reply_to_message_id
 		payload["replyToText"] = reply_to_text or ""
 		payload["replyToFromMe"] = bool(reply_to_from_me)
+	jids_list = frappe.parse_json(mentioned_jids) if mentioned_jids else []
+	if jids_list:
+		payload["mentionedJids"] = jids_list
 
 	try:
 		resp = _requests.post(
@@ -818,6 +822,25 @@ def get_baileys_contact(jid: str) -> dict:
 def get_hd_teams() -> list[dict]:
 	"""Return all HD Teams for the team assignment dropdown."""
 	return frappe.get_all("HD Team", fields=["name"], order_by="name asc")
+
+
+@frappe.whitelist()
+def get_group_participants(jid: str) -> list[dict]:
+	"""Return participants for a WhatsApp group JID with resolved phone numbers."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		frappe.throw(_("Gateway not configured or disabled"))
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/groupParticipants",
+			params={"jid": jid},
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=10,
+		)
+		resp.raise_for_status()
+		return resp.json().get("participants", [])
+	except Exception as e:
+		frappe.throw(_("Failed to fetch group participants: {0}").format(str(e)))
 
 
 @frappe.whitelist()

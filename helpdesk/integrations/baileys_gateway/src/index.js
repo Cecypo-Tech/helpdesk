@@ -206,9 +206,37 @@ app.get("/contacts", auth, (_, res) => {
 	res.json({ contacts, lidCount: Object.keys(lidToPhone).length });
 });
 
+// Returns participants for a group JID, with resolved phone numbers
+app.get("/groupParticipants", auth, async (req, res) => {
+	if (!isConnected) return res.status(503).json({ error: "Not connected" });
+	const { jid } = req.query;
+	if (!jid) return res.status(400).json({ error: "jid required" });
+	try {
+		const meta = await sock.groupMetadata(jid);
+		const participants = (meta.participants || []).map((p) => {
+			const id = p.id || "";
+			let phone = "", name = "";
+			if (id.endsWith("@s.whatsapp.net")) {
+				phone = id.split("@")[0].split(":")[0];
+				name = lidToName[id] || "";
+			} else if (id.endsWith("@lid")) {
+				phone = lidToPhone[id] || "";
+				name = lidToName[id] || "";
+			}
+			return {
+				jid: id,
+				phone,
+				name,
+				isAdmin: p.admin === "admin" || p.admin === "superadmin",
+			};
+		});
+		res.json({ groupName: meta.subject || "", participants });
+	} catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/send", auth, async (req, res) => {
 	if (!isConnected) return res.status(503).json({ error: "Not connected" });
-	const { jid, message, mediaUrl, contentType = "text", replyToMessageId, replyToText, replyToFromMe } = req.body;
+	const { jid, message, mediaUrl, contentType = "text", replyToMessageId, replyToText, replyToFromMe, mentionedJids } = req.body;
 	if (!jid || (!message && !mediaUrl)) return res.status(400).json({ error: "jid and message/mediaUrl required" });
 	try {
 		let content;
@@ -222,6 +250,9 @@ app.post("/send", auth, async (req, res) => {
 			content = { audio: { url: mediaUrl }, mimetype: "audio/mp4" };
 		} else {
 			content = { document: { url: mediaUrl }, fileName: message || "file" };
+		}
+		if (Array.isArray(mentionedJids) && mentionedJids.length) {
+			content.mentions = mentionedJids;
 		}
 		const options = {};
 		if (replyToMessageId) {

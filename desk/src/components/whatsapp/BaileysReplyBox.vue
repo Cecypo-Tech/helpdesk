@@ -94,6 +94,38 @@
       </div>
     </Teleport>
 
+    <!-- @mention picker -->
+    <Teleport to="body">
+      <div
+        v-if="showMentionPicker && filteredParticipants.length"
+        ref="mentionPickerRef"
+        class="fixed z-50 overflow-hidden rounded-xl border border-outline-gray-2 bg-surface-white shadow-xl"
+        :style="mentionPickerStyle"
+      >
+        <div v-if="participantsResource.loading" class="px-3 py-3 text-center text-xs text-ink-gray-4">
+          Loading members…
+        </div>
+        <div v-else class="max-h-52 overflow-y-auto">
+          <button
+            v-for="(p, i) in filteredParticipants"
+            :key="p.jid"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-gray-1"
+            :class="{ 'bg-surface-gray-1': i === mentionIndex }"
+            @mousedown.prevent="insertMention(p)"
+          >
+            <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-gray-3 text-[10px] font-bold text-ink-gray-7">
+              {{ (p.name || p.phone || "?")[0].toUpperCase() }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-xs font-medium text-ink-gray-8">{{ p.name || "+" + p.phone }}</div>
+              <div v-if="p.name && p.phone" class="text-[10px] text-ink-gray-4">+{{ p.phone }}</div>
+            </div>
+            <span v-if="p.isAdmin" class="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600">admin</span>
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
     <div class="flex items-end gap-2">
       <!-- Attach -->
       <button
@@ -132,11 +164,11 @@
         ref="textareaRef"
         v-model="text"
         :disabled="sending"
-        :placeholder="attachment ? 'Add a caption (optional)...' : 'Type a message...'"
+        :placeholder="attachment ? 'Add a caption (optional)...' : isGroup ? 'Type a message… use @ to mention' : 'Type a message...'"
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-gray-2 px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
-        @input="autoResize"
-        @keydown.enter.exact.prevent="send"
+        @input="onTextInput"
+        @keydown="onTextKeydown"
         @paste="onPaste"
       />
       <button
@@ -160,6 +192,13 @@
 import { createListResource, createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 
+interface Participant {
+  jid: string;
+  phone: string;
+  name: string;
+  isAdmin: boolean;
+}
+
 const props = defineProps<{
   ticketId: string;
   replyTo?: Record<string, any> | null;
@@ -178,6 +217,8 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const attachment = ref<File | null>(null);
 const attachmentPreview = ref<string>("");
+
+const isGroup = computed(() => props.jid?.endsWith("@g.us") ?? false);
 
 const contentType = computed(() => {
   if (!attachment.value) return "text";
@@ -306,12 +347,134 @@ function onDocClick(e: MouseEvent) {
   ) {
     showReplies.value = false;
   }
+  if (showMentionPicker.value && !mentionPickerRef.value?.contains(e.target as Node)) {
+    showMentionPicker.value = false;
+  }
 }
 
 onMounted(() => document.addEventListener("click", onDocClick));
 onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
 
 watch(showReplies, (v) => { if (!v) repliesSearch.value = ""; });
+
+// ── @mention picker ───────────────────────────────────────────────────────────
+const showMentionPicker = ref(false);
+const mentionQuery = ref("");
+const mentionAtPos = ref(0);
+const mentionIndex = ref(0);
+const mentionedJids = ref<string[]>([]);
+const mentionPickerRef = ref<HTMLElement | null>(null);
+const mentionPickerStyle = ref<Record<string, string>>({});
+
+const participantsResource = createResource({
+  url: "helpdesk.integrations.baileys.get_group_participants",
+  auto: false,
+});
+
+const participants = computed<Participant[]>(() => participantsResource.data || []);
+
+const filteredParticipants = computed(() => {
+  const q = mentionQuery.value.toLowerCase();
+  const list = participants.value;
+  if (!q) return list.slice(0, 20);
+  return list
+    .filter((p) =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.phone || "").includes(q)
+    )
+    .slice(0, 20);
+});
+
+function positionMentionPicker() {
+  if (!textareaRef.value) return;
+  const rect = textareaRef.value.getBoundingClientRect();
+  const pickerHeight = Math.min(filteredParticipants.value.length, 6) * 44 + 8;
+  mentionPickerStyle.value = {
+    bottom: `${window.innerHeight - rect.top + 4}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    maxWidth: "340px",
+  };
+}
+
+function detectMention() {
+  if (!isGroup.value) return;
+  const ta = textareaRef.value;
+  if (!ta) return;
+  const cursorPos = ta.selectionStart ?? 0;
+  const before = text.value.slice(0, cursorPos);
+  // Match an @ that isn't preceded by a non-space character (word boundary)
+  const match = before.match(/@([^@\s]*)$/);
+  if (match) {
+    if (!participantsResource.data && !participantsResource.loading && props.jid) {
+      participantsResource.submit({ jid: props.jid });
+    }
+    mentionQuery.value = match[1].toLowerCase();
+    mentionAtPos.value = before.lastIndexOf("@");
+    mentionIndex.value = 0;
+    showMentionPicker.value = true;
+    nextTick(positionMentionPicker);
+  } else {
+    showMentionPicker.value = false;
+  }
+}
+
+function insertMention(p: Participant) {
+  const ta = textareaRef.value;
+  if (!ta) return;
+  const cursorPos = ta.selectionStart ?? 0;
+  const displayName = p.name || (p.phone ? `+${p.phone}` : "Unknown");
+  const before = text.value.slice(0, mentionAtPos.value);
+  const after = text.value.slice(cursorPos);
+  const insert = `@${displayName} `;
+  text.value = before + insert + after;
+  if (!mentionedJids.value.includes(p.jid)) {
+    mentionedJids.value.push(p.jid);
+  }
+  showMentionPicker.value = false;
+  nextTick(() => {
+    const newPos = before.length + insert.length;
+    ta.selectionStart = ta.selectionEnd = newPos;
+    ta.focus();
+    autoResize();
+  });
+}
+
+// ── Input / keyboard handlers ─────────────────────────────────────────────────
+function onTextInput() {
+  autoResize();
+  detectMention();
+}
+
+function onTextKeydown(e: KeyboardEvent) {
+  // Intercept arrow/enter/esc when mention picker is open
+  if (showMentionPicker.value && filteredParticipants.value.length) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      mentionIndex.value = (mentionIndex.value + 1) % filteredParticipants.value.length;
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      mentionIndex.value = (mentionIndex.value - 1 + filteredParticipants.value.length) % filteredParticipants.value.length;
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      insertMention(filteredParticipants.value[mentionIndex.value]);
+      return;
+    }
+    if (e.key === "Escape") {
+      showMentionPicker.value = false;
+      return;
+    }
+  }
+  // Normal enter = send (no shift)
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+}
 
 // ── Send ──────────────────────────────────────────────────────────────────────
 const sendReply = createResource({
@@ -341,6 +504,7 @@ async function send() {
 
     text.value = "";
     clearAttachment();
+    mentionedJids.value = [];
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     sending.value = false;
     emit("sent");
@@ -359,11 +523,12 @@ async function send() {
     });
   } else {
     const msgText = text.value.trim();
-    // Capture reply context BEFORE emit("sent") clears replyingTo in parent
     const replyToId = props.replyTo?.message_id || "";
     const replyToText = props.replyTo?.message || "";
     const replyToFromMe = props.replyTo?.direction === "Outgoing";
+    const jidsToMention = [...mentionedJids.value];
     text.value = "";
+    mentionedJids.value = [];
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     sendReply.submit({
       ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
@@ -372,6 +537,7 @@ async function send() {
       reply_to_message_id: replyToId,
       reply_to_text: replyToText,
       reply_to_from_me: replyToFromMe,
+      ...(jidsToMention.length ? { mentioned_jids: JSON.stringify(jidsToMention) } : {}),
     });
   }
 }
