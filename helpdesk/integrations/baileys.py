@@ -904,6 +904,19 @@ def sync_baileys_contacts() -> dict:
 		except Exception:
 			pass
 
+	# Backfill phone for @s.whatsapp.net contacts that have an empty phone field —
+	# the phone is always derivable from the JID itself without calling the gateway.
+	ws_missing = frappe.get_all(
+		"Baileys Contact",
+		filters=[["jid", "like", "%@s.whatsapp.net"], ["phone", "in", ["", None]]],
+		fields=["name", "jid"],
+	)
+	for c in ws_missing:
+		phone = _normalize_phone(c.jid.split("@")[0])
+		if phone:
+			frappe.db.set_value("Baileys Contact", c.name, "phone", phone, update_modified=False)
+			updated += 1
+
 	frappe.db.commit()
 	return {"updated": updated, "created": created, "total": len(contacts)}
 

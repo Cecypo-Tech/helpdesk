@@ -24,6 +24,21 @@
           >{{ assignedTeam }}</span>
         </div>
       </div>
+      <!-- Members button (groups only) -->
+      <button
+        v-if="isGroup"
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+        :class="{ 'bg-surface-gray-2 text-ink-gray-8': showMembers }"
+        title="Group members"
+        @click="toggleMembers"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </button>
       <!-- Edit contact button -->
       <button
         class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
@@ -35,6 +50,48 @@
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
         </svg>
       </button>
+    </div>
+
+    <!-- Group members panel -->
+    <div v-if="showMembers && isGroup" class="border-b border-outline-gray-2 bg-surface-gray-1">
+      <div class="flex items-center justify-between px-4 py-2">
+        <span class="text-[11px] font-semibold text-ink-gray-6">
+          Members{{ participantsResource.data ? ` (${participantsResource.data.length})` : '' }}
+        </span>
+        <button class="text-[11px] text-ink-gray-4 hover:text-ink-gray-7" @click="showMembers = false">✕</button>
+      </div>
+      <div v-if="participantsResource.loading" class="px-4 py-3 text-center text-xs text-ink-gray-5">Loading…</div>
+      <div v-else-if="!participantsResource.data?.length" class="px-4 py-3 text-center text-xs text-ink-gray-5">No members found</div>
+      <div v-else class="max-h-52 overflow-y-auto divide-y divide-outline-gray-1">
+        <div
+          v-for="p in participantsResource.data"
+          :key="p.jid"
+          class="flex items-center gap-2.5 px-4 py-2"
+        >
+          <div
+            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+            :style="{ background: memberColor(p.jid) }"
+          >{{ (p.name || p.phone || '?')[0].toUpperCase() }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-xs font-medium text-ink-gray-8">
+              {{ p.name || (p.phone ? '+' + p.phone : p.jid.split('@')[0]) }}
+              <span v-if="p.isAdmin" class="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">admin</span>
+            </div>
+            <div v-if="p.phone" class="text-[11px] text-ink-gray-5">+{{ p.phone }}</div>
+            <div v-else class="text-[11px] text-ink-gray-4 italic">phone unknown — run sync</div>
+          </div>
+          <button
+            v-if="p.phone"
+            class="shrink-0 rounded p-1 text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+            title="Copy phone"
+            @click="copyPhone(p.phone)"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Inline contact edit form -->
@@ -177,6 +234,45 @@ const emit = defineEmits<{
 const messagesContainer = ref<HTMLElement | null>(null);
 const replyingTo = ref<Record<string, any> | null>(null);
 
+const isGroup = computed(() => !!props.jid?.endsWith("@g.us"));
+
+// ── Group members panel ───────────────────────────────────────────────────────
+const showMembers = ref(false);
+
+const participantsResource = createResource({
+  url: "helpdesk.integrations.baileys.get_group_participants",
+  auto: false,
+});
+
+function toggleMembers() {
+  if (!showMembers.value) {
+    showMembers.value = true;
+    if (!participantsResource.data && props.jid) {
+      participantsResource.submit({ jid: props.jid });
+    }
+  } else {
+    showMembers.value = false;
+  }
+}
+
+const MEMBER_COLORS = ["#128c7e", "#7e57c2", "#e67e22", "#c0392b", "#2980b9", "#27ae60", "#8e44ad"];
+function memberColor(jid: string) {
+  let hash = 0;
+  for (const ch of jid) hash = ((hash * 31) + ch.charCodeAt(0)) & 0x7fffffff;
+  return MEMBER_COLORS[hash % MEMBER_COLORS.length];
+}
+
+function copyPhone(phone: string) {
+  navigator.clipboard.writeText(`+${phone}`).then(() => toast.success(`+${phone} copied`));
+}
+
+// Reset members panel when switching conversations
+watch(() => props.jid, () => {
+  showMembers.value = false;
+  participantsResource.data = null;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 const editingContact = ref(false);
 const editName = ref("");
 const editPhone = ref("");
