@@ -53,10 +53,10 @@ def _publish_event(ticket_name: str, is_incoming: bool) -> None:
 
 
 def _publish_baileys_event(jid: str, is_incoming: bool) -> None:
+	frappe.db.commit()
 	frappe.publish_realtime(
 		"helpdesk:baileys-message",
 		message={"jid": jid, "is_incoming": is_incoming},
-		after_commit=True,
 	)
 
 
@@ -126,7 +126,7 @@ def _upsert_contact_name(jid: str, sender_name: str) -> None:
 			frappe.get_doc({
 				"doctype": "Baileys Contact",
 				"jid": jid,
-				"phone": _phone_from_jid(jid),
+				"phone": _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "",
 				"custom_name": sender_name,
 				"company": "",
 				"assigned_team": "",
@@ -752,7 +752,7 @@ def get_baileys_conversations() -> list[dict]:
 			"display_name": display_name or jid,
 			"company": contact.get("company") or "",
 			"assigned_team": assigned_team,
-			"phone": contact.get("phone") or (_phone_from_jid(jid) if not is_grp else ""),
+			"phone": contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
 			"is_group": is_grp,
 			"last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
 			"last_message_time": str(r["creation"]),
@@ -780,7 +780,7 @@ def save_baileys_contact(jid: str, custom_name: str = "", company: str = "", ass
 		frappe.get_doc({
 			"doctype": "Baileys Contact",
 			"jid": jid,
-			"phone": _phone_from_jid(jid) if not _is_group(jid) else "",
+			"phone": _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "",
 			"custom_name": custom_name,
 			"company": company,
 			"assigned_team": assigned_team,
