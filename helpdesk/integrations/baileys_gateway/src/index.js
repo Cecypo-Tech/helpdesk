@@ -25,28 +25,54 @@ let sock = null, qrString = null, isConnected = false;
 
 // ── Contact LID→phone resolution ──────────────────────────────────────────────
 // Maps @lid JIDs to phone numbers, populated from contacts.set / contacts.upsert.
-// WhatsApp uses @lid as an internal identifier; the phone lives in the @s.whatsapp.net JID.
 const lidToPhone = {};   // e.g. "177893317574803@lid" → "254712345678"
 const lidToName  = {};   // e.g. "177893317574803@lid" → "John Doe"
+let lastContactsSample = [];   // first 10 raw contacts from the most recent contacts.set, for /contacts/debug
+
+function normaliseJid(jid) {
+	// Strip device suffix (:N) that appears in multi-device JIDs e.g. 254712345678:3@s.whatsapp.net
+	return (jid || "").replace(/:\d+@/, "@");
+}
 
 function indexContacts(contacts) {
 	let mapped = 0;
+	// Keep a raw sample for the debug endpoint
+	lastContactsSample = contacts.slice(0, 10);
+
 	for (const c of contacts) {
-		const id  = c.id  || "";
-		const lid = c.lid || "";
-		const name = c.notify || c.name || c.verifiedName || "";
-		if (id.endsWith("@s.whatsapp.net") && lid) {
-			const phone = id.split("@")[0].split(":")[0];
-			lidToPhone[lid] = phone;
-			if (name) lidToName[lid] = name;
+		const rawId  = normaliseJid(c.id  || "");
+		const rawLid = normaliseJid(c.lid || "");
+		const name   = c.notify || c.name || c.verifiedName || "";
+
+		let phoneJid = "", lidJid = "";
+
+		if (rawId.endsWith("@s.whatsapp.net") && rawLid.endsWith("@lid")) {
+			// Normal case: id=phone-JID, lid=@lid
+			phoneJid = rawId; lidJid = rawLid;
+		} else if (rawId.endsWith("@lid") && rawLid.endsWith("@s.whatsapp.net")) {
+			// Reversed: id=@lid, lid=phone-JID (seen in some WA versions)
+			phoneJid = rawLid; lidJid = rawId;
+		} else if (rawId.endsWith("@s.whatsapp.net")) {
+			// No paired @lid — index phone JID directly
+			phoneJid = rawId;
+		} else if (rawId.endsWith("@lid")) {
+			// Only @lid, no phone mapping available
+			lidJid = rawId;
+		}
+
+		const phone = phoneJid ? phoneJid.split("@")[0] : "";
+
+		if (phone && lidJid) {
+			lidToPhone[lidJid] = phone;
+			if (name) lidToName[lidJid] = name;
 			mapped++;
 		}
-		// Also index @s.whatsapp.net contacts directly (name only)
-		if (id.endsWith("@s.whatsapp.net") && name) {
-			lidToName[id] = name;
-		}
+		if (phone && name) lidToName[phoneJid] = name;
+		if (!phone && lidJid && name) lidToName[lidJid] = name;
 	}
-	if (mapped > 0) logger.info({ mapped, total: Object.keys(lidToPhone).length }, "LID→phone map updated");
+	if (contacts.length > 0) {
+		logger.info({ mapped, total: Object.keys(lidToPhone).length, nameCount: Object.keys(lidToName).length, sampleKeys: Object.keys(contacts[0] || {}) }, "contacts indexed");
+	}
 }
 
 function resolvePhone(jid) {
@@ -206,6 +232,16 @@ app.get("/contacts", auth, (_, res) => {
 	res.json({ contacts, lidCount: Object.keys(lidToPhone).length });
 });
 
+// Debug: shows raw contact sample and current mapping state — helps diagnose empty lidToPhone
+app.get("/contacts/debug", auth, (_, res) => {
+	res.json({
+		lidCount: Object.keys(lidToPhone).length,
+		nameCount: Object.keys(lidToName).length,
+		sampleMappings: Object.entries(lidToPhone).slice(0, 5).map(([lid, phone]) => ({ lid, phone, name: lidToName[lid] || "" })),
+		rawContactSample: lastContactsSample,
+	});
+});
+
 // Returns participants for a group JID, with resolved phone numbers
 app.get("/groupParticipants", auth, async (req, res) => {
 	if (!isConnected) return res.status(503).json({ error: "Not connected" });
@@ -214,10 +250,10 @@ app.get("/groupParticipants", auth, async (req, res) => {
 	try {
 		const meta = await sock.groupMetadata(jid);
 		const participants = (meta.participants || []).map((p) => {
-			const id = p.id || "";
+			const id = normaliseJid(p.id || "");
 			let phone = "", name = "";
 			if (id.endsWith("@s.whatsapp.net")) {
-				phone = id.split("@")[0].split(":")[0];
+				phone = id.split("@")[0];
 				name = lidToName[id] || "";
 			} else if (id.endsWith("@lid")) {
 				phone = lidToPhone[id] || "";
