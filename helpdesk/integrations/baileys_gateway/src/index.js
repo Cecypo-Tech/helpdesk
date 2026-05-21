@@ -55,7 +55,7 @@ async function connectToWhatsApp() {
 		} else if (connection === "open") { isConnected = true; qrString = null; logger.info("Connected"); }
 	});
 	sock.ev.on("messages.upsert", async ({ messages, type }) => {
-		if (type !== "notify" || !WEBHOOK_URL) return;
+		if (type !== "notify" && type !== "append" || !WEBHOOK_URL) return;
 		for (const msg of messages) {
 			if (msg.key.fromMe || !msg.message) continue;
 			const jid        = msg.key.remoteJid;

@@ -181,6 +181,13 @@ def webhook():
 		return {"status": "blocked"}
 
 	if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):
+		# Backfill media_url if the stored record has none but we now have one
+		if media_url:
+			existing_name = frappe.db.get_value("Baileys Message", {"message_id": message_id}, "name")
+			if existing_name and not frappe.db.get_value("Baileys Message", existing_name, "media_url"):
+				frappe.set_user("Administrator")
+				frappe.db.set_value("Baileys Message", existing_name, "media_url", media_url)
+				_publish_baileys_event(jid, is_incoming=True)
 		return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
