@@ -53,6 +53,17 @@
             />
           </div>
           <div>
+            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Phone</label>
+            <input
+              v-model="editPhone"
+              type="text"
+              placeholder="e.g. 254712345678"
+              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+              @keydown.enter="saveContact"
+              @keydown.esc="editingContact = false"
+            />
+          </div>
+          <div>
             <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Company</label>
             <input
               v-model="editCompany"
@@ -160,7 +171,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "contactSaved", data: { custom_name: string; company: string; assigned_team: string }): void;
+  (e: "contactSaved", data: { custom_name: string; company: string; assigned_team: string; phone: string }): void;
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -168,6 +179,7 @@ const replyingTo = ref<Record<string, any> | null>(null);
 
 const editingContact = ref(false);
 const editName = ref("");
+const editPhone = ref("");
 const editCompany = ref("");
 const editTeam = ref("");
 const savingContact = ref(false);
@@ -198,7 +210,7 @@ const sendReactionResource = createResource({
 
 const saveContactResource = createResource({
   url: "helpdesk.integrations.baileys.save_baileys_contact",
-  onSuccess(data: { custom_name: string; company: string; assigned_team: string }) {
+  onSuccess(data: { custom_name: string; company: string; assigned_team: string; phone: string }) {
     savingContact.value = false;
     editingContact.value = false;
     emit("contactSaved", data);
@@ -232,6 +244,7 @@ function loadMore() {
 
 function openEdit() {
   editName.value = props.displayName || "";
+  editPhone.value = props.phone || "";
   editCompany.value = props.company || "";
   editTeam.value = props.assignedTeam || "";
   editingContact.value = true;
@@ -243,6 +256,7 @@ function saveContact() {
   saveContactResource.submit({
     jid: props.jid,
     custom_name: editName.value.trim(),
+    phone: editPhone.value.trim(),
     company: editCompany.value.trim(),
     assigned_team: editTeam.value,
   });

@@ -764,29 +764,32 @@ def get_baileys_conversations() -> list[dict]:
 
 
 @frappe.whitelist()
-def save_baileys_contact(jid: str, custom_name: str = "", company: str = "", assigned_team: str = "") -> dict:
+def save_baileys_contact(jid: str, custom_name: str = "", company: str = "", assigned_team: str = "", phone: str = "") -> dict:
 	"""Create or update a Baileys Contact override for a JID."""
 	custom_name = (custom_name or "").strip()
 	company = (company or "").strip()
 	assigned_team = (assigned_team or "").strip()
+	phone = _normalize_phone(phone or "")
 
 	if frappe.db.exists("Baileys Contact", {"jid": jid}):
 		doc = frappe.get_doc("Baileys Contact", {"jid": jid})
 		doc.custom_name = custom_name
 		doc.company = company
 		doc.assigned_team = assigned_team
+		if phone:
+			doc.phone = phone
 		doc.save(ignore_permissions=True)
 	else:
 		frappe.get_doc({
 			"doctype": "Baileys Contact",
 			"jid": jid,
-			"phone": _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "",
+			"phone": phone or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
 			"custom_name": custom_name,
 			"company": company,
 			"assigned_team": assigned_team,
 		}).insert(ignore_permissions=True)
 
-	return {"status": "ok", "jid": jid, "custom_name": custom_name, "company": company}
+	return {"status": "ok", "jid": jid, "custom_name": custom_name, "company": company, "phone": phone, "assigned_team": assigned_team}
 
 
 @frappe.whitelist()

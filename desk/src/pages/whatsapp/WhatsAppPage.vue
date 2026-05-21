@@ -120,10 +120,11 @@ function onSelect(jid: string, displayName: string, company: string, team: strin
   selectedPhone.value = phone || "";
 }
 
-function onContactSaved(data: { custom_name: string; company: string; assigned_team: string }) {
+function onContactSaved(data: { custom_name: string; company: string; assigned_team: string; phone: string }) {
   if (data.custom_name) selectedDisplayName.value = data.custom_name;
   selectedCompany.value = data.company;
   selectedTeam.value = data.assigned_team || "";
+  if (data.phone) selectedPhone.value = data.phone;
   convListRef.value?.reload();
 }
 </script>
