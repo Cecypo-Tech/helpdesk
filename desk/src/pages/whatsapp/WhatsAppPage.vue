@@ -29,6 +29,7 @@
       :displayName="selectedDisplayName"
       :company="selectedCompany"
       :assignedTeam="selectedTeam"
+      :phone="selectedPhone"
       @contactSaved="onContactSaved"
     />
   </div>
@@ -55,6 +56,7 @@ const selectedJid = ref<string | null>(null);
 const selectedDisplayName = ref<string>("");
 const selectedCompany = ref<string>("");
 const selectedTeam = ref<string>("");
+const selectedPhone = ref<string>("");
 const convListRef = ref<InstanceType<typeof BaileysConversationList> | null>(null);
 const baileysChat = ref<InstanceType<typeof BaileysChat> | null>(null);
 
@@ -110,11 +112,12 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-status-update", handleBaileysStatusUpdate);
 });
 
-function onSelect(jid: string, displayName: string, company: string, team: string) {
+function onSelect(jid: string, displayName: string, company: string, team: string, phone: string) {
   selectedJid.value = jid;
   selectedDisplayName.value = displayName;
   selectedCompany.value = company;
   selectedTeam.value = team;
+  selectedPhone.value = phone || "";
 }
 
 function onContactSaved(data: { custom_name: string; company: string; assigned_team: string }) {

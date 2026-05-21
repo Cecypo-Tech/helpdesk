@@ -17,7 +17,7 @@
         </div>
         <div class="flex flex-wrap items-center gap-1.5">
           <span v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</span>
-          <span v-else-if="phoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ phoneDisplay }}</span>
+          <span v-if="contactPhone" class="text-[11px] text-ink-gray-5">{{ contactPhone }}</span>
           <span
             v-if="assignedTeam"
             class="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300"
@@ -156,6 +156,7 @@ const props = defineProps<{
   displayName: string;
   company?: string;
   assignedTeam?: string;
+  phone?: string;
 }>();
 
 const emit = defineEmits<{
@@ -175,10 +176,6 @@ const PAGE_SIZE = 40;
 const visibleCount = ref(PAGE_SIZE);
 const loadingMore = ref(false);
 
-const connectedPhone = createResource({
-  url: "helpdesk.integrations.baileys.get_connected_phone",
-  auto: true,
-});
 
 const messages = createResource({
   url: "helpdesk.integrations.baileys.get_baileys_messages",
@@ -191,6 +188,9 @@ const markReadResource = createResource({
 
 const sendReactionResource = createResource({
   url: "helpdesk.integrations.baileys.send_baileys_reaction",
+  onSuccess() {
+    loadMessages();
+  },
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send reaction");
   },
@@ -314,9 +314,10 @@ const groupedMessages = computed(() => {
   return groups;
 });
 
-const phoneDisplay = computed(() => {
-  const phone = connectedPhone.data?.phone;
-  return phone ? `+${phone}` : null;
+const contactPhone = computed(() => {
+  const p = props.phone;
+  if (!p) return null;
+  return p.startsWith("+") ? p : `+${p}`;
 });
 
 function scrollToBottom() {

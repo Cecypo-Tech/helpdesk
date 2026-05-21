@@ -1,7 +1,10 @@
 <template>
   <div class="flex w-full h-full flex-col border-r border-outline-gray-2 bg-surface-gray-1">
     <div class="flex items-center justify-between border-b border-outline-gray-2 px-4 py-3">
-      <h2 class="text-sm font-semibold text-ink-gray-9">WhatsApp</h2>
+      <div>
+        <h2 class="text-sm font-semibold text-ink-gray-9">WhatsApp</h2>
+        <p v-if="connectedPhoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ connectedPhoneDisplay }}</p>
+      </div>
       <div class="flex items-center gap-1">
         <!-- Analytics -->
         <button
@@ -110,6 +113,7 @@
         :displayName="conv.display_name"
         :company="conv.company"
         :assignedTeam="conv.assigned_team"
+        :phone="conv.phone"
         :isGroup="conv.is_group"
         :lastMessage="conv.last_message"
         :lastMessageTime="conv.last_message_time"
@@ -117,7 +121,7 @@
         :contentType="conv.content_type"
         :hasUnread="isUnread(conv)"
         :selected="conv.jid === selectedJid"
-        @select="(jid, name, company, team) => $emit('select', jid, name, company, team)"
+        @select="(jid, name, company, team, phone) => $emit('select', jid, name, company, team, phone)"
       />
     </div>
   </div>
@@ -129,11 +133,21 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
+const connectedPhone = createResource({
+  url: "helpdesk.integrations.baileys.get_connected_phone",
+  auto: true,
+});
+
+const connectedPhoneDisplay = computed(() => {
+  const phone = connectedPhone.data?.phone;
+  return phone ? `+${phone}` : null;
+});
+
 const router = useRouter();
 
 const props = defineProps<{ selectedJid: string | null }>();
 const emit = defineEmits<{
-  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string): void;
+  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
 }>();
 
 const search = ref("");
@@ -184,12 +198,12 @@ function closeNewChat() {
 
 function selectContact(c: { jid: string; custom_name: string; phone: string; company: string }) {
   closeNewChat();
-  emit("select", c.jid, c.custom_name || c.phone, c.company || "", "");
+  emit("select", c.jid, c.custom_name || c.phone, c.company || "", "", c.phone || "");
 }
 
 function startWithPhone(digits: string) {
   closeNewChat();
-  emit("select", `${digits}@s.whatsapp.net`, `+${digits}`, "", "");
+  emit("select", `${digits}@s.whatsapp.net`, `+${digits}`, "", "", digits);
 }
 
 function onNewChatEnter() {

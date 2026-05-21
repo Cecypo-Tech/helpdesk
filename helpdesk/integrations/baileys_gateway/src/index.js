@@ -2,6 +2,7 @@ const express = require("express");
 const {
 	makeWASocket, useMultiFileAuthState, DisconnectReason,
 	makeCacheableSignalKeyStore, fetchLatestBaileysVersion, Browsers,
+	downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
@@ -14,6 +15,10 @@ const WEBHOOK_URL  = process.env.WEBHOOK_URL  || "";
 const SESSION_NAME = process.env.SESSION_NAME || "helpdesk";
 const PORT         = parseInt(process.env.PORT || "3000");
 const SESSION_DIR  = `/app/sessions/${SESSION_NAME}`;
+
+// Derive the Frappe base URL from WEBHOOK_URL (e.g. http://frappe:8000)
+const FRAPPE_BASE_URL = process.env.FRAPPE_BASE_URL || (WEBHOOK_URL ? new URL(WEBHOOK_URL).origin : "");
+const UPLOAD_URL = FRAPPE_BASE_URL ? `${FRAPPE_BASE_URL}/api/method/helpdesk.integrations.baileys.upload_baileys_media` : "";
 
 const logger = pino({ level: "info" });
 let sock = null, qrString = null, isConnected = false;
@@ -84,11 +89,31 @@ async function connectToWhatsApp() {
 				continue;
 			}
 
+			// Download and upload media for non-text/reaction messages
+			let mediaUrl = "";
+			if (contentType !== "text" && contentType !== "reaction" && UPLOAD_URL) {
+				try {
+					const buffer = await downloadMediaMessage(msg, "buffer", {});
+					const ext = contentType === "image" ? "jpg"
+						: contentType === "video" ? "mp4"
+						: contentType === "audio" ? "ogg"
+						: (mc.documentMessage?.fileName?.split(".").pop() || "bin");
+					const filename = mc.documentMessage?.fileName || `wa_${msg.key.id}.${ext}`;
+					const contentB64 = buffer.toString("base64");
+					const uploadRes = await axios.post(UPLOAD_URL, {
+						filename, content_b64: contentB64,
+					}, { headers: { "X-API-Key": API_KEY }, timeout: 30000 });
+					mediaUrl = uploadRes.data?.file_url || "";
+				} catch (err) {
+					logger.warn({ err: err.message, jid, contentType }, "Media upload failed — sending without URL");
+				}
+			}
+
 			try {
 				await axios.post(WEBHOOK_URL, {
 					jid, messageId: msg.key.id, sender, senderName,
 					message: text, contentType, timestamp: msg.messageTimestamp,
-					quotedMessageId,
+					quotedMessageId, mediaUrl,
 				}, { headers: { "X-API-Key": API_KEY }, timeout: 15000 });
 			} catch (err) { logger.error({ err: err.message, jid }, "Webhook failed"); }
 		}

@@ -2,7 +2,7 @@
   <div
     class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="selected ? 'bg-surface-gray-2' : ''"
-    @click="$emit('select', jid, displayName, company || '', assignedTeam || '')"
+    @click="$emit('select', jid, displayName, company || '', assignedTeam || '', phone || '')"
   >
     <!-- Avatar with type badge -->
     <div class="relative shrink-0">
@@ -58,6 +58,7 @@ const props = defineProps<{
   displayName: string;
   company?: string;
   assignedTeam?: string;
+  phone?: string;
   isGroup: boolean;
   lastMessage: string;
   lastMessageTime: string;
@@ -68,7 +69,7 @@ const props = defineProps<{
 }>();
 
 defineEmits<{
-  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string): void;
+  (e: "select", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
 }>();
 
 const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());

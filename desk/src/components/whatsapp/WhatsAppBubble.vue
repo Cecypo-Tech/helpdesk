@@ -5,15 +5,15 @@
 
       <!-- Action bar — shown on hover or while emoji picker is open -->
       <div
-        class="absolute bottom-full mb-1 z-10 flex items-center gap-1 transition-opacity duration-100"
+        class="pointer-events-none absolute top-0 z-10 flex items-center gap-1 transition-opacity duration-100"
         :class="[
-          isOutgoing ? 'right-0 flex-row-reverse' : 'left-0',
+          isOutgoing ? 'right-full mr-2' : 'left-full ml-2',
           showEmojiPicker ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
         ]"
       >
         <!-- Reply button -->
         <button
-          class="flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
+          class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
           title="Reply"
           @click.stop="$emit('reply', message)"
         >
@@ -24,7 +24,7 @@
         <!-- Copy button -->
         <button
           v-if="message.message"
-          class="flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
+          class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
           :title="copied ? 'Copied!' : 'Copy text'"
           @click.stop="copyText"
         >
@@ -37,7 +37,7 @@
         </button>
         <!-- React button -->
         <button
-          class="flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
+          class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
           title="React"
           @click.stop="toggleEmojiPicker"
         >
@@ -51,7 +51,7 @@
       <div
         v-if="showEmojiPicker"
         ref="emojiPickerRef"
-        class="absolute bottom-full mb-9 flex items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-2 py-1 shadow-lg"
+        class="absolute bottom-full mb-2 flex items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-2 py-1 shadow-lg"
         :class="isOutgoing ? 'right-0' : 'left-0'"
         style="z-index: 9990;"
       >
@@ -230,10 +230,10 @@
         </div>
       </div>
 
-      <!-- Reaction badges (below bubble) -->
+      <!-- Reaction badges (below bubble) — z-20 so they paint above the next message's action bar (z-10) -->
       <div
         v-if="aggregatedReactions.length"
-        class="mt-0.5 flex flex-wrap gap-1"
+        class="relative z-20 mt-0.5 flex flex-wrap gap-1"
         :class="isOutgoing ? 'justify-end' : 'justify-start'"
       >
         <span

@@ -211,6 +211,46 @@ def webhook():
 
 
 @frappe.whitelist(allow_guest=True)
+def upload_baileys_media():
+	"""Accept a base64-encoded media file from the Baileys gateway and return its public URL."""
+	import base64
+
+	if not frappe.db.exists("DocType", "Baileys Gateway Settings"):
+		frappe.response["http_status_code"] = 503
+		return {"error": "not configured"}
+
+	settings = _settings()
+	api_key = frappe.get_request_header("X-API-Key") or frappe.get_request_header("x-api-key")
+	if not settings.api_key or api_key != settings.api_key:
+		frappe.response["http_status_code"] = 401
+		return {"error": "Unauthorized"}
+
+	try:
+		payload = frappe.parse_json(frappe.request.data.decode("utf-8"))
+	except Exception:
+		frappe.response["http_status_code"] = 400
+		return {"error": "Invalid JSON"}
+
+	filename = payload.get("filename") or "wa_media"
+	content_b64 = payload.get("content_b64") or ""
+	if not content_b64:
+		frappe.response["http_status_code"] = 400
+		return {"error": "No content"}
+
+	frappe.set_user("Administrator")
+	content = base64.b64decode(content_b64)
+
+	f = frappe.get_doc({
+		"doctype": "File",
+		"file_name": filename,
+		"is_private": 0,
+		"content": content,
+	})
+	f.save(ignore_permissions=True)
+	return {"file_url": f.file_url}
+
+
+@frappe.whitelist(allow_guest=True)
 def status_webhook():
 	"""Receive delivery status updates (Sent→Delivered→Read) from the Baileys gateway."""
 	if not frappe.db.exists("DocType", "Baileys Gateway Settings"):
@@ -672,7 +712,7 @@ def get_baileys_conversations() -> list[dict]:
 		for c in frappe.get_all(
 			"Baileys Contact",
 			filters={"jid": ["in", jids]},
-			fields=["jid", "custom_name", "company", "assigned_team"],
+			fields=["jid", "custom_name", "company", "assigned_team", "phone"],
 		):
 			contacts[c.jid] = c
 
@@ -705,6 +745,7 @@ def get_baileys_conversations() -> list[dict]:
 			"display_name": display_name or jid,
 			"company": contact.get("company") or "",
 			"assigned_team": assigned_team,
+			"phone": contact.get("phone") or (_phone_from_jid(jid) if not is_grp else ""),
 			"is_group": is_grp,
 			"last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
 			"last_message_time": str(r["creation"]),
