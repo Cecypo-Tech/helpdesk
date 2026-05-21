@@ -113,7 +113,7 @@ async function connectToWhatsApp() {
 					const uploadRes = await axios.post(UPLOAD_URL, {
 						filename, content_b64: contentB64,
 					}, { headers: { "X-API-Key": API_KEY }, timeout: 30000 });
-					mediaUrl = uploadRes.data?.file_url || "";
+					mediaUrl = uploadRes.data?.message?.file_url || uploadRes.data?.file_url || "";
 					logger.info({ jid, contentType, mediaUrl }, "Media uploaded");
 				} catch (err) {
 					logger.warn({ err: err.message, jid, contentType }, "Media upload failed — sending without URL");
