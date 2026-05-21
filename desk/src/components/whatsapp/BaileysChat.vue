@@ -28,7 +28,7 @@
               <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
           </button>
-          <span v-else class="text-[10px] italic text-ink-gray-3">no phone — sync to resolve</span>
+          <span v-else class="text-[10px] italic text-ink-gray-3">no phone (enter via ✎)</span>
         </div>
         <div class="flex flex-wrap items-center gap-1.5">
           <span v-if="company" class="truncate text-[11px] text-ink-gray-5">{{ company }}</span>
@@ -92,7 +92,7 @@
               <span v-if="p.isAdmin" class="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">admin</span>
             </div>
             <div v-if="p.phone" class="text-[11px] text-ink-gray-5">+{{ p.phone }}</div>
-            <div v-else class="text-[11px] text-ink-gray-4 italic">phone unknown — run sync</div>
+            <div v-else class="text-[11px] text-ink-gray-4 italic">phone unavailable (LID)</div>
           </div>
           <button
             v-if="p.phone"

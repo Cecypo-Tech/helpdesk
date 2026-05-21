@@ -116,6 +116,13 @@ async function connectToWhatsApp() {
 	sock.ev.on("contacts.set", ({ contacts }) => indexContacts(contacts));
 	// Incremental contact updates
 	sock.ev.on("contacts.upsert", (contacts) => indexContacts(contacts));
+	// Messaging history (initial sync) — may include contact data
+	sock.ev.on("messaging-history.set", ({ contacts }) => {
+		if (contacts && contacts.length > 0) {
+			logger.info({ count: contacts.length }, "messaging-history.set contacts");
+			indexContacts(contacts);
+		}
+	});
 
 	sock.ev.on("messages.upsert", async ({ messages, type }) => {
 		if (type !== "notify" && type !== "append" || !WEBHOOK_URL) return;
@@ -233,12 +240,28 @@ app.get("/contacts", auth, (_, res) => {
 });
 
 // Debug: shows raw contact sample and current mapping state — helps diagnose empty lidToPhone
-app.get("/contacts/debug", auth, (_, res) => {
+app.get("/contacts/debug", auth, async (_, res) => {
+	let rawParticipantSample = null;
+	if (isConnected) {
+		try {
+			const groups = await sock.groupFetchAllParticipating();
+			const firstGroup = Object.values(groups)[0];
+			if (firstGroup) {
+				const meta = await sock.groupMetadata(firstGroup.id);
+				rawParticipantSample = (meta.participants || []).slice(0, 3).map((p) => ({
+					id: p.id, lid: p.lid, admin: p.admin, keys: Object.keys(p),
+				}));
+			}
+		} catch (e) {
+			rawParticipantSample = { error: e.message };
+		}
+	}
 	res.json({
 		lidCount: Object.keys(lidToPhone).length,
 		nameCount: Object.keys(lidToName).length,
 		sampleMappings: Object.entries(lidToPhone).slice(0, 5).map(([lid, phone]) => ({ lid, phone, name: lidToName[lid] || "" })),
 		rawContactSample: lastContactsSample,
+		rawParticipantSample,
 	});
 });
 
@@ -249,23 +272,35 @@ app.get("/groupParticipants", auth, async (req, res) => {
 	if (!jid) return res.status(400).json({ error: "jid required" });
 	try {
 		const meta = await sock.groupMetadata(jid);
+		let newMappings = 0;
 		const participants = (meta.participants || []).map((p) => {
-			const id = normaliseJid(p.id || "");
-			let phone = "", name = "";
-			if (id.endsWith("@s.whatsapp.net")) {
-				phone = id.split("@")[0];
-				name = lidToName[id] || "";
-			} else if (id.endsWith("@lid")) {
-				phone = lidToPhone[id] || "";
-				name = lidToName[id] || "";
+			const rawId  = normaliseJid(p.id  || "");
+			const rawLid = normaliseJid(p.lid || "");
+			let phoneJid = "", lidJid = "";
+
+			if (rawId.endsWith("@s.whatsapp.net") && rawLid.endsWith("@lid")) {
+				phoneJid = rawId; lidJid = rawLid;
+			} else if (rawId.endsWith("@lid") && rawLid.endsWith("@s.whatsapp.net")) {
+				phoneJid = rawLid; lidJid = rawId;
+			} else if (rawId.endsWith("@s.whatsapp.net")) {
+				phoneJid = rawId;
+			} else if (rawId.endsWith("@lid")) {
+				lidJid = rawId;
 			}
-			return {
-				jid: id,
-				phone,
-				name,
-				isAdmin: p.admin === "admin" || p.admin === "superadmin",
-			};
+
+			const phone = phoneJid ? phoneJid.split("@")[0] : (lidJid ? lidToPhone[lidJid] || "" : "");
+			const jidOut = lidJid || phoneJid || rawId;
+
+			// Store any new lid→phone mappings discovered here
+			if (phone && lidJid && !lidToPhone[lidJid]) {
+				lidToPhone[lidJid] = phone;
+				newMappings++;
+			}
+
+			const name = (lidJid ? lidToName[lidJid] : "") || (phoneJid ? lidToName[phoneJid] : "") || "";
+			return { jid: jidOut, phone, name, isAdmin: p.admin === "admin" || p.admin === "superadmin" };
 		});
+		if (newMappings > 0) logger.info({ group: jid, newMappings }, "New lid→phone mappings from group participants");
 		res.json({ groupName: meta.subject || "", participants });
 	} catch (err) { res.status(500).json({ error: err.message }); }
 });
