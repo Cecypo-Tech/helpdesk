@@ -267,33 +267,125 @@
   <Teleport to="body">
     <div
       v-if="lightbox.open"
-      class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
-      @click.self="closeLightbox"
+      ref="lightboxRef"
+      class="fixed inset-0 z-[9999] flex flex-col bg-black/92 outline-none"
+      tabindex="0"
+      @wheel.prevent="onLightboxWheel"
+      @keydown.esc="closeLightbox"
+      @keydown.equal.prevent="zoomIn"
+      @keydown.minus.prevent="zoomOut"
+      @keydown.0.prevent="resetZoom"
     >
-      <button
-        class="absolute right-4 top-4 text-white hover:text-gray-300"
-        @click="closeLightbox"
+      <!-- Top bar -->
+      <div class="flex shrink-0 items-center justify-between px-4 py-2.5">
+        <span class="text-xs text-white/50 tabular-nums">{{ Math.round(lightbox.scale * 100) }}%</span>
+        <div class="flex items-center gap-1">
+          <!-- Open in new tab -->
+          <a
+            :href="lightbox.src"
+            target="_blank"
+            rel="noopener"
+            class="flex h-8 w-8 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+            title="Open original"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+          </a>
+          <!-- Fullscreen toggle -->
+          <button
+            class="flex h-8 w-8 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+            :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+            @click="toggleFullscreen"
+          >
+            <svg v-if="!isFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+              <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="8 3 3 3 3 8"/><polyline points="21 8 21 3 16 3"/>
+              <polyline points="3 16 3 21 8 21"/><polyline points="16 21 21 21 21 16"/>
+            </svg>
+          </button>
+          <!-- Close -->
+          <button
+            class="flex h-8 w-8 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+            title="Close (Esc)"
+            @click="closeLightbox"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Media area -->
+      <div
+        class="flex flex-1 items-center justify-center overflow-hidden select-none"
+        :class="lightbox.scale > 1 ? (lightbox.dragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'"
+        @click.self="closeLightbox"
+        @mousedown="onDragStart"
+        @mousemove="onDragMove"
+        @mouseup="onDragEnd"
+        @mouseleave="onDragEnd"
+        @dblclick="onLightboxDblClick"
       >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-      <img
-        v-if="lightbox.type === 'image'"
-        :src="lightbox.src"
-        class="max-h-[90vh] max-w-[90vw] rounded object-contain"
-      />
-      <video
-        v-else-if="lightbox.type === 'video'"
-        :src="lightbox.src"
-        controls
-        autoplay
-        class="max-h-[90vh] max-w-[90vw] rounded"
-      />
+        <img
+          v-if="lightbox.type === 'image'"
+          :src="lightbox.src"
+          draggable="false"
+          :style="{
+            transform: `translate(${lightbox.offsetX}px, ${lightbox.offsetY}px) scale(${lightbox.scale})`,
+            transformOrigin: 'center center',
+            transition: lightbox.dragging ? 'none' : 'transform 0.15s ease',
+            maxHeight: '100%',
+            maxWidth: '100%',
+          }"
+          class="rounded object-contain"
+          @click.stop
+        />
+        <video
+          v-else-if="lightbox.type === 'video'"
+          :src="lightbox.src"
+          controls
+          autoplay
+          class="max-h-full max-w-full rounded"
+        />
+      </div>
+
+      <!-- Zoom controls -->
+      <div v-if="lightbox.type === 'image'" class="flex shrink-0 items-center justify-center gap-2 py-2.5">
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          :disabled="lightbox.scale <= 0.25"
+          title="Zoom out (−)"
+          @click="zoomOut"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button
+          class="w-14 rounded border border-white/20 py-0.5 text-center text-xs text-white/70 hover:bg-white/10 hover:text-white tabular-nums"
+          title="Reset zoom (0)"
+          @click="resetZoom"
+        >{{ Math.round(lightbox.scale * 100) }}%</button>
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30"
+          :disabled="lightbox.scale >= 4"
+          title="Zoom in (+)"
+          @click="zoomIn"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <span class="ml-2 text-[10px] text-white/30">scroll to zoom · drag to pan · dbl-click to toggle</span>
+      </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -339,6 +431,7 @@ watch(showEmojiPicker, (val) => {
 
 onBeforeUnmount(() => {
   document.removeEventListener("click", onDocumentClick);
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
 });
 
 function toggleEmojiPicker() {
@@ -440,16 +533,91 @@ const attachFilename = computed(() => {
 });
 
 // Lightbox
-const lightbox = reactive({ open: false, src: "", type: "image" as "image" | "video" });
+const lightboxRef = ref<HTMLElement | null>(null);
+const isFullscreen = ref(false);
+const lightbox = reactive({
+  open: false, src: "", type: "image" as "image" | "video",
+  scale: 1, offsetX: 0, offsetY: 0,
+  dragging: false, dragStartX: 0, dragStartY: 0,
+});
 
 function openLightbox(src: string, type: "image" | "video") {
   lightbox.src = src;
   lightbox.type = type;
+  lightbox.scale = 1;
+  lightbox.offsetX = 0;
+  lightbox.offsetY = 0;
   lightbox.open = true;
+  nextTick(() => lightboxRef.value?.focus());
 }
 
 function closeLightbox() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   lightbox.open = false;
   lightbox.src = "";
+  isFullscreen.value = false;
 }
+
+function zoomIn() {
+  lightbox.scale = Math.min(4, parseFloat((lightbox.scale + 0.25).toFixed(2)));
+}
+
+function zoomOut() {
+  lightbox.scale = Math.max(0.25, parseFloat((lightbox.scale - 0.25).toFixed(2)));
+  if (lightbox.scale <= 1) { lightbox.offsetX = 0; lightbox.offsetY = 0; }
+}
+
+function resetZoom() {
+  lightbox.scale = 1;
+  lightbox.offsetX = 0;
+  lightbox.offsetY = 0;
+}
+
+function onLightboxWheel(e: WheelEvent) {
+  const delta = e.deltaY < 0 ? 0.15 : -0.15;
+  lightbox.scale = Math.max(0.25, Math.min(4, parseFloat((lightbox.scale + delta).toFixed(2))));
+  if (lightbox.scale <= 1) { lightbox.offsetX = 0; lightbox.offsetY = 0; }
+}
+
+function onLightboxDblClick() {
+  if (lightbox.scale !== 1) {
+    resetZoom();
+  } else {
+    lightbox.scale = 2;
+  }
+}
+
+function onDragStart(e: MouseEvent) {
+  if (lightbox.scale <= 1) return;
+  lightbox.dragging = true;
+  lightbox.dragStartX = e.clientX - lightbox.offsetX;
+  lightbox.dragStartY = e.clientY - lightbox.offsetY;
+}
+
+function onDragMove(e: MouseEvent) {
+  if (!lightbox.dragging) return;
+  lightbox.offsetX = e.clientX - lightbox.dragStartX;
+  lightbox.offsetY = e.clientY - lightbox.dragStartY;
+}
+
+function onDragEnd() {
+  lightbox.dragging = false;
+}
+
+async function toggleFullscreen() {
+  if (!lightboxRef.value) return;
+  if (document.fullscreenElement) {
+    await document.exitFullscreen().catch(() => {});
+    isFullscreen.value = false;
+  } else {
+    await lightboxRef.value.requestFullscreen().catch(() => {});
+    isFullscreen.value = true;
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement;
+}
+
+document.addEventListener("fullscreenchange", onFullscreenChange);
 </script>
