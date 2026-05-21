@@ -6,6 +6,19 @@
         <p v-if="connectedPhoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ connectedPhoneDisplay }}</p>
       </div>
       <div class="flex items-center gap-1">
+        <!-- Sync contacts -->
+        <button
+          class="flex h-6 w-6 items-center justify-center rounded-full text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8 disabled:opacity-40"
+          :title="syncingContacts ? 'Syncing…' : 'Sync contacts'"
+          :disabled="syncingContacts"
+          @click="syncContacts"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            :class="syncingContacts ? 'animate-spin' : ''">
+            <polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/>
+            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+          </svg>
+        </button>
         <!-- Analytics -->
         <button
           class="flex h-6 w-6 items-center justify-center rounded-full text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
@@ -128,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, LoadingIndicator } from "frappe-ui";
+import { createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
@@ -152,6 +165,26 @@ const emit = defineEmits<{
 
 const search = ref("");
 const lastReadMap = ref<Record<string, number>>({});
+const syncingContacts = ref(false);
+
+const syncContactsResource = createResource({
+  url: "helpdesk.integrations.baileys.sync_baileys_contacts",
+  onSuccess(data: { updated: number; created: number; total: number }) {
+    syncingContacts.value = false;
+    toast.success(`Synced ${data.total} contacts (${data.updated} updated, ${data.created} new)`);
+    conversations.reload();
+  },
+  onError(e: any) {
+    syncingContacts.value = false;
+    toast.error(e?.messages?.[0] || "Contact sync failed");
+  },
+});
+
+function syncContacts() {
+  if (syncingContacts.value) return;
+  syncingContacts.value = true;
+  syncContactsResource.submit({});
+}
 
 watch(() => props.selectedJid, (jid) => {
   if (jid) lastReadMap.value[jid] = Date.now();

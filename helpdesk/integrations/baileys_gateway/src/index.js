@@ -23,6 +23,38 @@ const UPLOAD_URL = FRAPPE_BASE_URL ? `${FRAPPE_BASE_URL}/api/method/helpdesk.int
 const logger = pino({ level: "info" });
 let sock = null, qrString = null, isConnected = false;
 
+// ── Contact LID→phone resolution ──────────────────────────────────────────────
+// Maps @lid JIDs to phone numbers, populated from contacts.set / contacts.upsert.
+// WhatsApp uses @lid as an internal identifier; the phone lives in the @s.whatsapp.net JID.
+const lidToPhone = {};   // e.g. "177893317574803@lid" → "254712345678"
+const lidToName  = {};   // e.g. "177893317574803@lid" → "John Doe"
+
+function indexContacts(contacts) {
+	let mapped = 0;
+	for (const c of contacts) {
+		const id  = c.id  || "";
+		const lid = c.lid || "";
+		const name = c.notify || c.name || c.verifiedName || "";
+		if (id.endsWith("@s.whatsapp.net") && lid) {
+			const phone = id.split("@")[0].split(":")[0];
+			lidToPhone[lid] = phone;
+			if (name) lidToName[lid] = name;
+			mapped++;
+		}
+		// Also index @s.whatsapp.net contacts directly (name only)
+		if (id.endsWith("@s.whatsapp.net") && name) {
+			lidToName[id] = name;
+		}
+	}
+	if (mapped > 0) logger.info({ mapped, total: Object.keys(lidToPhone).length }, "LID→phone map updated");
+}
+
+function resolvePhone(jid) {
+	if (jid.endsWith("@s.whatsapp.net")) return jid.split("@")[0].split(":")[0];
+	if (jid.endsWith("@lid") && lidToPhone[jid]) return lidToPhone[jid];
+	return "";
+}
+
 async function connectToWhatsApp() {
 	const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 	const { version } = await fetchLatestBaileysVersion();
@@ -45,7 +77,6 @@ async function connectToWhatsApp() {
 			const code = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output.statusCode : null;
 			logger.warn({ code, reason: lastDisconnect?.error?.message }, "Connection closed");
 			if (code === DisconnectReason.loggedOut || code === 405) {
-				// 401 = logged out deliberately; 405 = server rejected session — both need fresh auth
 				logger.warn({ code }, "Clearing stale session for fresh QR");
 				fs.rmSync(SESSION_DIR, { recursive: true, force: true });
 				setTimeout(connectToWhatsApp, 3000);
@@ -54,13 +85,22 @@ async function connectToWhatsApp() {
 			}
 		} else if (connection === "open") { isConnected = true; qrString = null; logger.info("Connected"); }
 	});
+
+	// Full contact list on first sync
+	sock.ev.on("contacts.set", ({ contacts }) => indexContacts(contacts));
+	// Incremental contact updates
+	sock.ev.on("contacts.upsert", (contacts) => indexContacts(contacts));
+
 	sock.ev.on("messages.upsert", async ({ messages, type }) => {
 		if (type !== "notify" && type !== "append" || !WEBHOOK_URL) return;
 		for (const msg of messages) {
 			if (msg.key.fromMe || !msg.message) continue;
 			const jid        = msg.key.remoteJid;
 			const sender     = msg.key.participant || jid;
-			const senderName = msg.pushName || sender.split("@")[0];
+			const senderName = msg.pushName || lidToName[jid] || sender.split("@")[0];
+
+			// Resolve phone for @lid contacts
+			const resolvedPhone = resolvePhone(jid);
 
 			// Unwrap view-once / ephemeral / document-with-caption containers
 			const mc = msg.message?.viewOnceMessage?.message
@@ -97,7 +137,7 @@ async function connectToWhatsApp() {
 				continue;
 			}
 
-			logger.info({ jid, contentType, type }, "Processing message");
+			logger.info({ jid, resolvedPhone: resolvedPhone || "(lid-unresolved)", contentType, type }, "Processing message");
 
 			// Download and upload media for non-text/reaction messages
 			let mediaUrl = "";
@@ -124,7 +164,7 @@ async function connectToWhatsApp() {
 				await axios.post(WEBHOOK_URL, {
 					jid, messageId: msg.key.id, sender, senderName,
 					message: text, contentType, timestamp: msg.messageTimestamp,
-					quotedMessageId, mediaUrl,
+					quotedMessageId, mediaUrl, resolvedPhone,
 				}, { headers: { "X-API-Key": API_KEY }, timeout: 15000 });
 			} catch (err) { logger.error({ err: err.message, jid }, "Webhook failed"); }
 		}
@@ -148,6 +188,22 @@ app.get("/qr", async (_, res) => {
 	const dataUrl = await qrcode.toDataURL(qrString);
 	res.send(`<html><body style="background:#111;display:flex;align-items:center;justify-content:center;height:100vh">
 		<img src="${dataUrl}" style="width:300px;height:300px"/></body></html>`);
+});
+
+// Returns all contacts in the LID→phone map for bulk sync
+app.get("/contacts", auth, (_, res) => {
+	const contacts = Object.entries(lidToPhone).map(([lid, phone]) => ({
+		lid,
+		phone,
+		name: lidToName[lid] || "",
+	}));
+	// Also include @s.whatsapp.net contacts that have a name
+	for (const [jid, name] of Object.entries(lidToName)) {
+		if (jid.endsWith("@s.whatsapp.net")) {
+			contacts.push({ lid: null, phone: jid.split("@")[0].split(":")[0], jid, name });
+		}
+	}
+	res.json({ contacts, lidCount: Object.keys(lidToPhone).length });
 });
 
 app.post("/send", auth, async (req, res) => {

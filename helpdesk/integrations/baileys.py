@@ -110,23 +110,30 @@ def _group_label(jid: str, settings) -> str:
 	return jid
 
 
-def _upsert_contact_name(jid: str, sender_name: str) -> None:
-	"""Silently record sender_name in Baileys Contact if no custom override exists."""
+def _upsert_contact_name(jid: str, sender_name: str, resolved_phone: str = "") -> None:
+	"""Silently record sender_name (and resolved phone) in Baileys Contact."""
 	if not jid or not sender_name or _is_group(jid):
 		return
+	phone = resolved_phone or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
 	try:
 		if frappe.db.exists("Baileys Contact", {"jid": jid}):
-			existing = frappe.db.get_value("Baileys Contact", {"jid": jid}, "custom_name")
-			if existing:
-				return
-			frappe.db.set_value(
-				"Baileys Contact", {"jid": jid}, "custom_name", sender_name, update_modified=False
-			)
+			existing = frappe.db.get_value(
+				"Baileys Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
+			) or {}
+			updates = {}
+			if not existing.get("custom_name") and sender_name:
+				updates["custom_name"] = sender_name
+			if not existing.get("phone") and phone:
+				updates["phone"] = phone
+			if updates:
+				frappe.db.set_value(
+					"Baileys Contact", {"jid": jid}, updates, update_modified=False
+				)
 		else:
 			frappe.get_doc({
 				"doctype": "Baileys Contact",
 				"jid": jid,
-				"phone": _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "",
+				"phone": phone,
 				"custom_name": sender_name,
 				"company": "",
 				"assigned_team": "",
@@ -169,6 +176,7 @@ def webhook():
 	content_type = payload.get("contentType", "text")
 	media_url = payload.get("mediaUrl") or ""
 	quoted_message_id = payload.get("quotedMessageId") or ""
+	resolved_phone = _normalize_phone(payload.get("resolvedPhone") or "")
 
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
@@ -209,7 +217,7 @@ def webhook():
 		"reference_name": "",
 	}).insert(ignore_permissions=True)
 
-	_upsert_contact_name(jid, sender_name)
+	_upsert_contact_name(jid, sender_name, resolved_phone)
 	_publish_baileys_event(jid, is_incoming=True)
 	if content_type != "reaction":
 		_notify_agents_baileys(jid, message, sender_name)
@@ -810,6 +818,64 @@ def get_baileys_contact(jid: str) -> dict:
 def get_hd_teams() -> list[dict]:
 	"""Return all HD Teams for the team assignment dropdown."""
 	return frappe.get_all("HD Team", fields=["name"], order_by="name asc")
+
+
+@frappe.whitelist()
+def sync_baileys_contacts() -> dict:
+	"""Pull the LID→phone contact map from the gateway and backfill phone numbers on Baileys Contacts."""
+	settings = _settings()
+	if not settings.enabled or not settings.gateway_url:
+		frappe.throw(_("Gateway not configured or disabled"))
+
+	try:
+		resp = _requests.get(
+			f"{settings.gateway_url.rstrip('/')}/contacts",
+			headers={"X-API-Key": settings.api_key or ""},
+			timeout=15,
+		)
+		resp.raise_for_status()
+		data = resp.json()
+	except Exception as e:
+		frappe.throw(_("Failed to fetch contacts from gateway: {0}").format(str(e)))
+
+	contacts = data.get("contacts") or []
+	updated = created = 0
+
+	for c in contacts:
+		phone = _normalize_phone(c.get("phone") or "")
+		name = (c.get("name") or "").strip()
+		lid = (c.get("lid") or "").strip()
+		jid = (c.get("jid") or lid or "").strip()
+
+		if not phone or not jid:
+			continue
+
+		try:
+			if frappe.db.exists("Baileys Contact", {"jid": jid}):
+				existing = frappe.db.get_value("Baileys Contact", {"jid": jid}, ["phone", "custom_name"], as_dict=True) or {}
+				upd = {}
+				if not existing.get("phone"):
+					upd["phone"] = phone
+				if not existing.get("custom_name") and name:
+					upd["custom_name"] = name
+				if upd:
+					frappe.db.set_value("Baileys Contact", {"jid": jid}, upd, update_modified=False)
+					updated += 1
+			else:
+				frappe.get_doc({
+					"doctype": "Baileys Contact",
+					"jid": jid,
+					"phone": phone,
+					"custom_name": name,
+					"company": "",
+					"assigned_team": "",
+				}).insert(ignore_permissions=True)
+				created += 1
+		except Exception:
+			pass
+
+	frappe.db.commit()
+	return {"updated": updated, "created": created, "total": len(contacts)}
 
 
 @frappe.whitelist()
