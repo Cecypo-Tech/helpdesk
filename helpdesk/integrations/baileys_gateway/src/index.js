@@ -61,7 +61,14 @@ async function connectToWhatsApp() {
 			const jid        = msg.key.remoteJid;
 			const sender     = msg.key.participant || jid;
 			const senderName = msg.pushName || sender.split("@")[0];
-			const mc         = msg.message;
+
+			// Unwrap view-once / ephemeral / document-with-caption containers
+			const mc = msg.message?.viewOnceMessage?.message
+				|| msg.message?.viewOnceMessageV2?.message?.viewOnceMessage?.message
+				|| msg.message?.ephemeralMessage?.message
+				|| msg.message?.documentWithCaptionMessage?.message
+				|| msg.message;
+
 			let text = "", contentType = "text", quotedMessageId = "";
 
 			if (mc.conversation) {
@@ -86,8 +93,11 @@ async function connectToWhatsApp() {
 				text = mc.reactionMessage.text || "";
 				quotedMessageId = mc.reactionMessage.key?.id || "";
 			} else {
+				logger.info({ jid, keys: Object.keys(mc) }, "Unhandled message type — skipping");
 				continue;
 			}
+
+			logger.info({ jid, contentType, type }, "Processing message");
 
 			// Download and upload media for non-text/reaction messages
 			let mediaUrl = "";
@@ -104,6 +114,7 @@ async function connectToWhatsApp() {
 						filename, content_b64: contentB64,
 					}, { headers: { "X-API-Key": API_KEY }, timeout: 30000 });
 					mediaUrl = uploadRes.data?.file_url || "";
+					logger.info({ jid, contentType, mediaUrl }, "Media uploaded");
 				} catch (err) {
 					logger.warn({ err: err.message, jid, contentType }, "Media upload failed — sending without URL");
 				}
