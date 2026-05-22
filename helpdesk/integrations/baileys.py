@@ -919,7 +919,7 @@ def get_hd_teams() -> list[dict]:
 
 @frappe.whitelist()
 def get_group_participants(jid: str) -> list[dict]:
-	"""Return participants for a WhatsApp group JID with resolved phone numbers."""
+	"""Return participants for a WhatsApp group JID with resolved phone numbers and names."""
 	settings = _settings()
 	if not settings.enabled or not settings.gateway_url:
 		frappe.throw(_("Gateway not configured or disabled"))
@@ -931,9 +931,29 @@ def get_group_participants(jid: str) -> list[dict]:
 			timeout=10,
 		)
 		resp.raise_for_status()
-		return resp.json().get("participants", [])
+		participants = resp.json().get("participants", [])
 	except Exception as e:
 		frappe.throw(_("Failed to fetch group participants: {0}").format(str(e)))
+
+	# Baileys groupMetadata() doesn't include display names — enrich from saved contacts.
+	for p in participants:
+		if p.get("name"):
+			continue
+		jid_key = p.get("jid") or ""
+		phone = p.get("phone") or ""
+		# Try direct JID lookup first, then phone-form JID fallback.
+		lookup_jids = [jid_key]
+		if phone and not jid_key.endswith("@s.whatsapp.net"):
+			lookup_jids.append(f"{phone}@s.whatsapp.net")
+		for lj in lookup_jids:
+			if not lj:
+				continue
+			name = frappe.db.get_value("Baileys Contact", {"jid": lj}, "custom_name")
+			if name:
+				p["name"] = name
+				break
+
+	return participants
 
 
 @frappe.whitelist()
