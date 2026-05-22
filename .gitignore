@@ -41,4 +41,5 @@ desk/stats.html
 # Superpowers plugin artifacts and local docs
 .superpowers/
 docs/
+!docs/superpowers/specs/
 .gstack/
