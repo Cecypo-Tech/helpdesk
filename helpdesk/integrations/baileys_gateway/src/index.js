@@ -82,6 +82,20 @@ async function pushContactMappings(mappings) {
 	}
 }
 
+// Push a group's subject as a Baileys Contact custom_name keyed by the group JID.
+// Same endpoint as contact mappings; backend routes on the @g.us suffix.
+async function pushGroupName(jid, name) {
+	if (!CONTACT_UPSERT_URL || !jid || !jid.endsWith("@g.us") || !name) return;
+	try {
+		await axios.post(CONTACT_UPSERT_URL, { jid, name }, {
+			headers: { "X-API-Key": API_KEY },
+			timeout: 5000,
+		});
+	} catch (err) {
+		logger.trace({ err: err.message, jid }, "Group name upsert failed");
+	}
+}
+
 // Resolve a phone number for any JID. Order:
 // 1. JID is already a PN → strip the digits
 // 2. lidMapping store has a cached/persisted reverse mapping → use it
@@ -162,6 +176,19 @@ async function connectToWhatsApp() {
 		if (mappings.length) {
 			logger.info({ count: mappings.length }, "contacts.upsert → pushing mappings");
 			pushContactMappings(mappings).catch(() => {});
+		}
+	});
+
+	// Live group subject changes: WA fires groups.upsert when we join/discover a group
+	// and groups.update on rename. Both deliver { id, subject? }.
+	sock.ev.on("groups.upsert", (groups) => {
+		for (const g of (groups || [])) {
+			if (g?.id && g?.subject) pushGroupName(g.id, g.subject).catch(() => {});
+		}
+	});
+	sock.ev.on("groups.update", (updates) => {
+		for (const g of (updates || [])) {
+			if (g?.id && g?.subject) pushGroupName(g.id, g.subject).catch(() => {});
 		}
 	});
 
@@ -271,9 +298,14 @@ async function bootstrapContactSync() {
 	const list = Object.values(groups);
 
 	const mappings = [];
+	let names = 0;
 	for (const g of list) {
 		try {
 			const meta = await sock.groupMetadata(g.id);
+			if (meta.subject) {
+				pushGroupName(g.id, meta.subject).catch(() => {});
+				names++;
+			}
 			for (const p of (meta.participants || [])) {
 				const m = contactToMapping(p);
 				if (m.lid || m.phone) mappings.push(m);
@@ -284,8 +316,8 @@ async function bootstrapContactSync() {
 	}
 
 	if (mappings.length) await pushContactMappings(mappings);
-	logger.info({ groups: list.length, mappings: mappings.length }, "Bootstrap contact sync complete");
-	return { groups: list.length, mappings: mappings.length };
+	logger.info({ groups: list.length, names, mappings: mappings.length }, "Bootstrap contact sync complete");
+	return { groups: list.length, names, mappings: mappings.length };
 }
 
 // ── HTTP API ─────────────────────────────────────────────────────────────────

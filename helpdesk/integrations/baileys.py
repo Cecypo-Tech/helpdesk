@@ -266,11 +266,17 @@ def upsert_contact_mapping():
 		return {"error": "Invalid JSON"}
 
 	frappe.set_user("Administrator")
-	_upsert_contact_by_pair(
-		lid=(payload.get("lid") or "").strip(),
-		phone=(payload.get("phone") or "").strip(),
-		name=(payload.get("name") or "").strip(),
-	)
+	jid = (payload.get("jid") or "").strip()
+	name = (payload.get("name") or "").strip()
+	if jid.endswith("@g.us"):
+		# Group: write the subject as custom_name on the group JID row
+		_upsert_one_contact(jid, "", name)
+	else:
+		_upsert_contact_by_pair(
+			lid=(payload.get("lid") or "").strip(),
+			phone=(payload.get("phone") or "").strip(),
+			name=name,
+		)
 	frappe.db.commit()
 	return {"status": "ok"}
 
@@ -578,15 +584,18 @@ def get_baileys_messages(jid: str = None, ticket: str = None) -> list[dict]:
 
 	BM = DocType("Baileys Message")
 	User = DocType("User")
+	BC = DocType("Baileys Contact")
 
 	rows = (
 		frappe.qb.from_(BM)
 		.left_join(User).on(User.name == BM.owner)
+		.left_join(BC).on(BC.jid == BM.sender_jid)
 		.select(
 			BM.name, BM.creation, BM.direction, BM.jid, BM.message,
 			BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
 			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
 			User.full_name.as_("sender_full_name"),
+			BC.phone.as_("sender_phone"),
 		)
 		.where(BM.jid == jid)
 		.orderby(BM.creation)
