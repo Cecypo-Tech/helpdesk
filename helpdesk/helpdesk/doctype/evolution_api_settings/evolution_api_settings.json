@@ -56,7 +56,7 @@
   {
    "description": "Evolution API global key \u2014 sent as apikey header.",
    "fieldname": "global_api_key",
-   "fieldtype": "Password",
+   "fieldtype": "Data",
    "label": "Global API Key"
   },
   {

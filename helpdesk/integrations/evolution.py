@@ -26,8 +26,10 @@ def _line(instance_name: str):
     return frappe.get_doc("Evolution Line", names[0])
 
 
-def _headers() -> dict:
-    return {"apikey": _settings().global_api_key or "", "Content-Type": "application/json"}
+def _headers(line_doc=None) -> dict:
+    key = (line_doc.instance_token if line_doc and getattr(line_doc, "instance_token", None) else None) \
+          or _settings().global_api_key or ""
+    return {"apikey": key, "Content-Type": "application/json"}
 
 
 def _url(path: str, instance: str) -> str:
@@ -419,7 +421,7 @@ def send_evolution_reply(
         resp = _requests.post(
             _url("message/sendText", line.instance_name),
             json=payload,
-            headers=_headers(),
+            headers=_headers(line),
             timeout=15,
         )
         resp.raise_for_status()
@@ -509,7 +511,7 @@ def send_evolution_reaction(
         resp = _requests.post(
             _url("message/sendReaction", line.instance_name),
             json=reaction_payload,
-            headers=_headers(),
+            headers=_headers(line),
             timeout=10,
         )
         resp.raise_for_status()
@@ -711,7 +713,7 @@ def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
         resp = _requests.get(
             _url("group/findParticipants", line_doc.instance_name),
             params={"groupJid": jid},
-            headers=_headers(),
+            headers=_headers(line_doc),
             timeout=10,
         )
         resp.raise_for_status()
@@ -754,7 +756,7 @@ def get_evolution_instance_status(line: str) -> dict:
     try:
         resp = _requests.get(
             _url("instance/connectionState", line_doc.instance_name),
-            headers=_headers(),
+            headers=_headers(line_doc),
             timeout=5,
         )
         resp.raise_for_status()
