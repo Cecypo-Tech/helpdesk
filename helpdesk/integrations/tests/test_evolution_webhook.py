@@ -57,3 +57,25 @@ class TestEvolutionWebhook(unittest.TestCase):
             "update": {"status": 99},
         }], line)
         self.assertEqual(result["status"], "ok")
+
+    def test_get_evolution_lines_returns_unread_count(self):
+        from helpdesk.integrations.evolution import get_evolution_lines
+        line = frappe.get_doc("Evolution Line", {"instance_name": "_test-evo"})
+        # Create 2 unread incoming messages
+        for i in range(2):
+            frappe.get_doc({
+                "doctype": "Baileys Message",
+                "direction": "Incoming",
+                "jid": f"2547{i}@s.whatsapp.net",
+                "message": f"msg {i}",
+                "content_type": "text",
+                "message_id": f"_test-unread-{i}",
+                "status": "Pending",
+                "line": line.name,
+                "is_read": 0,
+            }).insert(ignore_permissions=True)
+
+        lines = get_evolution_lines()
+        test_line = next((l for l in lines if l["name"] == line.name), None)
+        self.assertIsNotNone(test_line)
+        self.assertGreaterEqual(test_line["unread"], 2)

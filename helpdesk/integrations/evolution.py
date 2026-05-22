@@ -517,3 +517,249 @@ def send_evolution_reaction(
         frappe.throw(_("Evolution API reaction failed: {0}").format(str(e)))
 
     return {"status": "ok"}
+
+
+@frappe.whitelist(allow_guest=False)
+def send_evolution_media(
+    ticket: str = None,
+    jid: str = None,
+    message: str = "",
+    content_type: str = "document",
+) -> dict:
+    """Upload file to Frappe storage and send via Evolution API."""
+    file_obj = frappe.request.files.get("file")
+    if not file_obj:
+        frappe.throw(_("No file provided."))
+
+    filename = file_obj.filename or "attachment"
+    mime_type = file_obj.content_type or "application/octet-stream"
+    file_data = file_obj.read()
+
+    if mime_type.startswith("image/"):
+        content_type = "image"
+    elif mime_type.startswith("video/"):
+        content_type = "video"
+    elif mime_type.startswith("audio/"):
+        content_type = "audio"
+    else:
+        content_type = "document"
+
+    file_doc = frappe.get_doc({
+        "doctype": "File",
+        "file_name": filename,
+        "content": file_data,
+        "is_private": 0,
+    })
+    file_doc.insert(ignore_permissions=True)
+    public_url = frappe.utils.get_url(file_doc.file_url)
+
+    return send_evolution_reply(
+        ticket=ticket,
+        jid=jid,
+        message=message,
+        content_type=content_type,
+        media_url=public_url,
+    )
+
+
+# ── Utility APIs ──────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_evolution_lines() -> list[dict]:
+    """Return all Evolution Lines with unread counts — used by the sidebar."""
+    lines = frappe.get_all(
+        "Evolution Line",
+        fields=["name", "label", "instance_name"],
+        order_by="label asc",
+    )
+    for line in lines:
+        line["display_label"] = line["label"] or line["instance_name"]
+        line["unread"] = frappe.db.count(
+            "Baileys Message",
+            {"line": line["name"], "direction": "Incoming", "is_read": 0},
+        )
+    return lines
+
+
+@frappe.whitelist()
+def get_evolution_conversations(line: str = "") -> list[dict]:
+    """Return one entry per unique JID for the given line, sorted by most-recent first."""
+    from frappe.query_builder import DocType
+    from frappe.query_builder.functions import Max
+
+    BM = DocType("Baileys Message")
+
+    q = (
+        frappe.qb.from_(BM)
+        .select(BM.jid, Max(BM.creation).as_("latest_creation"))
+        .where(~BM.jid.like("%@broadcast"))
+    )
+    if line:
+        q = q.where(BM.line == line)
+
+    latest = q.groupby(BM.jid)
+
+    BM2 = DocType("Baileys Message")
+    rows = (
+        frappe.qb.from_(BM2)
+        .join(latest).on(
+            (BM2.jid == latest.jid) & (BM2.creation == latest.latest_creation)
+        )
+        .select(BM2.jid, BM2.sender_name, BM2.message,
+                BM2.content_type, BM2.direction, BM2.creation)
+        .orderby(BM2.creation, order=frappe.qb.desc)
+        .run(as_dict=True)
+    )
+
+    seen: set[str] = set()
+    deduped = []
+    for r in rows:
+        if r.jid and r.jid not in seen:
+            seen.add(r.jid)
+            deduped.append(r)
+
+    line_doc = frappe.get_doc("Evolution Line", line) if line else None
+    group_names = {}
+    if line_doc:
+        group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
+
+    settings = frappe.get_cached_doc("Evolution API Settings")
+    restrict = settings.get("restrict_chats_by_team")
+    user_teams: set[str] = set()
+    user_has_any_team = False
+    if restrict:
+        user_teams = set(frappe.get_all("HD Team Member",
+                                        filters={"user": frappe.session.user}, pluck="parent"))
+        user_has_any_team = bool(user_teams)
+
+    jids = [r.jid for r in deduped]
+    contacts: dict[str, dict] = {}
+    if jids:
+        for c in frappe.get_all(
+            "Baileys Contact",
+            filters={"jid": ["in", jids]},
+            fields=["jid", "custom_name", "company", "assigned_team", "phone"],
+        ):
+            contacts[c.jid] = c
+
+    result = []
+    for r in deduped:
+        jid = r.jid
+        is_grp = jid.endswith("@g.us")
+        contact = contacts.get(jid, {})
+        assigned_team = contact.get("assigned_team") or ""
+
+        if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
+            continue
+
+        if is_grp:
+            display_name = (
+                contact.get("custom_name")
+                or group_names.get(jid)
+                or f"Group {jid.split('@')[0][-10:]}"
+            )
+        else:
+            display_name = (
+                contact.get("custom_name")
+                or r.get("sender_name")
+                or jid.split("@")[0]
+            )
+        result.append({
+            "jid": jid,
+            "display_name": display_name or jid,
+            "company": contact.get("company") or "",
+            "assigned_team": assigned_team,
+            "phone": contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
+            "is_group": is_grp,
+            "last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
+            "last_sender_name": r.get("sender_name") or "" if is_grp else "",
+            "last_message_time": str(r["creation"]),
+            "last_direction": r.get("direction", "Incoming"),
+            "content_type": r.get("content_type", "text"),
+        })
+
+    return result
+
+
+@frappe.whitelist()
+def mark_evolution_messages_read(jid: str = "", ticket: str = "") -> int:
+    """Mark all unread incoming Baileys Messages for a JID as read."""
+    if not jid and ticket:
+        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+    if not jid:
+        return 0
+
+    filters: dict = {"jid": jid, "direction": "Incoming", "is_read": 0}
+    unread = frappe.get_all("Baileys Message", filters=filters, fields=["name"])
+    for row in unread:
+        frappe.db.set_value("Baileys Message", row.name, "is_read", 1, update_modified=False)
+
+    if unread:
+        frappe.db.commit()
+
+    return len(unread)
+
+
+@frappe.whitelist()
+def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
+    """Fetch group participants from Evolution API and enrich names from Baileys Contacts."""
+    settings = _settings()
+    if not settings.enabled or not settings.server_url:
+        frappe.throw(_("Evolution API not configured or disabled"))
+    line_doc = frappe.get_doc("Evolution Line", line)
+    try:
+        resp = _requests.get(
+            _url("group/findParticipants", line_doc.instance_name),
+            params={"groupJid": jid},
+            headers=_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        participants = resp.json().get("participants", [])
+    except Exception as e:
+        frappe.throw(_("Failed to fetch group participants: {0}").format(str(e)))
+
+    normalised = []
+    for p in participants:
+        p_id = p.get("id") or ""
+        phone = _phone_from_jid(p_id) if p_id.endswith("@s.whatsapp.net") else ""
+        normalised.append({
+            "jid": p_id,
+            "phone": phone,
+            "name": "",
+            "isAdmin": p.get("admin") in ("admin", "superadmin"),
+        })
+
+    for p in normalised:
+        if p.get("name"):
+            continue
+        for lj in [p["jid"], f"{p['phone']}@s.whatsapp.net" if p["phone"] else ""]:
+            if not lj:
+                continue
+            name = frappe.db.get_value("Baileys Contact", {"jid": lj}, "custom_name")
+            if name:
+                p["name"] = name
+                break
+
+    return normalised
+
+
+@frappe.whitelist()
+def get_evolution_instance_status(line: str) -> dict:
+    """Return connection state for a given Evolution Line."""
+    settings = _settings()
+    if not settings.enabled or not settings.server_url:
+        return {"connected": False, "error": "Evolution API not configured"}
+    line_doc = frappe.get_doc("Evolution Line", line)
+    try:
+        resp = _requests.get(
+            _url("instance/connectionState", line_doc.instance_name),
+            headers=_headers(),
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        state = (data.get("instance") or {}).get("state") or ""
+        return {"connected": state == "open", "state": state}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
