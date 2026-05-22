@@ -115,7 +115,7 @@ fixtures = [
         "doctype": "Custom Field",
         "filters": [
             ["dt", "in", ["HD Ticket", "Customer"]],
-            ["fieldname", "in", ["baileys_jid", "helpdesk_notes"]],
+            ["fieldname", "in", ["baileys_jid", "baileys_line", "helpdesk_notes"]],
         ],
     }
 ]
