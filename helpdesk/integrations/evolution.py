@@ -326,3 +326,36 @@ def _handle_contacts_upsert(contacts: list) -> None:
         if jid and name:
             phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
             _upsert_contact(jid, phone, name)
+
+
+# Evolution API v2 message status integer codes
+_STATUS_MAP = {
+    0: None,         # ERROR — ignore
+    1: "Sent",       # PENDING
+    2: "Sent",       # SERVER_ACK
+    3: "Delivered",  # DELIVERY_ACK
+    4: "Read",       # READ
+    5: "Read",       # PLAYED (audio/video)
+}
+
+
+def _handle_update(updates: list, line) -> dict:
+    for item in updates:
+        key = item.get("key") or {}
+        message_id = key.get("id") or ""
+        raw_status = (item.get("update") or {}).get("status")
+        status = _STATUS_MAP.get(raw_status) if raw_status is not None else None
+        if not message_id or not status:
+            continue
+        msg_name = frappe.db.get_value("Baileys Message", {"message_id": message_id}, "name")
+        if not msg_name:
+            continue
+        frappe.db.set_value("Baileys Message", msg_name, "status", status, update_modified=False)
+        frappe.db.commit()
+        frappe.publish_realtime(
+            "helpdesk:baileys-status-update",
+            message={"message_id": message_id, "status": status,
+                     "jid": key.get("remoteJid", ""), "line": line.name},
+            after_commit=True,
+        )
+    return {"status": "ok"}
