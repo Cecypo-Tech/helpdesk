@@ -765,3 +765,27 @@ def get_evolution_instance_status(line: str) -> dict:
         return {"connected": state == "open", "state": state}
     except Exception as e:
         return {"connected": False, "error": str(e)}
+
+
+@frappe.whitelist()
+def get_evolution_qr(line: str) -> dict:
+    """Fetch QR code (or pairing code) for an Evolution Line instance."""
+    settings = _settings()
+    if not settings.enabled or not settings.server_url:
+        frappe.throw(_("Evolution API not configured or disabled"))
+    line_doc = frappe.get_doc("Evolution Line", line)
+    try:
+        resp = _requests.get(
+            _url("instance/connect", line_doc.instance_name),
+            headers=_headers(line_doc),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # Evolution API returns { base64: "data:image/png;base64,..." } or { code: "..." }
+        return {
+            "base64": data.get("base64") or data.get("qrcode", {}).get("base64") or "",
+            "code": data.get("code") or "",
+        }
+    except Exception as e:
+        frappe.throw(_("Failed to fetch QR code: {0}").format(str(e)))
