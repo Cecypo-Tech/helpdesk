@@ -942,6 +942,29 @@ def get_hd_teams() -> list[dict]:
 
 
 @frappe.whitelist()
+def get_hd_customers(query: str = "") -> list[dict]:
+	"""Search HD Customers by name for the contact editor autocomplete."""
+	q = (query or "").strip()
+	filters = [["customer_name", "like", f"%{q}%"]] if q else []
+	return frappe.get_all(
+		"HD Customer",
+		filters=filters,
+		fields=["name", "customer_name", "domain"],
+		order_by="customer_name asc",
+		limit=15,
+	)
+
+
+@frappe.whitelist()
+def get_customer_notes(customer: str) -> dict:
+	"""Return helpdesk_notes for an HD Customer."""
+	if not customer:
+		return {"notes": ""}
+	notes = frappe.db.get_value("HD Customer", customer, "helpdesk_notes") or ""
+	return {"notes": notes}
+
+
+@frappe.whitelist()
 def get_whatsapp_ticket_info(ticket: str) -> dict:
 	"""Return WhatsApp metadata for the ticket activity tab."""
 	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")

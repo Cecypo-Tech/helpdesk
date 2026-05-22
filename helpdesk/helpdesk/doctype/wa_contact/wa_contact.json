@@ -41,8 +41,9 @@
   },
   {
    "fieldname": "company",
-   "fieldtype": "Data",
-   "label": "Company",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "HD Customer",
    "in_list_view": 1
   },
   {

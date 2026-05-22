@@ -53,10 +53,26 @@
           <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
       </button>
+      <!-- Customer notes button (shown when customer is linked) -->
+      <button
+        v-if="company"
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full hover:bg-surface-gray-2"
+        :class="showNotes ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40' : 'text-ink-gray-4 hover:text-amber-600'"
+        title="Customer notes"
+        @click="toggleNotes"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+      </button>
       <!-- Edit contact button -->
       <button
         class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
-        title="Edit contact name / company"
+        title="Edit contact / customer"
         @click="openEdit"
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -109,6 +125,17 @@
       </div>
     </div>
 
+    <!-- Customer notes panel -->
+    <div v-if="showNotes && company" class="border-b border-outline-gray-2 bg-amber-50 dark:bg-surface-gray-2 px-4 py-3">
+      <div class="mb-1.5 flex items-center justify-between">
+        <span class="text-[11px] font-semibold text-amber-700 dark:text-amber-400">Customer Notes · {{ company }}</span>
+        <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="showNotes = false">✕</button>
+      </div>
+      <div v-if="customerNotesResource.loading" class="text-xs text-ink-gray-5">Loading…</div>
+      <div v-else-if="!notesText" class="text-xs italic text-ink-gray-4">No notes for this customer.</div>
+      <pre v-else class="whitespace-pre-wrap text-xs leading-relaxed text-ink-gray-8">{{ notesText }}</pre>
+    </div>
+
     <!-- Inline contact edit form -->
     <div v-if="editingContact" class="border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-3">
       <div class="flex items-end gap-2">
@@ -135,16 +162,38 @@
               @keydown.esc="editingContact = false"
             />
           </div>
-          <div>
-            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Company</label>
+          <div class="relative">
+            <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Customer</label>
             <input
-              v-model="editCompany"
+              v-model="editCustomerQuery"
               type="text"
-              placeholder="Company name..."
-              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
-              @keydown.enter="saveContact"
-              @keydown.esc="editingContact = false"
+              placeholder="Search customers…"
+              autocomplete="off"
+              class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1 pr-6 text-xs text-ink-gray-9 focus:border-outline-gray-4 focus:outline-none"
+              @input="onCustomerInput"
+              @keydown.enter.prevent="pickFirstCustomer"
+              @keydown.esc="customerDropdown = false"
             />
+            <button
+              v-if="editCustomerQuery"
+              class="absolute right-1.5 top-[18px] text-ink-gray-3 hover:text-ink-gray-6"
+              tabindex="-1"
+              @mousedown.prevent="clearCustomer"
+            >✕</button>
+            <div
+              v-if="customerDropdown && customerResults.length"
+              class="absolute z-20 mt-0.5 max-h-36 w-full overflow-y-auto rounded border border-outline-gray-2 bg-surface-white shadow-sm"
+            >
+              <button
+                v-for="c in customerResults"
+                :key="c.name"
+                class="flex w-full flex-col px-2.5 py-1.5 text-left hover:bg-surface-gray-2"
+                @mousedown.prevent="selectCustomer(c)"
+              >
+                <span class="text-xs font-medium text-ink-gray-8">{{ c.customer_name }}</span>
+                <span v-if="c.domain" class="text-[10px] text-ink-gray-5">{{ c.domain }}</span>
+              </button>
+            </div>
           </div>
           <div>
             <label class="mb-0.5 block text-[11px] font-medium text-ink-gray-5">Assigned Team</label>
@@ -236,6 +285,8 @@ import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import BaileysReplyBox from "./BaileysReplyBox.vue";
 
+interface HdCustomer { name: string; customer_name: string; domain?: string }
+
 const props = defineProps<{
   jid: string | null;
   displayName: string;
@@ -253,6 +304,31 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const replyingTo = ref<Record<string, any> | null>(null);
 
 const isGroup = computed(() => !!props.jid?.endsWith("@g.us"));
+
+// ── Customer notes panel ──────────────────────────────────────────────────────
+const showNotes = ref(false);
+
+const customerNotesResource = createResource({
+  url: "helpdesk.integrations.evolution.get_customer_notes",
+  auto: false,
+});
+const notesText = computed(() => (customerNotesResource.data as { notes?: string } | null)?.notes || "");
+
+function toggleNotes() {
+  if (!showNotes.value) {
+    showNotes.value = true;
+    if (props.company) customerNotesResource.submit({ customer: props.company });
+  } else {
+    showNotes.value = false;
+  }
+}
+
+watch(() => props.company, (newCustomer) => {
+  if (showNotes.value) {
+    if (newCustomer) customerNotesResource.submit({ customer: newCustomer });
+    else showNotes.value = false;
+  }
+});
 
 // ── Group members panel ───────────────────────────────────────────────────────
 const showMembers = ref(false);
@@ -290,19 +366,60 @@ function copyContactPhone() {
   }
 }
 
-// Reset members panel when switching conversations
+// Reset panels when switching conversations
 watch(() => props.jid, () => {
   showMembers.value = false;
   participantsResource.data = null;
+  showNotes.value = false;
+  customerNotesResource.data = null;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 const editingContact = ref(false);
 const editName = ref("");
 const editPhone = ref("");
-const editCompany = ref("");
+const editCustomer = ref(""); // stored Link value (HD Customer name)
+const editCustomerQuery = ref(""); // display text in the autocomplete input
+const customerResults = ref<HdCustomer[]>([]);
+const customerDropdown = ref(false);
+let customerSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const editTeam = ref("");
 const savingContact = ref(false);
+
+const customerSearchResource = createResource({
+  url: "helpdesk.integrations.evolution.get_hd_customers",
+  auto: false,
+  onSuccess(data: HdCustomer[]) {
+    customerResults.value = data;
+    customerDropdown.value = data.length > 0;
+  },
+});
+
+function onCustomerInput() {
+  editCustomer.value = editCustomerQuery.value.trim();
+  if (customerSearchTimer) clearTimeout(customerSearchTimer);
+  customerSearchTimer = setTimeout(() => {
+    customerSearchResource.submit({ query: editCustomerQuery.value });
+  }, 280);
+}
+
+function selectCustomer(c: HdCustomer) {
+  editCustomer.value = c.name;
+  editCustomerQuery.value = c.customer_name;
+  customerDropdown.value = false;
+  customerResults.value = [];
+}
+
+function pickFirstCustomer() {
+  if (customerResults.value.length) selectCustomer(customerResults.value[0]);
+}
+
+function clearCustomer() {
+  editCustomer.value = "";
+  editCustomerQuery.value = "";
+  customerDropdown.value = false;
+  customerResults.value = [];
+}
 
 const PAGE_SIZE = 40;
 const visibleCount = ref(PAGE_SIZE);
@@ -365,7 +482,10 @@ function loadMore() {
 function openEdit() {
   editName.value = props.displayName || "";
   editPhone.value = props.phone || "";
-  editCompany.value = props.company || "";
+  editCustomer.value = props.company || "";
+  editCustomerQuery.value = props.company || "";
+  customerDropdown.value = false;
+  customerResults.value = [];
   editTeam.value = props.assignedTeam || "";
   editingContact.value = true;
 }
@@ -377,7 +497,7 @@ function saveContact() {
     jid: props.jid,
     custom_name: editName.value.trim(),
     phone: editPhone.value.trim(),
-    company: editCompany.value.trim(),
+    company: editCustomer.value || editCustomerQuery.value.trim(),
     assigned_team: editTeam.value,
   });
 }
