@@ -1121,8 +1121,8 @@ def search_baileys_contacts(query: str = "") -> list[dict]:
 
 
 @frappe.whitelist()
-def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
-	"""Return WhatsApp analytics for the given date range."""
+def get_baileys_analytics(from_date: str = None, to_date: str = None, line: str = None) -> dict:
+	"""Return WhatsApp analytics for the given date range, optionally filtered by Evolution Line."""
 	from collections import defaultdict
 	from frappe.utils import add_days, today
 
@@ -1134,51 +1134,57 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 	from_dt = f"{from_date} 00:00:00"
 	to_dt = f"{to_date} 23:59:59"
 
+	line_filter = "AND line = %(line)s" if line else ""
+	params_base = {"from_dt": from_dt, "to_dt": to_dt, "line": line or ""}
+
 	# Summary counts
 	summary = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			COUNT(*) as total,
 			SUM(direction = 'Incoming') as incoming,
 			SUM(direction = 'Outgoing') as outgoing,
 			COUNT(DISTINCT jid) as conversations
 		FROM `tabBaileys Message`
-		WHERE creation BETWEEN %s AND %s
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
+		  {line_filter}
 		""",
-		(from_dt, to_dt),
+		params_base,
 		as_dict=True,
 	)[0]
 
 	# Messages per day
 	daily = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			DATE(creation) as date,
 			COUNT(*) as total,
 			SUM(direction = 'Incoming') as incoming,
 			SUM(direction = 'Outgoing') as outgoing
 		FROM `tabBaileys Message`
-		WHERE creation BETWEEN %s AND %s
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
+		  {line_filter}
 		GROUP BY DATE(creation)
 		ORDER BY date ASC
 		""",
-		(from_dt, to_dt),
+		params_base,
 		as_dict=True,
 	)
 
 	# Messages by hour of day
 	hourly = frappe.db.sql(
-		"""
+		f"""
 		SELECT HOUR(creation) as hour, COUNT(*) as total
 		FROM `tabBaileys Message`
-		WHERE creation BETWEEN %s AND %s
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
+		  {line_filter}
 		GROUP BY HOUR(creation)
 		ORDER BY hour ASC
 		""",
-		(from_dt, to_dt),
+		params_base,
 		as_dict=True,
 	)
 	hourly_map = {r.hour: r.total for r in hourly}
@@ -1186,7 +1192,7 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 
 	# Top active contacts/groups
 	top_raw = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			jid,
 			COUNT(*) as total,
@@ -1194,14 +1200,15 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 			SUM(direction = 'Outgoing') as outgoing,
 			MAX(sender_name) as sender_name
 		FROM `tabBaileys Message`
-		WHERE creation BETWEEN %s AND %s
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND jid NOT LIKE '%%@broadcast'
 		  AND content_type != 'reaction'
+		  {line_filter}
 		GROUP BY jid
 		ORDER BY total DESC
 		LIMIT 15
 		""",
-		(from_dt, to_dt),
+		params_base,
 		as_dict=True,
 	)
 
@@ -1215,8 +1222,12 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 		):
 			contacts[c.jid] = c
 
-	settings = _settings()
-	group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
+	if line and frappe.db.exists("Evolution Line", line):
+		line_doc = frappe.get_doc("Evolution Line", line)
+		group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
+	else:
+		settings = _settings()
+		group_names = {row.jid: (row.group_name or row.jid) for row in (settings.group_jids or [])}
 
 	top_contacts = []
 	for r in top_raw:
@@ -1241,7 +1252,7 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 	# Agent response times
 	# For each outgoing message, find the most recent incoming before it (same JID, within 24h)
 	raw_replies = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			bm_out.owner AS agent_user,
 			bm_out.sender_name AS agent_name,
@@ -1262,10 +1273,11 @@ def get_baileys_analytics(from_date: str = None, to_date: str = None) -> dict:
 		)
 		WHERE bm_out.direction = 'Outgoing'
 		  AND bm_out.content_type NOT IN ('reaction')
-		  AND bm_out.creation BETWEEN %s AND %s
+		  AND bm_out.creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) BETWEEN 0 AND 1440
+		  {line_filter.replace('line =', 'bm_out.line =')}
 		""",
-		(from_dt, to_dt),
+		params_base,
 		as_dict=True,
 	)
 
