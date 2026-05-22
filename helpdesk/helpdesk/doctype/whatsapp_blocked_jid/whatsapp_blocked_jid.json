@@ -28,7 +28,7 @@
  "modified": "2026-05-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
- "name": "Baileys Blocked JID",
+ "name": "WhatsApp Blocked JID",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",

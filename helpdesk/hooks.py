@@ -70,10 +70,6 @@ doc_events = {
         "on_trash": "helpdesk.extends.assignment_rule.on_assignment_rule_trash",
         "validate": "helpdesk.extends.assignment_rule.on_assignment_rule_validate",
     },
-    "WhatsApp Message": {
-        "after_insert": "helpdesk.integrations.whatsapp.on_whatsapp_message_insert",
-        "on_update": "helpdesk.integrations.whatsapp.on_whatsapp_message_update",
-    },
 }
 
 has_permission = {

@@ -1,45 +1,94 @@
 {
  "actions": [],
  "autoname": "field:instance_name",
- "creation": "2026-05-22 10:00:00.000000",
+ "creation": "2026-05-22 10:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "label", "instance_name", "instance_token", "col_break_1", "connected_user",
-  "section_groups", "group_jids",
-  "section_blocklist", "blocked_jids"
+  "label",
+  "instance_name",
+  "instance_token",
+  "col_break_1",
+  "connected_user",
+  "section_groups",
+  "group_jids",
+  "section_blocklist",
+  "blocked_jids"
  ],
  "fields": [
-  {"fieldname": "label", "fieldtype": "Data", "label": "Label",
-   "description": "Friendly name shown in sidebar. Falls back to instance_name if blank."},
-  {"fieldname": "instance_name", "fieldtype": "Data", "label": "Instance Name",
+  {
+   "description": "Friendly name shown in sidebar. Falls back to instance_name if blank.",
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Label"
+  },
+  {
    "description": "Must exactly match the instance name configured in Evolution API.",
-   "reqd": 1, "unique": 1, "in_list_view": 1},
-  {"fieldname": "instance_token", "fieldtype": "Data", "label": "Instance Token",
-   "description": "Per-instance API token from Evolution API. Overrides the global API key when set."},
-  {"fieldname": "col_break_1", "fieldtype": "Column Break"},
-  {"fieldname": "connected_user", "fieldtype": "Link", "options": "User",
+   "fieldname": "instance_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Instance Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Per-instance API token from Evolution API. Overrides the global API key when set.",
+   "fieldname": "instance_token",
+   "fieldtype": "Data",
+   "label": "Instance Token"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Credited as owner of fromMe-mirrored (phone-typed) messages. Falls back to Administrator.",
+   "fieldname": "connected_user",
+   "fieldtype": "Link",
    "label": "Connected User",
-   "description": "Credited as owner of fromMe-mirrored (phone-typed) messages. Falls back to Administrator."},
-  {"fieldname": "section_groups", "fieldtype": "Section Break", "label": "Group Mappings"},
-  {"fieldname": "group_jids", "fieldtype": "Table",
-   "label": "WhatsApp Groups", "options": "Baileys Gateway Group JID",
-   "description": "Map each group JID to a friendly name and optional team override."},
-  {"fieldname": "section_blocklist", "fieldtype": "Section Break", "label": "Blocklist"},
-  {"fieldname": "blocked_jids", "fieldtype": "Table",
-   "label": "Blocked Numbers / Groups", "options": "Baileys Blocked JID",
-   "description": "Messages from these JIDs are silently dropped."}
+   "options": "User"
+  },
+  {
+   "fieldname": "section_groups",
+   "fieldtype": "Section Break",
+   "label": "Group Mappings"
+  },
+  {
+   "description": "Map each group JID to a friendly name and optional team override.",
+   "fieldname": "group_jids",
+   "fieldtype": "Table",
+   "label": "WhatsApp Groups",
+   "options": "WhatsApp Group JID"
+  },
+  {
+   "fieldname": "section_blocklist",
+   "fieldtype": "Section Break",
+   "label": "Blocklist"
+  },
+  {
+   "description": "Messages from these JIDs are silently dropped.",
+   "fieldname": "blocked_jids",
+   "fieldtype": "Table",
+   "label": "Blocked Numbers / Groups",
+   "options": "WhatsApp Blocked JID"
+  }
  ],
- "issingle": 0,
  "links": [],
- "modified": "2026-05-22 10:00:00.000000",
+ "modified": "2026-05-23 00:18:46.520869",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "Evolution Line",
  "owner": "Administrator",
  "permissions": [
-  {"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

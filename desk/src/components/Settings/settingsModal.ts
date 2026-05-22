@@ -19,7 +19,6 @@ import { FieldDependencyIcon, PhoneIcon } from "@/components/icons";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import Telephony from "./Telephony/Telephony.vue";
 import WhatsAppSettings from "./WhatsApp/WhatsAppSettings.vue";
-import BaileysGatewaySettings from "./BaileysGateway/BaileysGatewaySettings.vue";
 import { EmailNotifications } from "./EmailNotifications";
 import { __ } from "@/translation";
 import SavedReplies from "./SavedReplies/SavedReplies.vue";
@@ -139,12 +138,6 @@ export const tabs = computed(() => {
           component: markRaw(WhatsAppSettings),
           condition: () => auth.isAdmin,
         },
-        {
-          label: __("Baileys Gateway"),
-          icon: markRaw(WhatsAppIcon),
-          component: markRaw(BaileysGatewaySettings),
-          condition: () => auth.isAdmin,
-        },
       ],
     },
   ];
@@ -181,7 +174,6 @@ type TabName =
   | "Field Dependencies"
   | "Telephony"
   | "WhatsApp"
-  | "Baileys Gateway"
   | "Saved Replies";
 
 export const setActiveSettingsTab = (tabName: TabName) => {

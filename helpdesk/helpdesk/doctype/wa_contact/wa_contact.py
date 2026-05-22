@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class BaileysBlockedJID(Document):
+class WAContact(Document):
 	pass

@@ -16,28 +16,23 @@ const pickingUp = ref(false);
 const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
-  url: "helpdesk.integrations.baileys.get_baileys_messages",
+  url: "helpdesk.integrations.evolution.get_whatsapp_messages",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const tabInfo = createResource({
-  url: "helpdesk.integrations.baileys.get_ticket_baileys_info",
+  url: "helpdesk.integrations.evolution.get_whatsapp_ticket_info",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
-const connectedPhone = createResource({
-  url: "helpdesk.integrations.baileys.get_connected_phone",
-  auto: true,
-});
-
 const markReadResource = createResource({
-  url: "helpdesk.integrations.baileys.mark_baileys_messages_read",
+  url: "helpdesk.integrations.evolution.mark_evolution_messages_read",
 });
 
 const pickUpResource = createResource({
-  url: "helpdesk.integrations.baileys.pickup_baileys_ticket",
+  url: "helpdesk.integrations.evolution.pickup_whatsapp_ticket",
   onSuccess() {
     pickingUp.value = false;
     tabInfo.reload();
@@ -50,7 +45,7 @@ const pickUpResource = createResource({
 });
 
 const sendReactionResource = createResource({
-  url: "helpdesk.integrations.baileys.send_baileys_reaction",
+  url: "helpdesk.integrations.evolution.send_evolution_reaction",
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send reaction");
   },
@@ -91,11 +86,6 @@ const groupedMessages = computed(() => {
     groups[date].push(msg);
   }
   return groups;
-});
-
-const phoneDisplay = computed(() => {
-  const phone = connectedPhone.data?.phone;
-  return phone ? `+${phone}` : null;
 });
 
 function scrollToBottom() {
@@ -172,24 +162,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex flex-1 flex-col overflow-hidden">
-    <!-- Chat header: connected phone + optional group name -->
-    <div
-      v-if="phoneDisplay"
-      class="flex items-center gap-2 border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-2"
-    >
-      <WhatsAppIcon class="h-4 w-4 text-green-600" />
-      <span class="text-xs text-ink-gray-6">
-        Connected:
-        <span class="font-medium text-ink-gray-8">{{ phoneDisplay }}</span>
-      </span>
-      <span
-        v-if="tabInfo.data?.is_group && tabInfo.data?.group_name"
-        class="ml-auto text-[11px] text-ink-gray-5"
-      >
-        {{ tabInfo.data.group_name }}
-      </span>
-    </div>
-
     <!-- Messages area -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto px-5 py-4">
       <div v-if="messages.loading && !messages.data" class="flex justify-center py-10">
@@ -228,7 +200,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Bottom area -->
-    <div v-if="tabInfo.data?.has_baileys">
+    <div v-if="tabInfo.data?.has_whatsapp">
       <div
         v-if="!tabInfo.data.is_assigned"
         class="flex items-center justify-between border-t border-outline-gray-2 bg-surface-gray-1 px-4 py-2"
@@ -251,10 +223,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      v-else-if="tabInfo.fetched && tabInfo.data && !tabInfo.data.has_baileys"
+      v-else-if="tabInfo.fetched && tabInfo.data && !tabInfo.data.has_whatsapp"
       class="border-t border-outline-gray-2 px-4 py-3 text-center text-xs text-ink-gray-5"
     >
-      This ticket is not linked to a Baileys chat.
+      This ticket is not linked to a WhatsApp chat.
     </div>
   </div>
 </template>

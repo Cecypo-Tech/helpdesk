@@ -155,13 +155,13 @@ def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings
 
 
 def _upsert_contact(jid: str, phone: str, name: str) -> None:
-    """Create-or-blank-fill a Baileys Contact row keyed by JID."""
+    """Create-or-blank-fill a WA Contact row keyed by JID."""
     if not jid:
         return
     try:
-        if frappe.db.exists("Baileys Contact", {"jid": jid}):
+        if frappe.db.exists("WA Contact", {"jid": jid}):
             existing = frappe.db.get_value(
-                "Baileys Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
+                "WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
             ) or {}
             updates = {}
             if not existing.get("custom_name") and name:
@@ -169,10 +169,10 @@ def _upsert_contact(jid: str, phone: str, name: str) -> None:
             if not existing.get("phone") and phone:
                 updates["phone"] = phone
             if updates:
-                frappe.db.set_value("Baileys Contact", {"jid": jid}, updates, update_modified=False)
+                frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
         else:
             frappe.get_doc({
-                "doctype": "Baileys Contact",
+                "doctype": "WA Contact",
                 "jid": jid,
                 "phone": phone,
                 "custom_name": name,
@@ -638,7 +638,7 @@ def get_evolution_conversations(line: str = "") -> list[dict]:
     contacts: dict[str, dict] = {}
     if jids:
         for c in frappe.get_all(
-            "Baileys Contact",
+            "WA Contact",
             filters={"jid": ["in", jids]},
             fields=["jid", "custom_name", "company", "assigned_team", "phone"],
         ):
@@ -704,7 +704,7 @@ def mark_evolution_messages_read(jid: str = "", ticket: str = "") -> int:
 
 @frappe.whitelist()
 def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
-    """Fetch group participants from Evolution API and enrich names from Baileys Contacts."""
+    """Fetch group participants from Evolution API and enrich names from WA Contacts."""
     settings = _settings()
     if not settings.enabled or not settings.server_url:
         frappe.throw(_("Evolution API not configured or disabled"))
@@ -738,7 +738,7 @@ def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
         for lj in [p["jid"], f"{p['phone']}@s.whatsapp.net" if p["phone"] else ""]:
             if not lj:
                 continue
-            name = frappe.db.get_value("Baileys Contact", {"jid": lj}, "custom_name")
+            name = frappe.db.get_value("WA Contact", {"jid": lj}, "custom_name")
             if name:
                 p["name"] = name
                 break
@@ -789,3 +789,495 @@ def get_evolution_qr(line: str) -> dict:
         }
     except Exception as e:
         frappe.throw(_("Failed to fetch QR code: {0}").format(str(e)))
+
+
+# ── Migrated from baileys.py ──────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
+	"""Return messages for a conversation. Accepts jid directly or ticket name."""
+	from frappe.query_builder import DocType
+
+	if not jid and ticket:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid:
+		return []
+
+	BM = DocType("Baileys Message")
+	User = DocType("User")
+	BC = DocType("WA Contact")
+
+	rows = (
+		frappe.qb.from_(BM)
+		.left_join(User).on(User.name == BM.owner)
+		.left_join(BC).on(BC.jid == BM.sender_jid)
+		.select(
+			BM.name, BM.creation, BM.direction, BM.jid, BM.message,
+			BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
+			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
+			User.full_name.as_("sender_full_name"),
+			BC.phone.as_("sender_phone"),
+		)
+		.where(BM.jid == jid)
+		.orderby(BM.creation)
+		.run(as_dict=True)
+	)
+
+	for m in rows:
+		if m.get("creation") and not isinstance(m["creation"], str):
+			m["creation"] = str(m["creation"])
+		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
+		m["attach"] = m.get("media_url") or ""
+		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
+
+	return rows
+
+
+@frappe.whitelist()
+def save_whatsapp_contact(jid: str, custom_name: str = "", company: str = "", assigned_team: str = "", phone: str = "") -> dict:
+	"""Create or update a WA Contact override for a JID."""
+	custom_name = (custom_name or "").strip()
+	company = (company or "").strip()
+	assigned_team = (assigned_team or "").strip()
+	phone = _normalize_phone(phone or "")
+
+	if frappe.db.exists("WA Contact", {"jid": jid}):
+		doc = frappe.get_doc("WA Contact", {"jid": jid})
+		doc.custom_name = custom_name
+		doc.company = company
+		doc.assigned_team = assigned_team
+		if phone:
+			doc.phone = phone
+		doc.save(ignore_permissions=True)
+	else:
+		frappe.get_doc({
+			"doctype": "WA Contact",
+			"jid": jid,
+			"phone": phone or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
+			"custom_name": custom_name,
+			"company": company,
+			"assigned_team": assigned_team,
+		}).insert(ignore_permissions=True)
+
+	return {"status": "ok", "jid": jid, "custom_name": custom_name, "company": company, "phone": phone, "assigned_team": assigned_team}
+
+
+@frappe.whitelist()
+def search_whatsapp_contacts(query: str = "") -> list[dict]:
+	"""Search WA Contacts and standard Contacts by name/phone. Returns up to 30 matches."""
+	q = (query or "").strip()
+	like = f"%{q}%"
+
+	if q:
+		wa_rows = frappe.db.sql(
+			"""
+			SELECT jid, custom_name, phone, company
+			FROM `tabWA Contact`
+			WHERE jid NOT LIKE '%%@broadcast'
+			  AND (custom_name LIKE %s OR phone LIKE %s OR company LIKE %s)
+			ORDER BY custom_name ASC
+			LIMIT 30
+			""",
+			(like, like, like),
+			as_dict=True,
+		)
+	else:
+		wa_rows = frappe.get_all(
+			"WA Contact",
+			filters=[["jid", "not like", "%@broadcast"]],
+			fields=["jid", "custom_name", "phone", "company"],
+			order_by="custom_name asc",
+			limit=30,
+		)
+
+	seen_phones: set[str] = {_normalize_phone(r.phone) for r in wa_rows if r.phone}
+	result = list(wa_rows)
+
+	if q:
+		frappe_rows = frappe.db.sql(
+			"""
+			SELECT c.full_name, c.mobile_no, c.company_name
+			FROM `tabContact` c
+			WHERE c.mobile_no IS NOT NULL AND c.mobile_no != ''
+			  AND (c.full_name LIKE %s OR c.mobile_no LIKE %s OR c.company_name LIKE %s)
+			ORDER BY c.full_name ASC
+			LIMIT 50
+			""",
+			(like, like, like),
+			as_dict=True,
+		)
+	else:
+		frappe_rows = frappe.db.sql(
+			"""
+			SELECT c.full_name, c.mobile_no, c.company_name
+			FROM `tabContact` c
+			WHERE c.mobile_no IS NOT NULL AND c.mobile_no != ''
+			ORDER BY c.full_name ASC
+			LIMIT 50
+			""",
+			as_dict=True,
+		)
+
+	for r in frappe_rows:
+		phone = _normalize_phone(r.mobile_no)
+		if not phone or phone in seen_phones:
+			continue
+		seen_phones.add(phone)
+		result.append({
+			"jid": f"{phone}@s.whatsapp.net",
+			"custom_name": r.full_name or "",
+			"phone": phone,
+			"company": r.company_name or "",
+		})
+		if len(result) >= 30:
+			break
+
+	return result
+
+
+@frappe.whitelist()
+def get_hd_teams() -> list[dict]:
+	"""Return all HD Teams for the team assignment dropdown."""
+	return frappe.get_all("HD Team", fields=["name"], order_by="name asc")
+
+
+@frappe.whitelist()
+def get_whatsapp_ticket_info(ticket: str) -> dict:
+	"""Return WhatsApp metadata for the ticket activity tab."""
+	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	if not jid:
+		return {"has_whatsapp": False}
+
+	is_grp = _is_group(jid)
+	group_name = None
+	if is_grp:
+		group_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or jid.split("@")[0]
+
+	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+	assigned_users = frappe.parse_json(assign_json) or []
+
+	return {
+		"has_whatsapp": True,
+		"jid": jid,
+		"is_group": is_grp,
+		"group_name": group_name,
+		"is_assigned": frappe.session.user in assigned_users,
+		"assignees": assigned_users,
+		"reply_window_open": True,
+	}
+
+
+@frappe.whitelist()
+def pickup_whatsapp_ticket(ticket: str) -> dict:
+	"""Assign the current agent to a WhatsApp ticket."""
+	user = frappe.session.user
+	if not frappe.db.exists("HD Agent", {"user": user}):
+		frappe.throw(_("You are not registered as a Helpdesk Agent."))
+
+	agent_group = frappe.db.get_value("HD Ticket", ticket, "agent_group")
+	if agent_group:
+		members = frappe.get_all(
+			"HD Team Member",
+			filters={"parent": agent_group, "parenttype": "HD Team"},
+			pluck="user",
+		)
+		if user not in members:
+			frappe.throw(_("You are not a member of the team '{0}'.").format(agent_group))
+
+	frappe.get_doc("HD Ticket", ticket).assign_agent(user)
+	return {"assigned_to": user}
+
+
+@frappe.whitelist()
+def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str = None) -> dict:
+	"""Return WhatsApp analytics for the given date range, optionally filtered by Evolution Line."""
+	from collections import defaultdict
+	from frappe.utils import add_days, today
+
+	if not from_date:
+		from_date = add_days(today(), -30)
+	if not to_date:
+		to_date = today()
+
+	from_dt = f"{from_date} 00:00:00"
+	to_dt = f"{to_date} 23:59:59"
+
+	line_filter = "AND line = %(line)s" if line else ""
+	params_base = {"from_dt": from_dt, "to_dt": to_dt, "line": line or ""}
+
+	summary = frappe.db.sql(
+		f"""
+		SELECT
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing,
+			COUNT(DISTINCT jid) as conversations
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
+		  AND content_type != 'reaction'
+		  {line_filter}
+		""",
+		params_base,
+		as_dict=True,
+	)[0]
+
+	daily = frappe.db.sql(
+		f"""
+		SELECT
+			DATE(creation) as date,
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
+		  AND content_type != 'reaction'
+		  {line_filter}
+		GROUP BY DATE(creation)
+		ORDER BY date ASC
+		""",
+		params_base,
+		as_dict=True,
+	)
+
+	hourly = frappe.db.sql(
+		f"""
+		SELECT HOUR(creation) as hour, COUNT(*) as total
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
+		  AND content_type != 'reaction'
+		  {line_filter}
+		GROUP BY HOUR(creation)
+		ORDER BY hour ASC
+		""",
+		params_base,
+		as_dict=True,
+	)
+	hourly_map = {r.hour: r.total for r in hourly}
+	hourly_full = [{"hour": h, "total": hourly_map.get(h, 0)} for h in range(24)]
+
+	top_raw = frappe.db.sql(
+		f"""
+		SELECT
+			jid,
+			COUNT(*) as total,
+			SUM(direction = 'Incoming') as incoming,
+			SUM(direction = 'Outgoing') as outgoing,
+			MAX(sender_name) as sender_name
+		FROM `tabBaileys Message`
+		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
+		  AND jid NOT LIKE '%%@broadcast'
+		  AND content_type != 'reaction'
+		  {line_filter}
+		GROUP BY jid
+		ORDER BY total DESC
+		LIMIT 15
+		""",
+		params_base,
+		as_dict=True,
+	)
+
+	jids = [r.jid for r in top_raw]
+	contacts: dict = {}
+	if jids:
+		for c in frappe.get_all(
+			"WA Contact",
+			filters={"jid": ["in", jids]},
+			fields=["jid", "custom_name", "company"],
+		):
+			contacts[c.jid] = c
+
+	if line and frappe.db.exists("Evolution Line", line):
+		line_doc = frappe.get_doc("Evolution Line", line)
+		group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
+	else:
+		group_names = {}
+
+	top_contacts = []
+	for r in top_raw:
+		contact = contacts.get(r.jid, {})
+		is_grp = _is_group(r.jid)
+		display_name = (
+			contact.get("custom_name")
+			or (group_names.get(r.jid) if is_grp else None)
+			or r.get("sender_name")
+			or r.jid.split("@")[0]
+		)
+		top_contacts.append({
+			"jid": r.jid,
+			"display_name": display_name,
+			"company": contact.get("company") or "",
+			"is_group": is_grp,
+			"total": r.total,
+			"incoming": r.incoming or 0,
+			"outgoing": r.outgoing or 0,
+		})
+
+	raw_replies = frappe.db.sql(
+		f"""
+		SELECT
+			bm_out.owner AS agent_user,
+			bm_out.sender_name AS agent_name,
+			TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) AS response_minutes
+		FROM `tabBaileys Message` bm_out
+		INNER JOIN `tabBaileys Message` bm_in ON (
+			bm_in.jid = bm_out.jid
+			AND bm_in.direction = 'Incoming'
+			AND bm_in.content_type != 'reaction'
+			AND bm_in.creation = (
+				SELECT MAX(b2.creation)
+				FROM `tabBaileys Message` b2
+				WHERE b2.jid = bm_out.jid
+				  AND b2.direction = 'Incoming'
+				  AND b2.content_type != 'reaction'
+				  AND b2.creation < bm_out.creation
+			)
+		)
+		WHERE bm_out.direction = 'Outgoing'
+		  AND bm_out.content_type NOT IN ('reaction')
+		  AND bm_out.creation BETWEEN %(from_dt)s AND %(to_dt)s
+		  AND TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) BETWEEN 0 AND 1440
+		  {line_filter.replace('line =', 'bm_out.line =')}
+		""",
+		params_base,
+		as_dict=True,
+	)
+
+	agent_map: dict = defaultdict(lambda: {"replies": 0, "total_minutes": 0, "lt5": 0, "lt30": 0, "lt120": 0, "gt120": 0})
+	agent_names: dict = {}
+	for r in raw_replies:
+		key = r.agent_user or r.agent_name or "Unknown"
+		agent_names[key] = r.agent_name or r.agent_user or "Unknown"
+		agent_map[key]["replies"] += 1
+		m = r.response_minutes or 0
+		agent_map[key]["total_minutes"] += m
+		if m < 5:
+			agent_map[key]["lt5"] += 1
+		elif m < 30:
+			agent_map[key]["lt30"] += 1
+		elif m < 120:
+			agent_map[key]["lt120"] += 1
+		else:
+			agent_map[key]["gt120"] += 1
+
+	agent_stats = sorted(
+		[
+			{
+				"agent_name": agent_names.get(k, k),
+				"replies": v["replies"],
+				"avg_minutes": round(v["total_minutes"] / v["replies"]) if v["replies"] else 0,
+				"lt5": v["lt5"],
+				"lt30": v["lt30"],
+				"lt120": v["lt120"],
+				"gt120": v["gt120"],
+			}
+			for k, v in agent_map.items()
+		],
+		key=lambda x: x["replies"],
+		reverse=True,
+	)
+
+	return {
+		"summary": {k: (int(v) if v is not None else 0) for k, v in summary.items()},
+		"daily": [dict(r) for r in daily],
+		"hourly": hourly_full,
+		"top_contacts": top_contacts,
+		"agent_stats": agent_stats,
+	}
+
+
+@frappe.whitelist()
+def sync_evolution_contacts() -> dict:
+	"""Fetch contacts from all Evolution Lines and upsert into WA Contact."""
+	settings = _settings()
+	if not settings.enabled or not settings.server_url:
+		frappe.throw(_("Evolution API not configured or disabled"))
+
+	lines = frappe.get_all("Evolution Line", fields=["name", "instance_name", "instance_token"])
+	created = updated = 0
+
+	for line_row in lines:
+		line_doc = frappe._dict(line_row)
+		try:
+			resp = _requests.get(
+				_url("contacts/fetchContacts", line_doc.instance_name),
+				headers=_headers(line_doc),
+				timeout=15,
+			)
+			resp.raise_for_status()
+			contacts = resp.json() if isinstance(resp.json(), list) else resp.json().get("contacts", [])
+		except Exception:
+			continue
+
+		for c in contacts:
+			jid = c.get("id") or c.get("jid") or ""
+			if not jid or "@broadcast" in jid or jid.endswith("@g.us"):
+				continue
+			phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
+			name = c.get("pushName") or c.get("name") or ""
+			if frappe.db.exists("WA Contact", {"jid": jid}):
+				existing = frappe.db.get_value("WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True)
+				updates = {}
+				if not existing.phone and phone:
+					updates["phone"] = phone
+				if not existing.custom_name and name:
+					updates["custom_name"] = name
+				if updates:
+					frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
+					updated += 1
+			else:
+				frappe.get_doc({
+					"doctype": "WA Contact",
+					"jid": jid,
+					"phone": phone,
+					"custom_name": name,
+				}).insert(ignore_permissions=True)
+				created += 1
+
+	frappe.db.commit()
+	return {"created": created, "updated": updated, "total": created + updated}
+
+
+@frappe.whitelist()
+def sync_evolution_groups() -> dict:
+	"""Fetch groups from all Evolution Lines and upsert group subjects into WA Contact."""
+	settings = _settings()
+	if not settings.enabled or not settings.server_url:
+		frappe.throw(_("Evolution API not configured or disabled"))
+
+	lines = frappe.get_all("Evolution Line", fields=["name", "instance_name", "instance_token"])
+	created = updated = 0
+
+	for line_row in lines:
+		line_doc = frappe._dict(line_row)
+		try:
+			resp = _requests.get(
+				_url("group/fetchAllGroups", line_doc.instance_name),
+				params={"getParticipants": "false"},
+				headers=_headers(line_doc),
+				timeout=15,
+			)
+			resp.raise_for_status()
+			groups = resp.json() if isinstance(resp.json(), list) else resp.json().get("groups", [])
+		except Exception:
+			continue
+
+		for g in groups:
+			jid = g.get("id") or g.get("jid") or ""
+			if not jid:
+				continue
+			subject = g.get("subject") or g.get("name") or ""
+			if frappe.db.exists("WA Contact", {"jid": jid}):
+				existing_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or ""
+				if not existing_name and subject:
+					frappe.db.set_value("WA Contact", {"jid": jid}, "custom_name", subject, update_modified=False)
+					updated += 1
+			else:
+				frappe.get_doc({
+					"doctype": "WA Contact",
+					"jid": jid,
+					"custom_name": subject,
+				}).insert(ignore_permissions=True)
+				created += 1
+
+	frappe.db.commit()
+	return {"created": created, "updated": updated, "total": created + updated}

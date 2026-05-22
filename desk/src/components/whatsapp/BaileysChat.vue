@@ -310,7 +310,7 @@ const loadingMore = ref(false);
 
 
 const messages = createResource({
-  url: "helpdesk.integrations.baileys.get_baileys_messages",
+  url: "helpdesk.integrations.evolution.get_whatsapp_messages",
   auto: false,
 });
 
@@ -329,7 +329,7 @@ const sendReactionResource = createResource({
 });
 
 const saveContactResource = createResource({
-  url: "helpdesk.integrations.baileys.save_baileys_contact",
+  url: "helpdesk.integrations.evolution.save_whatsapp_contact",
   onSuccess(data: { custom_name: string; company: string; assigned_team: string; phone: string }) {
     savingContact.value = false;
     editingContact.value = false;
@@ -343,7 +343,7 @@ const saveContactResource = createResource({
 });
 
 const teamsResource = createResource({
-  url: "helpdesk.integrations.baileys.get_hd_teams",
+  url: "helpdesk.integrations.evolution.get_hd_teams",
   auto: true,
 });
 

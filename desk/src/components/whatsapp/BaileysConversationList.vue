@@ -169,7 +169,7 @@ const lastReadMap = ref<Record<string, number>>({});
 const syncingContacts = ref(false);
 
 const syncContactsResource = createResource({
-  url: "helpdesk.integrations.baileys.sync_baileys_contacts",
+  url: "helpdesk.integrations.evolution.sync_evolution_contacts",
   onSuccess(data: { updated: number; created: number; total: number }) {
     syncGroupsResource.submit({});
   },
@@ -180,10 +180,10 @@ const syncContactsResource = createResource({
 });
 
 const syncGroupsResource = createResource({
-  url: "helpdesk.integrations.baileys.sync_baileys_groups",
+  url: "helpdesk.integrations.evolution.sync_evolution_groups",
   onSuccess(data: { updated: number; created: number; total: number }) {
     syncingContacts.value = false;
-    toast.success(`Synced contacts & ${data.total} groups`);
+    toast.success(`Synced ${data.total} contacts & groups`);
     conversations.reload();
   },
   onError(e: any) {
@@ -211,7 +211,7 @@ const newChatError = ref("");
 const newChatInputRef = ref<HTMLInputElement | null>(null);
 
 const contactsResource = createResource({
-  url: "helpdesk.integrations.baileys.search_baileys_contacts",
+  url: "helpdesk.integrations.evolution.search_whatsapp_contacts",
   auto: false,
 });
 

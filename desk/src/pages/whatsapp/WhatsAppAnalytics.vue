@@ -303,7 +303,7 @@ function applyPreset(p: { label: string; days: number }) {
 // ── Data ──────────────────────────────────────────────────────────────────────
 
 const analytics = createResource({
-  url: "helpdesk.integrations.baileys.get_baileys_analytics",
+  url: "helpdesk.integrations.evolution.get_whatsapp_analytics",
   auto: false,
 });
 
