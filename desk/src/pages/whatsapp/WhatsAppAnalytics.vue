@@ -14,6 +14,16 @@
       <WhatsAppIcon class="h-4 w-4 text-green-600" />
       <h1 class="text-sm font-semibold text-ink-gray-9">WhatsApp Analytics</h1>
       <div class="flex-1" />
+      <!-- Line filter -->
+      <select
+        v-if="lines.length > 1"
+        v-model="selectedLine"
+        class="rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-xs text-ink-gray-7 focus:border-outline-gray-4 focus:outline-none"
+        @change="submitAnalytics"
+      >
+        <option value="">All lines</option>
+        <option v-for="l in lines" :key="l.name" :value="l.name">{{ l.display_label || l.label || l.name }}</option>
+      </select>
       <div class="flex items-center gap-1">
         <button
           v-for="p in presets"
@@ -244,9 +254,15 @@
 import { createResource, LoadingIndicator } from "frappe-ui";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
+import { useEvolutionLinesStore } from "@/stores/evolutionLines";
 
 const router = useRouter();
+
+const evolutionLinesStore = useEvolutionLinesStore();
+const { lines } = storeToRefs(evolutionLinesStore);
+const selectedLine = ref("");
 
 // ── Date presets ──────────────────────────────────────────────────────────────
 
@@ -269,11 +285,19 @@ function todayStr(): string {
 const fromDate = ref(daysAgo(30));
 const toDate = ref(todayStr());
 
+function submitAnalytics() {
+  analytics.submit({
+    from_date: fromDate.value,
+    to_date: toDate.value,
+    ...(selectedLine.value ? { line: selectedLine.value } : {}),
+  });
+}
+
 function applyPreset(p: { label: string; days: number }) {
   activePreset.value = p.label;
   fromDate.value = daysAgo(p.days);
   toDate.value = todayStr();
-  analytics.submit({ from_date: fromDate.value, to_date: toDate.value });
+  submitAnalytics();
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -283,7 +307,7 @@ const analytics = createResource({
   auto: false,
 });
 
-analytics.submit({ from_date: fromDate.value, to_date: toDate.value });
+submitAnalytics();
 
 const data = computed(() => analytics.data || null);
 
