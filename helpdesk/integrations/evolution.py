@@ -304,7 +304,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
         "content_type": content_type or "text",
         "media_url": "",
         "message_id": message_id,
-        "status": "Received",
+        "status": "Pending",
         "reference_doctype": "",
         "reference_name": "",
         "line": line.name,
