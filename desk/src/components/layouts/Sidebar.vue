@@ -57,6 +57,76 @@
         </template>
       </SidebarLink>
     </div>
+    <!-- WhatsApp lines section (dynamic, Evolution API) -->
+    <div v-if="!isCustomerPortal && evolutionLines.length" class="mb-1">
+      <!-- Collapsed mode: single icon with green dot when any unread -->
+      <div v-if="!isExpanded" class="relative my-0.5">
+        <SidebarLink
+          :label="__('WhatsApp')"
+          :icon="WhatsAppIcon"
+          :is-expanded="false"
+          :is-active="route.path.startsWith('/whatsapp')"
+          :to="evolutionLines.length
+                ? { name: 'WhatsAppChat', params: { lineName: evolutionLines[0].name } }
+                : 'WhatsAppAnalytics'"
+        />
+        <span
+          v-if="waUnread > 0"
+          class="absolute left-1 top-1 size-1.5 rounded-full bg-green-500"
+        />
+      </div>
+
+      <!-- Expanded mode: collapsible section header + per-line links -->
+      <template v-else>
+        <div
+          class="flex cursor-pointer items-center gap-1.5 px-2 mt-3 mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-gray-5 select-none"
+          @click="waExpanded = !waExpanded"
+        >
+          <FeatherIcon
+            name="chevron-right"
+            class="h-3 w-3 text-ink-gray-5 transition-transform duration-200"
+            :class="{ 'rotate-90': waExpanded }"
+          />
+          <span class="flex-1">{{ __("WhatsApp") }}</span>
+          <Badge
+            v-if="waUnread > 0"
+            :label="waUnread > 99 ? '99+' : String(waUnread)"
+            theme="green"
+            variant="subtle"
+            class="text-[10px]"
+          />
+        </div>
+        <nav v-if="waExpanded" class="flex flex-col">
+          <SidebarLink
+            v-for="line in evolutionLines"
+            :key="line.name"
+            :icon="WhatsAppIcon"
+            :label="line.display_label"
+            :to="{ name: 'WhatsAppChat', params: { lineName: line.name } }"
+            :is-expanded="true"
+            :is-active="route.params.lineName === line.name"
+            class="my-0.5 pl-5"
+          >
+            <template #right>
+              <Badge
+                v-if="line.unread > 0"
+                :label="line.unread > 99 ? '99+' : String(line.unread)"
+                theme="green"
+                variant="subtle"
+              />
+            </template>
+          </SidebarLink>
+          <SidebarLink
+            :icon="LucideBarChart2"
+            :label="__('Analytics')"
+            :to="{ name: 'WhatsAppAnalytics' }"
+            :is-expanded="true"
+            :is-active="route.name === 'WhatsAppAnalytics'"
+            class="my-0.5 pl-5"
+          />
+        </nav>
+      </template>
+    </div>
     <div class="overflow-y-auto overflow-x-hidden">
       <div v-for="view in allViews" :key="view.label">
         <div
@@ -215,7 +285,7 @@ import {
 
 import { HelpIcon } from "frappe-ui/icons";
 import { storeToRefs } from "pinia";
-import { computed, h, markRaw, onMounted, ref } from "vue";
+import { computed, h, markRaw, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   agentPortalSidebarOptions,
@@ -224,9 +294,13 @@ import {
 
 import { useShortcut } from "@/composables/shortcuts";
 import { useTelephonyStore } from "@/stores/telephony";
+import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import { globalStore } from "@/stores/globalStore";
+import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import { __ } from "@/translation";
 import LucideArrowLeftFromLine from "~icons/lucide/arrow-left-from-line";
 import LucideArrowRightFromLine from "~icons/lucide/arrow-right-from-line";
+import LucideBarChart2 from "~icons/lucide/bar-chart-2";
 import LucideMoon from "~icons/lucide/moon";
 import LucideSun from "~icons/lucide/sun";
 import LucideBell from "~icons/lucide/bell";
@@ -270,6 +344,10 @@ const { isExpanded, width } = storeToRefs(useSidebarStore());
 const device = useDevice();
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
+
+const evolutionLinesStore = useEvolutionLinesStore();
+const { lines: evolutionLines, totalUnread: waUnread } = storeToRefs(evolutionLinesStore);
+const waExpanded = useStorage("wa-sidebar-expanded", true);
 
 const showShortcutsModal = ref(false);
 const showCommandPalette = ref(false);
@@ -697,5 +775,13 @@ onMounted(() => {
   useShortcut({ key: ",", meta: true }, () => {
     showSettingsModal.value = !showSettingsModal.value;
   });
+  // Refresh WhatsApp line unread counts when a new message arrives
+  const { $socket } = globalStore();
+  $socket.on("helpdesk:baileys-message", evolutionLinesStore.reload);
+});
+
+onBeforeUnmount(() => {
+  const { $socket } = globalStore();
+  $socket.off("helpdesk:baileys-message", evolutionLinesStore.reload);
 });
 </script>
