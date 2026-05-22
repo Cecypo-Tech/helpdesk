@@ -203,6 +203,7 @@ const props = defineProps<{
   ticketId: string;
   replyTo?: Record<string, any> | null;
   jid?: string | null;
+  line?: string;
 }>();
 
 const emit = defineEmits<{
@@ -367,7 +368,7 @@ const mentionPickerRef = ref<HTMLElement | null>(null);
 const mentionPickerStyle = ref<Record<string, string>>({});
 
 const participantsResource = createResource({
-  url: "helpdesk.integrations.baileys.get_group_participants",
+  url: "helpdesk.integrations.evolution.get_evolution_group_participants",
   auto: false,
 });
 
@@ -407,7 +408,7 @@ function detectMention() {
   const match = before.match(/@([^@\s]*)$/);
   if (match) {
     if (!participantsResource.data && !participantsResource.loading && props.jid) {
-      participantsResource.submit({ jid: props.jid });
+      participantsResource.submit({ jid: props.jid, line: props.line || "" });
     }
     mentionQuery.value = match[1].toLowerCase();
     mentionAtPos.value = before.lastIndexOf("@");
@@ -478,7 +479,7 @@ function onTextKeydown(e: KeyboardEvent) {
 
 // ── Send ──────────────────────────────────────────────────────────────────────
 const sendReply = createResource({
-  url: "helpdesk.integrations.baileys.send_baileys_reply",
+  url: "helpdesk.integrations.evolution.send_evolution_reply",
   onSuccess() {
     emit("sent");
   },
@@ -509,7 +510,7 @@ async function send() {
     sending.value = false;
     emit("sent");
 
-    fetch("/api/method/helpdesk.integrations.baileys.send_baileys_media", {
+    fetch("/api/method/helpdesk.integrations.evolution.send_evolution_media", {
       method: "POST",
       headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
       body: formData,

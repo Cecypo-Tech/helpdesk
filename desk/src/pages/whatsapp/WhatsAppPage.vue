@@ -13,6 +13,7 @@
     >
       <BaileysConversationList
         ref="convListRef"
+        :line="lineName"
         :selectedJid="selectedJid"
         @select="onSelect"
       />
@@ -30,16 +31,21 @@
       :company="selectedCompany"
       :assignedTeam="selectedTeam"
       :phone="selectedPhone"
+      :line="lineName"
       @contactSaved="onContactSaved"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import BaileysConversationList from "@/components/whatsapp/BaileysConversationList.vue";
 import BaileysChat from "@/components/whatsapp/BaileysChat.vue";
 import { globalStore } from "@/stores/globalStore";
+
+const route = useRoute();
+const lineName = computed(() => String(route.params.lineName || ""));
 
 defineOptions({ inheritAttrs: false });
 

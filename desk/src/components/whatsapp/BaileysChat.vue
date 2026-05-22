@@ -221,6 +221,7 @@
     <BaileysReplyBox
       ticketId=""
       :jid="jid"
+      :line="line"
       :replyTo="replyingTo"
       @sent="onMessageSent"
       @clearReply="replyingTo = null"
@@ -241,6 +242,7 @@ const props = defineProps<{
   company?: string;
   assignedTeam?: string;
   phone?: string;
+  line?: string;
 }>();
 
 const emit = defineEmits<{
@@ -256,7 +258,7 @@ const isGroup = computed(() => !!props.jid?.endsWith("@g.us"));
 const showMembers = ref(false);
 
 const participantsResource = createResource({
-  url: "helpdesk.integrations.baileys.get_group_participants",
+  url: "helpdesk.integrations.evolution.get_evolution_group_participants",
   auto: false,
 });
 
@@ -264,7 +266,7 @@ function toggleMembers() {
   if (!showMembers.value) {
     showMembers.value = true;
     if (!participantsResource.data && props.jid) {
-      participantsResource.submit({ jid: props.jid });
+      participantsResource.submit({ jid: props.jid, line: props.line || "" });
     }
   } else {
     showMembers.value = false;
@@ -313,11 +315,11 @@ const messages = createResource({
 });
 
 const markReadResource = createResource({
-  url: "helpdesk.integrations.baileys.mark_baileys_messages_read",
+  url: "helpdesk.integrations.evolution.mark_evolution_messages_read",
 });
 
 const sendReactionResource = createResource({
-  url: "helpdesk.integrations.baileys.send_baileys_reaction",
+  url: "helpdesk.integrations.evolution.send_evolution_reaction",
   onSuccess() {
     loadMessages();
   },

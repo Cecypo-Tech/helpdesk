@@ -3,7 +3,6 @@
     <div class="flex items-center justify-between border-b border-outline-gray-2 px-4 py-3">
       <div>
         <h2 class="text-sm font-semibold text-ink-gray-9">WhatsApp</h2>
-        <p v-if="connectedPhoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ connectedPhoneDisplay }}</p>
       </div>
       <div class="flex items-center gap-1">
         <!-- Mark all read (UI badge only — does not send WhatsApp read receipts) -->
@@ -158,22 +157,12 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
-const connectedPhone = createResource({
-  url: "helpdesk.integrations.baileys.get_connected_phone",
-  auto: true,
-});
-
-const connectedPhoneDisplay = computed(() => {
-  const phone = connectedPhone.data?.phone;
-  return phone ? `+${phone}` : null;
-});
-
-const router = useRouter();
-
-const props = defineProps<{ selectedJid: string | null }>();
+const props = defineProps<{ line: string; selectedJid: string | null }>();
 const emit = defineEmits<{
   (e: "select", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
 }>();
+
+const router = useRouter();
 
 const search = ref("");
 const lastReadMap = ref<Record<string, number>>({});
@@ -276,8 +265,14 @@ function onNewChatEnter() {
 // ── Conversations list ──────────────────────────────────────────────────────
 
 const conversations = createResource({
-  url: "helpdesk.integrations.baileys.get_baileys_conversations",
+  url: "helpdesk.integrations.evolution.get_evolution_conversations",
+  params: { line: props.line },
   auto: true,
+});
+
+watch(() => props.line, () => {
+  conversations.update({ params: { line: props.line } });
+  conversations.reload();
 });
 
 const filteredList = computed(() => {
