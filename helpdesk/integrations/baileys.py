@@ -110,36 +110,56 @@ def _group_label(jid: str, settings) -> str:
 	return jid
 
 
-def _upsert_contact_name(jid: str, sender_name: str, resolved_phone: str = "") -> None:
-	"""Silently record sender_name (and resolved phone) in Baileys Contact."""
-	if not jid or not sender_name or _is_group(jid):
+def _upsert_one_contact(jid: str, phone: str, name: str) -> None:
+	"""Create-or-blank-fill one Baileys Contact row keyed by jid. Never overwrites existing values."""
+	if not jid:
 		return
-	phone = resolved_phone or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
 	try:
 		if frappe.db.exists("Baileys Contact", {"jid": jid}):
 			existing = frappe.db.get_value(
 				"Baileys Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
 			) or {}
 			updates = {}
-			if not existing.get("custom_name") and sender_name:
-				updates["custom_name"] = sender_name
+			if not existing.get("custom_name") and name:
+				updates["custom_name"] = name
 			if not existing.get("phone") and phone:
 				updates["phone"] = phone
 			if updates:
-				frappe.db.set_value(
-					"Baileys Contact", {"jid": jid}, updates, update_modified=False
-				)
+				frappe.db.set_value("Baileys Contact", {"jid": jid}, updates, update_modified=False)
 		else:
 			frappe.get_doc({
 				"doctype": "Baileys Contact",
 				"jid": jid,
 				"phone": phone,
-				"custom_name": sender_name,
+				"custom_name": name,
 				"company": "",
 				"assigned_team": "",
 			}).insert(ignore_permissions=True)
 	except Exception:
 		pass
+
+
+def _upsert_contact_by_pair(lid: str, phone: str, name: str) -> None:
+	"""Upsert Baileys Contact for a LID/phone pair. Writes both keyed rows if both are known."""
+	lid = (lid or "").strip()
+	phone = _normalize_phone(phone or "")
+	name = (name or "").strip()
+	if not lid and not phone:
+		return
+	if lid and lid.endswith("@lid"):
+		_upsert_one_contact(lid, phone, name)
+	if phone:
+		_upsert_one_contact(f"{phone}@s.whatsapp.net", phone, name)
+
+
+def _upsert_contact_name(jid: str, sender_name: str, resolved_phone: str = "") -> None:
+	"""Backwards-compat wrapper used by webhook(). Pushes the (jid, name, resolved_phone)
+	through the same pair-aware path the gateway uses."""
+	if not jid or _is_group(jid):
+		return
+	lid = jid if jid.endswith("@lid") else ""
+	phone = _normalize_phone(resolved_phone) or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
+	_upsert_contact_by_pair(lid, phone, sender_name)
 
 
 # ── Webhook ───────────────────────────────────────────────────────────────────
@@ -222,6 +242,36 @@ def webhook():
 	if content_type != "reaction":
 		_notify_agents_baileys(jid, message, sender_name)
 
+	return {"status": "ok"}
+
+
+@frappe.whitelist(allow_guest=True)
+def upsert_contact_mapping():
+	"""Gateway pushes LID/phone/name mappings here as it learns them — from message keys,
+	contacts.upsert, history sync, and group participant queries. API-key authed."""
+	if not frappe.db.exists("DocType", "Baileys Gateway Settings"):
+		frappe.response["http_status_code"] = 503
+		return {"error": "not configured"}
+
+	settings = _settings()
+	api_key = frappe.get_request_header("X-API-Key") or frappe.get_request_header("x-api-key")
+	if not settings.api_key or api_key != settings.api_key:
+		frappe.response["http_status_code"] = 401
+		return {"error": "Unauthorized"}
+
+	try:
+		payload = frappe.parse_json(frappe.request.data.decode("utf-8"))
+	except Exception:
+		frappe.response["http_status_code"] = 400
+		return {"error": "Invalid JSON"}
+
+	frappe.set_user("Administrator")
+	_upsert_contact_by_pair(
+		lid=(payload.get("lid") or "").strip(),
+		phone=(payload.get("phone") or "").strip(),
+		name=(payload.get("name") or "").strip(),
+	)
+	frappe.db.commit()
 	return {"status": "ok"}
 
 
@@ -852,60 +902,27 @@ def get_group_participants(jid: str) -> list[dict]:
 
 @frappe.whitelist()
 def sync_baileys_contacts() -> dict:
-	"""Pull the LID→phone contact map from the gateway and backfill phone numbers on Baileys Contacts."""
+	"""Trigger the gateway to re-walk all groups and push LID/phone mappings to Frappe.
+	The gateway pushes incrementally via upsert_contact_mapping — this call just kicks
+	the bootstrap. Use after wiping Baileys Contact or when the chat list looks stale."""
 	settings = _settings()
 	if not settings.enabled or not settings.gateway_url:
 		frappe.throw(_("Gateway not configured or disabled"))
 
 	try:
-		resp = _requests.get(
-			f"{settings.gateway_url.rstrip('/')}/contacts",
+		resp = _requests.post(
+			f"{settings.gateway_url.rstrip('/')}/resync",
 			headers={"X-API-Key": settings.api_key or ""},
-			timeout=15,
+			timeout=60,
 		)
 		resp.raise_for_status()
 		data = resp.json()
 	except Exception as e:
-		frappe.throw(_("Failed to fetch contacts from gateway: {0}").format(str(e)))
+		frappe.throw(_("Failed to trigger gateway resync: {0}").format(str(e)))
 
-	contacts = data.get("contacts") or []
-	updated = created = 0
-
-	for c in contacts:
-		phone = _normalize_phone(c.get("phone") or "")
-		name = (c.get("name") or "").strip()
-		lid = (c.get("lid") or "").strip()
-		jid = (c.get("jid") or lid or "").strip()
-
-		if not phone or not jid:
-			continue
-
-		try:
-			if frappe.db.exists("Baileys Contact", {"jid": jid}):
-				existing = frappe.db.get_value("Baileys Contact", {"jid": jid}, ["phone", "custom_name"], as_dict=True) or {}
-				upd = {}
-				if not existing.get("phone"):
-					upd["phone"] = phone
-				if not existing.get("custom_name") and name:
-					upd["custom_name"] = name
-				if upd:
-					frappe.db.set_value("Baileys Contact", {"jid": jid}, upd, update_modified=False)
-					updated += 1
-			else:
-				frappe.get_doc({
-					"doctype": "Baileys Contact",
-					"jid": jid,
-					"phone": phone,
-					"custom_name": name,
-					"company": "",
-					"assigned_team": "",
-				}).insert(ignore_permissions=True)
-				created += 1
-		except Exception:
-			pass
-
-	# Backfill phone for @s.whatsapp.net contacts that have an empty phone field —
-	# the phone is always derivable from the JID itself without calling the gateway.
+	# Backfill phone for @s.whatsapp.net contacts where the phone field is empty —
+	# the phone is always derivable from the JID itself.
+	updated = 0
 	ws_missing = frappe.get_all(
 		"Baileys Contact",
 		filters=[["jid", "like", "%@s.whatsapp.net"], ["phone", "in", ["", None]]],
@@ -918,7 +935,11 @@ def sync_baileys_contacts() -> dict:
 			updated += 1
 
 	frappe.db.commit()
-	return {"updated": updated, "created": created, "total": len(contacts)}
+	return {
+		"groups": data.get("groups") or 0,
+		"mappings_pushed": data.get("mappings") or 0,
+		"phone_backfills": updated,
+	}
 
 
 @frappe.whitelist()
