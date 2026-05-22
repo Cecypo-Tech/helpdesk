@@ -359,3 +359,161 @@ def _handle_update(updates: list, line) -> dict:
             after_commit=True,
         )
     return {"status": "ok"}
+
+
+# ── Agent send ────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def send_evolution_reply(
+    ticket: str = None,
+    jid: str = None,
+    message: str = "",
+    content_type: str = "text",
+    media_url: str | None = None,
+    reply_to_message_id: str | None = None,
+    reply_to_text: str | None = None,
+    reply_to_from_me: bool = False,
+    mentioned_jids: str | None = None,
+) -> dict:
+    """Send a text reply via Evolution API."""
+    settings = _settings()
+    if not settings.enabled:
+        frappe.throw(_("Evolution API is not enabled."))
+
+    if not jid and ticket:
+        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+    if not jid:
+        frappe.throw(_("No WhatsApp JID provided."))
+
+    # Resolve which line owns this ticket/JID
+    line_name = None
+    if ticket:
+        line_name = frappe.db.get_value("HD Ticket", ticket, "baileys_line")
+    if not line_name:
+        # Fallback: find most recent message for this JID
+        line_name = frappe.db.get_value(
+            "Baileys Message",
+            {"jid": jid, "line": ["is", "set"]},
+            "line",
+            order_by="creation desc",
+        )
+    if not line_name:
+        frappe.throw(_("Cannot determine WhatsApp line for this conversation."))
+
+    line = frappe.get_doc("Evolution Line", line_name)
+
+    if settings.append_agent_initials:
+        suffix = f"\n^{_agent_initials()}"
+        full_message = f"{message}{suffix}" if message else suffix.strip()
+    else:
+        full_message = message or ""
+
+    payload: dict = {"number": jid, "text": full_message}
+    if mentioned_jids:
+        jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
+        if jids_list:
+            payload["mentionsEveryOne"] = False
+            payload["mentioned"] = jids_list
+
+    try:
+        resp = _requests.post(
+            _url("message/sendText", line.instance_name),
+            json=payload,
+            headers=_headers(),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        sent_id = resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
+    except Exception as e:
+        frappe.throw(_("Evolution API send failed: {0}").format(str(e)))
+
+    sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
+    msg_doc = frappe.get_doc({
+        "doctype": "Baileys Message",
+        "direction": "Outgoing",
+        "jid": jid,
+        "sender_jid": "",
+        "sender_name": sender_name,
+        "profile_name": "",
+        "message": full_message,
+        "content_type": content_type,
+        "media_url": media_url or "",
+        "message_id": sent_id,
+        "reply_to_message_id": reply_to_message_id or "",
+        "status": "Sent",
+        "reference_doctype": "HD Ticket" if ticket else "",
+        "reference_name": ticket or "",
+        "line": line.name,
+        "is_read": 1,
+    })
+    msg_doc.insert(ignore_permissions=True)
+
+    if ticket:
+        assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+        if not frappe.parse_json(assign_json):
+            try:
+                frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
+            except Exception:
+                pass
+        if settings.agent_reply_status:
+            _set_ticket_status(ticket, settings.agent_reply_status)
+
+    _publish_evolution_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
+    return {"name": msg_doc.name, "message_id": sent_id, "status": "Sent"}
+
+
+@frappe.whitelist()
+def send_evolution_reaction(
+    ticket: str = None,
+    jid: str = None,
+    target_message_id: str = "",
+    emoji: str = "",
+) -> dict:
+    """Send a reaction to a message via Evolution API."""
+    settings = _settings()
+    if not settings.enabled:
+        frappe.throw(_("Evolution API is not enabled."))
+
+    if not jid and ticket:
+        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+    if not jid or not target_message_id or not emoji:
+        frappe.throw(_("jid, target_message_id and emoji are required."))
+
+    line_name = (
+        frappe.db.get_value("HD Ticket", ticket, "baileys_line") if ticket
+        else frappe.db.get_value("Baileys Message",
+                                  {"jid": jid, "line": ["is", "set"]},
+                                  "line", order_by="creation desc")
+    )
+    if not line_name:
+        frappe.throw(_("Cannot determine WhatsApp line for this conversation."))
+    line = frappe.get_doc("Evolution Line", line_name)
+
+    target_msg = frappe.db.get_value(
+        "Baileys Message",
+        {"message_id": target_message_id},
+        ["message_id", "jid", "direction"],
+        as_dict=True,
+    )
+
+    reaction_payload = {
+        "key": {
+            "remoteJid": jid,
+            "fromMe": bool(target_msg and target_msg.direction == "Outgoing"),
+            "id": target_message_id,
+        },
+        "reaction": emoji,
+    }
+
+    try:
+        resp = _requests.post(
+            _url("message/sendReaction", line.instance_name),
+            json=reaction_payload,
+            headers=_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        frappe.throw(_("Evolution API reaction failed: {0}").format(str(e)))
+
+    return {"status": "ok"}
