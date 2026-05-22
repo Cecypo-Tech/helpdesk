@@ -91,19 +91,20 @@
               {{ p.name || (p.phone ? '+' + p.phone : p.jid.split('@')[0]) }}
               <span v-if="p.isAdmin" class="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">admin</span>
             </div>
-            <div v-if="p.phone" class="text-[11px] text-ink-gray-5">+{{ p.phone }}</div>
+            <div v-if="p.phone" class="flex items-center gap-1 text-[11px] text-ink-gray-5">
+              <span>+{{ p.phone }}</span>
+              <button
+                class="rounded p-0.5 text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+                title="Copy phone"
+                @click="copyPhone(p.phone)"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
+            </div>
             <div v-else class="text-[11px] text-ink-gray-4 italic">phone unavailable (LID)</div>
           </div>
-          <button
-            v-if="p.phone"
-            class="shrink-0 rounded p-1 text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
-            title="Copy phone"
-            @click="copyPhone(p.phone)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-            </svg>
-          </button>
         </div>
       </div>
     </div>
@@ -208,6 +209,7 @@
             :message="msg"
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
+            :isGroup="isGroup"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"

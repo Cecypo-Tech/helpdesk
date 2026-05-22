@@ -75,10 +75,23 @@
         <!-- Profile name for incoming (color-coded per sender for group chats) -->
         <div
           v-if="!isOutgoing && message.profile_name"
-          class="mb-1 text-xs font-medium"
-          :style="{ color: senderColor }"
+          class="mb-1 flex items-center gap-1.5 text-xs font-medium"
         >
-          {{ message.profile_name }}
+          <span :style="{ color: senderColor }">{{ message.profile_name }}</span>
+          <button
+            v-if="isGroup && message.sender_phone"
+            class="inline-flex items-center gap-0.5 rounded px-1 py-0.5 font-normal text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+            :title="phoneCopied ? 'Copied!' : `Copy +${message.sender_phone}`"
+            @click.stop="copySenderPhone"
+          >
+            <span class="tabular-nums">+{{ message.sender_phone }}</span>
+            <svg v-if="!phoneCopied" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-green-600">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </button>
         </div>
         <!-- Sender name for outgoing -->
         <div
@@ -386,14 +399,16 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { toast } from "frappe-ui";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   message: Record<string, any>;
   reactions?: Array<{ emoji: string; type: string; sender: string }>;
   replyToMessage?: Record<string, any> | null;
-}>();
+  isGroup?: boolean;
+}>(), { isGroup: false });
 
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
@@ -504,6 +519,20 @@ function copyText() {
     copied.value = true;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied.value = false; }, 1500);
+  });
+}
+
+const phoneCopied = ref(false);
+let phoneCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function copySenderPhone() {
+  const phone = props.message.sender_phone;
+  if (!phone) return;
+  navigator.clipboard.writeText(`+${phone}`).then(() => {
+    phoneCopied.value = true;
+    toast.success(`+${phone} copied`);
+    if (phoneCopyTimer) clearTimeout(phoneCopyTimer);
+    phoneCopyTimer = setTimeout(() => { phoneCopied.value = false; }, 1500);
   });
 }
 

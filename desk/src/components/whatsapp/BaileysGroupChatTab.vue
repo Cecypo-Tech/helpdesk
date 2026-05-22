@@ -218,6 +218,7 @@ onBeforeUnmount(() => {
             :message="msg"
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
+            :isGroup="true"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
