@@ -10,6 +10,7 @@
   "col_break_conn",
   "api_key",
   "session_name",
+  "connected_user",
   "section_ticket_defaults",
   "default_ticket_type",
   "col_break_defaults",
@@ -68,6 +69,13 @@
    "label": "Session Name",
    "default": "helpdesk",
    "description": "The Baileys session name configured on the gateway."
+  },
+  {
+   "fieldname": "connected_user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Connected User",
+   "description": "User credited as the owner of messages typed on the phone (mirrored back via Baileys). Falls back to Administrator if unset."
   },
   {
    "fieldname": "section_ticket_defaults",

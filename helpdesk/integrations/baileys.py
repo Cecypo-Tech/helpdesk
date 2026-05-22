@@ -197,6 +197,7 @@ def webhook():
 	media_url = payload.get("mediaUrl") or ""
 	quoted_message_id = payload.get("quotedMessageId") or ""
 	resolved_phone = _normalize_phone(payload.get("resolvedPhone") or "")
+	from_me = bool(payload.get("fromMe"))
 
 	if not jid:
 		return {"status": "skipped", "reason": "no jid"}
@@ -215,10 +216,36 @@ def webhook():
 			if existing_name and not frappe.db.get_value("Baileys Message", existing_name, "media_url"):
 				frappe.set_user("Administrator")
 				frappe.db.set_value("Baileys Message", existing_name, "media_url", media_url)
-				_publish_baileys_event(jid, is_incoming=True)
+				_publish_baileys_event(jid, is_incoming=not from_me)
 		return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
+
+	if from_me:
+		# Phone-typed reply mirrored back via Baileys multi-device sync.
+		owner = settings.get("connected_user") or "Administrator"
+		if not frappe.db.exists("User", owner):
+			owner = "Administrator"
+		doc = frappe.get_doc({
+			"doctype": "Baileys Message",
+			"direction": "Outgoing",
+			"jid": jid,
+			"sender_jid": "",
+			"sender_name": "(via phone)",
+			"profile_name": "(via phone)",
+			"message": message,
+			"content_type": content_type or "text",
+			"media_url": media_url,
+			"message_id": message_id,
+			"reply_to_message_id": quoted_message_id,
+			"status": "Delivered",
+			"reference_doctype": "",
+			"reference_name": "",
+		}).insert(ignore_permissions=True)
+		# Re-credit ownership so per-user filters/audits attribute correctly.
+		frappe.db.set_value("Baileys Message", doc.name, "owner", owner, update_modified=False)
+		_publish_baileys_event(jid, is_incoming=False)
+		return {"status": "ok", "mirrored": True}
 
 	frappe.get_doc({
 		"doctype": "Baileys Message",

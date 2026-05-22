@@ -196,31 +196,36 @@ async function connectToWhatsApp() {
 		if ((type !== "notify" && type !== "append") || !WEBHOOK_URL) return;
 
 		for (const msg of messages) {
-			if (msg.key.fromMe || !msg.message) continue;
+			if (!msg.message) continue;
 
 			const jid       = msg.key.remoteJid;
 			const isGroup   = jid?.endsWith("@g.us");
+			const fromMe    = !!msg.key.fromMe;
 			const sender    = msg.key.participant || jid;
 			const senderName = msg.pushName || sender?.split("@")[0] || "";
 
-			// Mine LID↔PN pairs straight from the message key — free, instant, accurate.
-			const chatPair = isGroup ? { lid: "", pn: "" } : pairFromKey(jid, msg.key.remoteJidAlt);
-			const partPair = isGroup ? pairFromKey(sender, msg.key.participantAlt) : { lid: "", pn: "" };
+			// fromMe messages don't yield new contact mappings (the alt JIDs would be our own).
+			let resolvedPhone = "";
+			if (!fromMe) {
+				// Mine LID↔PN pairs straight from the message key — free, instant, accurate.
+				const chatPair = isGroup ? { lid: "", pn: "" } : pairFromKey(jid, msg.key.remoteJidAlt);
+				const partPair = isGroup ? pairFromKey(sender, msg.key.participantAlt) : { lid: "", pn: "" };
 
-			const learned = [];
-			if (chatPair.lid || chatPair.pn) {
-				learned.push({ lid: chatPair.lid, phone: digits(chatPair.pn), name: isGroup ? "" : senderName });
-			}
-			if (partPair.lid || partPair.pn) {
-				learned.push({ lid: partPair.lid, phone: digits(partPair.pn), name: senderName });
-			}
-			if (learned.length) pushContactMappings(learned).catch(() => {});
+				const learned = [];
+				if (chatPair.lid || chatPair.pn) {
+					learned.push({ lid: chatPair.lid, phone: digits(chatPair.pn), name: isGroup ? "" : senderName });
+				}
+				if (partPair.lid || partPair.pn) {
+					learned.push({ lid: partPair.lid, phone: digits(partPair.pn), name: senderName });
+				}
+				if (learned.length) pushContactMappings(learned).catch(() => {});
 
-			// Resolve the phone shipped on the webhook. Prefer the alt PN we already have;
-			// fall back to the signalRepository lid-mapping store; final fallback: "".
-			const resolvedPhone = isGroup
-				? (digits(partPair.pn) || await resolvePhone(sender))
-				: (digits(chatPair.pn) || await resolvePhone(jid));
+				// Resolve the phone shipped on the webhook. Prefer the alt PN we already have;
+				// fall back to the signalRepository lid-mapping store; final fallback: "".
+				resolvedPhone = isGroup
+					? (digits(partPair.pn) || await resolvePhone(sender))
+					: (digits(chatPair.pn) || await resolvePhone(jid));
+			}
 
 			// Unwrap container messages (view-once, ephemeral, documentWithCaption)
 			const mc = msg.message?.viewOnceMessage?.message
@@ -283,7 +288,7 @@ async function connectToWhatsApp() {
 				await axios.post(WEBHOOK_URL, {
 					jid, messageId: msg.key.id, sender, senderName,
 					message: text, contentType, timestamp: msg.messageTimestamp,
-					quotedMessageId, mediaUrl, resolvedPhone,
+					quotedMessageId, mediaUrl, resolvedPhone, fromMe,
 				}, { headers: { "X-API-Key": API_KEY }, timeout: 15000 });
 			} catch (err) { logger.error({ err: err.message, jid }, "Webhook failed"); }
 		}

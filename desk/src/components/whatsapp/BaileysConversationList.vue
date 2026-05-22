@@ -6,6 +6,17 @@
         <p v-if="connectedPhoneDisplay" class="text-[11px] text-ink-gray-5">Connected: {{ connectedPhoneDisplay }}</p>
       </div>
       <div class="flex items-center gap-1">
+        <!-- Mark all read (UI badge only — does not send WhatsApp read receipts) -->
+        <button
+          class="flex h-6 w-6 items-center justify-center rounded-full text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8 disabled:opacity-40"
+          :title="unreadCount ? `Mark all read (${unreadCount}) — does not send read receipts` : 'No unread'"
+          :disabled="!unreadCount"
+          @click="markAllRead"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/><polyline points="20 12 9 23 4 18"/>
+          </svg>
+        </button>
         <!-- Sync contacts -->
         <button
           class="flex h-6 w-6 items-center justify-center rounded-full text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8 disabled:opacity-40"
@@ -289,6 +300,26 @@ function isUnread(conv: any): boolean {
   const stored = localStorage.getItem(`baileys_last_read_${conv.jid}`);
   if (!stored) return true;
   return msgTime > new Date(stored).getTime();
+}
+
+const unreadCount = computed(() =>
+  (conversations.data || []).reduce((n: number, c: any) => n + (isUnread(c) ? 1 : 0), 0)
+);
+
+function markAllRead() {
+  // Pivot on each conversation's own last_message_time so the comparison in
+  // isUnread() uses the same Date.parse() source on both sides — avoids TZ
+  // skew bugs where naive server timestamps get re-interpreted as local.
+  const next: Record<string, number> = { ...lastReadMap.value };
+  for (const c of (conversations.data || [])) {
+    if (!c?.jid) continue;
+    const stamp = c.last_message_time || "";
+    const t = stamp ? new Date(stamp).getTime() : Date.now();
+    if (!Number.isFinite(t)) continue;
+    next[c.jid] = t;
+    try { localStorage.setItem(`baileys_last_read_${c.jid}`, stamp || new Date(t).toISOString()); } catch {}
+  }
+  lastReadMap.value = next;
 }
 
 defineExpose({ reload: () => conversations.reload() });
