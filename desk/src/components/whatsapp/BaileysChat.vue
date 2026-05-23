@@ -10,6 +10,17 @@
   <div v-else class="flex flex-1 min-h-0 flex-col overflow-hidden">
     <!-- Header -->
     <div class="flex items-center gap-3 border-b border-outline-gray-2 bg-surface-gray-1 px-4 py-2.5">
+      <!-- Mobile back button -->
+      <button
+        v-if="showBack"
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-8"
+        title="Back to conversations"
+        @click="emit('back')"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
       <WhatsAppIcon class="h-4 w-4 shrink-0 text-green-600" />
       <div class="min-w-0 flex-1">
         <div class="truncate text-sm font-semibold text-ink-gray-9">
@@ -80,6 +91,23 @@
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
         </svg>
       </button>
+      <!-- Tasks panel toggle -->
+      <div class="relative shrink-0">
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-full text-ink-gray-4 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+          :class="{ 'bg-blue-50 text-blue-600': tasksOpen }"
+          title="Tasks & tickets"
+          @click="emit('toggleTasks')"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+        </button>
+        <span
+          v-if="(tasksCount || 0) + (ticketsCount || 0) > 0"
+          class="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-500 px-0.5 text-[9px] font-bold leading-none text-white"
+        >{{ ((tasksCount || 0) + (ticketsCount || 0)) > 99 ? '99+' : (tasksCount || 0) + (ticketsCount || 0) }}</span>
+      </div>
     </div>
 
     <!-- Group members panel -->
@@ -294,10 +322,16 @@ const props = defineProps<{
   assignedTeam?: string;
   phone?: string;
   line?: string;
+  showBack?: boolean;
+  tasksOpen?: boolean;
+  tasksCount?: number;
+  ticketsCount?: number;
 }>();
 
 const emit = defineEmits<{
   (e: "contactSaved", data: { custom_name: string; company: string; assigned_team: string; phone: string }): void;
+  (e: "back"): void;
+  (e: "toggleTasks"): void;
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);

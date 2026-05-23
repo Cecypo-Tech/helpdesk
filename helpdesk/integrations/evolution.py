@@ -90,7 +90,6 @@ def _group_label(jid: str, line) -> str:
 
 def _extract_text(msg: dict) -> tuple[str, str]:
     """Return (text, content_type) from a raw Evolution API message object."""
-    # Unwrap container messages
     inner = (
         msg.get("viewOnceMessage", {}).get("message")
         or msg.get("ephemeralMessage", {}).get("message")
@@ -118,6 +117,128 @@ def _extract_text(msg: dict) -> tuple[str, str]:
     if "reactionMessage" in inner:
         return inner["reactionMessage"].get("text", ""), "reaction"
     return "", "text"
+
+
+_EXT_MAP = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+    "video/mp4": "mp4", "video/quicktime": "mov",
+    "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a",
+    "application/pdf": "pdf",
+}
+
+
+def _save_base64_media(b64: str, mime: str) -> str:
+    """Decode base64 media, save as Frappe File, return relative file_url."""
+    import base64 as _base64
+    try:
+        if b64.startswith("data:"):
+            header, _, encoded = b64.partition(",")
+            mime = header.split(";")[0].replace("data:", "") or mime or "application/octet-stream"
+            raw_bytes = _base64.b64decode(encoded)
+        else:
+            raw_bytes = _base64.b64decode(b64)
+        ext = _EXT_MAP.get(mime.split(";")[0], "bin")
+        fname = f"wa_media_{frappe.generate_hash(length=8)}.{ext}"
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": fname,
+            "content": raw_bytes,
+            "is_private": 0,
+        })
+        file_doc.insert(ignore_permissions=True)
+        return file_doc.file_url
+    except Exception:
+        return ""
+
+
+def _download_media_via_evolution(line, full_data: dict) -> str:
+    """Call Evolution API /chat/getBase64FromMediaMessage.
+    Only needs the message key — Evolution decrypts the CDN-encrypted media using its Baileys session."""
+    key = full_data.get("key") or {}
+    if not key.get("id"):
+        return ""
+    # Evolution v2.3+ uses /chat/ prefix, only needs the message key
+    endpoint = _url("chat/getBase64FromMediaMessage", line.instance_name)
+    payload = {"message": {"key": key}}
+    try:
+        resp = _requests.post(endpoint, json=payload, headers=_headers(line), timeout=60)
+        if not resp.ok:
+            frappe.logger().warning(f"Evolution download failed {resp.status_code}: {resp.text[:200]}")
+            return ""
+        result = resp.json()
+        b64 = result.get("base64") or result.get("data") or result.get("buffer") or ""
+        mime = result.get("mimetype") or result.get("mediaType") or "application/octet-stream"
+        if b64:
+            return _save_base64_media(b64, mime)
+        frappe.logger().warning(f"Evolution download: no base64 in response keys={list(result.keys())}")
+    except Exception as e:
+        frappe.logger().warning(f"Evolution download exception: {e}")
+    return ""
+
+
+@frappe.whitelist()
+def refetch_media_for_message(message_name: str) -> str:
+    """Re-download media for an existing Baileys Message via Evolution API. Returns new local URL."""
+    doc = frappe.get_doc("Baileys Message", message_name)
+
+    if not doc.line or not doc.message_id:
+        return ""
+
+    try:
+        line = frappe.get_doc("Evolution Line", doc.line)
+    except Exception:
+        return ""
+
+    full_data = {
+        "key": {
+            "remoteJid": doc.jid,
+            "fromMe": doc.direction == "Outgoing",
+            "id": doc.message_id,
+        },
+    }
+    new_url = _download_media_via_evolution(line, full_data)
+    if new_url:
+        frappe.db.set_value("Baileys Message", message_name, "media_url", new_url)
+        frappe.db.commit()
+        return new_url
+    return ""
+
+
+def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = None) -> str:
+    """Download and permanently save media from an incoming WhatsApp message.
+    WhatsApp CDN files (.enc) are AES-encrypted — only Evolution (Baileys session) can decrypt."""
+    inner = (
+        msg.get("viewOnceMessage", {}).get("message")
+        or msg.get("ephemeralMessage", {}).get("message")
+        or msg.get("documentWithCaptionMessage", {}).get("message")
+        or msg
+    )
+    for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
+        if media_key not in inner:
+            continue
+        media_msg = inner[media_key]
+        mime = (media_msg.get("mimetype") or "application/octet-stream").split(";")[0]
+
+        # 1. Inline base64 (requires webhook_base64: true on the Evolution instance)
+        b64 = media_msg.get("base64") or ""
+        if b64:
+            saved = _save_base64_media(b64, mime)
+            if saved:
+                return saved
+
+        # 2. Evolution /chat/getBase64FromMediaMessage — only needs message key
+        if line and full_webhook_data:
+            saved = _download_media_via_evolution(line, full_webhook_data)
+            if saved:
+                return saved
+
+        # 3. Last resort: store the raw CDN URL (encrypted, will fail to render in browser)
+        cdn_url = media_msg.get("url") or ""
+        if cdn_url:
+            return cdn_url
+
+        break
+    return ""
 
 
 def _publish_evolution_event(jid: str, is_incoming: bool, line: str, ticket: str = "") -> None:
@@ -263,6 +384,30 @@ def _handle_upsert(data: dict, line, settings) -> dict:
     raw_msg = data.get("message") or {}
     text, content_type = _extract_text(raw_msg)
 
+    # For reactions, capture the ID of the message being reacted to
+    reply_to_message_id = ""
+    if content_type == "reaction":
+        reply_to_message_id = ((raw_msg.get("reactionMessage") or {}).get("key") or {}).get("id") or ""
+
+    # Extract reply-to ID from quoted context message
+    if not reply_to_message_id:
+        ctx_info = raw_msg.get("extendedTextMessage", {}).get("contextInfo") or {}
+        if not ctx_info:
+            for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
+                ctx_info = raw_msg.get(media_key, {}).get("contextInfo") or {}
+                if ctx_info:
+                    break
+        reply_to_message_id = ctx_info.get("stanzaId") or ctx_info.get("quotedMessage", {}) and ctx_info.get("stanzaId") or ""
+
+    # Extract media URL for media messages — pass full `data` so Evolution can decrypt
+    media_url = ""
+    if content_type in ("image", "video", "audio", "document", "sticker"):
+        try:
+            media_url = _extract_media_url(raw_msg, line=line, full_webhook_data=data)
+        except Exception as exc:
+            frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
+            media_url = ""
+
     # Deduplicate
     if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):
         return {"status": "duplicate"}
@@ -282,8 +427,9 @@ def _handle_upsert(data: dict, line, settings) -> dict:
             "profile_name": "(via phone)",
             "message": text,
             "content_type": content_type or "text",
-            "media_url": "",
+            "media_url": media_url,
             "message_id": message_id,
+            "reply_to_message_id": reply_to_message_id,
             "status": "Delivered",
             "reference_doctype": "",
             "reference_name": "",
@@ -304,8 +450,9 @@ def _handle_upsert(data: dict, line, settings) -> dict:
         "profile_name": sender_name,
         "message": text,
         "content_type": content_type or "text",
-        "media_url": "",
+        "media_url": media_url,
         "message_id": message_id,
+        "reply_to_message_id": reply_to_message_id,
         "status": "Pending",
         "reference_doctype": "",
         "reference_name": "",
@@ -343,6 +490,8 @@ _STATUS_MAP = {
 
 def _handle_update(updates: list, line) -> dict:
     for item in updates:
+        if not isinstance(item, dict):
+            continue
         key = item.get("key") or {}
         message_id = key.get("id") or ""
         raw_status = (item.get("update") or {}).get("status")
@@ -410,20 +559,68 @@ def send_evolution_reply(
     else:
         full_message = message or ""
 
-    payload: dict = {"number": jid, "text": full_message}
-    if mentioned_jids:
-        jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
-        if jids_list:
-            payload["mentionsEveryOne"] = False
-            payload["mentioned"] = jids_list
+    _MIME_MAP = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/ogg", "document": "application/octet-stream"}
+
+    # Build quoted context for WhatsApp reply threading
+    quoted_key: dict | None = None
+    if reply_to_message_id:
+        target = frappe.db.get_value(
+            "Baileys Message",
+            {"message_id": reply_to_message_id},
+            ["message_id", "direction", "sender_jid"],
+            as_dict=True,
+        )
+        if target:
+            is_from_me = target.direction == "Outgoing"
+            participant = "" if not _is_group(jid) else (
+                target.sender_jid if not is_from_me else ""
+            )
+            quoted_key = {
+                "remoteJid": jid,
+                "fromMe": is_from_me,
+                "id": reply_to_message_id,
+            }
+            if participant:
+                quoted_key["participant"] = participant
 
     try:
-        resp = _requests.post(
-            _url("message/sendText", line.instance_name),
-            json=payload,
-            headers=_headers(line),
-            timeout=15,
-        )
+        if media_url and content_type in ("image", "video", "audio", "document"):
+            abs_url = media_url if media_url.startswith("http") else frappe.utils.get_url(media_url)
+            media_payload: dict = {
+                "number": jid,
+                "mediatype": content_type,
+                "mimetype": _MIME_MAP.get(content_type, "application/octet-stream"),
+                "media": abs_url,
+                "caption": full_message,
+            }
+            if quoted_key:
+                media_payload["quoted"] = {"key": quoted_key}
+            if mentioned_jids:
+                jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
+                if jids_list:
+                    media_payload["mentionsEveryOne"] = False
+                    media_payload["mentioned"] = jids_list
+            resp = _requests.post(
+                _url("message/sendMedia", line.instance_name),
+                json=media_payload,
+                headers=_headers(line),
+                timeout=30,
+            )
+        else:
+            payload: dict = {"number": jid, "text": full_message}
+            if quoted_key:
+                payload["quoted"] = {"key": quoted_key}
+            if mentioned_jids:
+                jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
+                if jids_list:
+                    payload["mentionsEveryOne"] = False
+                    payload["mentioned"] = jids_list
+            resp = _requests.post(
+                _url("message/sendText", line.instance_name),
+                json=payload,
+                headers=_headers(line),
+                timeout=15,
+            )
         resp.raise_for_status()
         sent_id = resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
     except Exception as e:
@@ -515,9 +712,26 @@ def send_evolution_reaction(
             timeout=10,
         )
         resp.raise_for_status()
+        sent_id = resp.json().get("key", {}).get("id") or frappe.generate_hash(length=16)
     except Exception as e:
         frappe.throw(_("Evolution API reaction failed: {0}").format(str(e)))
 
+    sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
+    frappe.get_doc({
+        "doctype": "Baileys Message",
+        "direction": "Outgoing",
+        "jid": jid,
+        "sender_name": sender_name,
+        "message": emoji,
+        "content_type": "reaction",
+        "media_url": "",
+        "message_id": sent_id,
+        "reply_to_message_id": target_message_id,
+        "line": line.name,
+        "is_read": 1,
+    }).insert(ignore_permissions=True)
+    frappe.db.commit()
+    _publish_evolution_event(jid, is_incoming=False, line=line.name)
     return {"status": "ok"}
 
 
@@ -553,14 +767,15 @@ def send_evolution_media(
         "is_private": 0,
     })
     file_doc.insert(ignore_permissions=True)
-    public_url = frappe.utils.get_url(file_doc.file_url)
+    # Store relative path — send_evolution_reply converts to absolute for the API call
+    relative_url = file_doc.file_url
 
     return send_evolution_reply(
         ticket=ticket,
         jid=jid,
         message=message,
         content_type=content_type,
-        media_url=public_url,
+        media_url=relative_url,
     )
 
 
@@ -703,11 +918,27 @@ def mark_evolution_messages_read(jid: str = "", ticket: str = "") -> int:
 
 
 @frappe.whitelist()
+def mark_all_evolution_messages_read(line: str) -> int:
+    """Mark all unread incoming Baileys Messages for an entire line as read."""
+    if not line:
+        return 0
+    filters: dict = {"line": line, "direction": "Incoming", "is_read": 0}
+    unread = frappe.get_all("Baileys Message", filters=filters, fields=["name"])
+    for row in unread:
+        frappe.db.set_value("Baileys Message", row.name, "is_read", 1, update_modified=False)
+    if unread:
+        frappe.db.commit()
+    return len(unread)
+
+
+@frappe.whitelist()
 def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
     """Fetch group participants from Evolution API and enrich names from WA Contacts."""
+    if not line:
+        return []
     settings = _settings()
     if not settings.enabled or not settings.server_url:
-        frappe.throw(_("Evolution API not configured or disabled"))
+        return []
     line_doc = frappe.get_doc("Evolution Line", line)
     try:
         resp = _requests.get(
@@ -719,7 +950,8 @@ def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
         resp.raise_for_status()
         participants = resp.json().get("participants", [])
     except Exception as e:
-        frappe.throw(_("Failed to fetch group participants: {0}").format(str(e)))
+        frappe.log_error(f"get_evolution_group_participants failed for {jid}: {e}")
+        return []
 
     normalised = []
     for p in participants:
@@ -744,6 +976,139 @@ def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
                 break
 
     return normalised
+
+
+# ── WA Chat → Task / Ticket helpers ───────────────────────────────────────────
+
+@frappe.whitelist()
+def get_tasks_for_jid(jid: str) -> list[dict]:
+    """Return HD Tasks linked (via ticket) to the WhatsApp JID."""
+    if not jid:
+        return []
+    tickets = frappe.get_all("HD Ticket", filters={"baileys_jid": jid}, pluck="name")
+    if not tickets:
+        return []
+    return frappe.get_all(
+        "HD Task",
+        filters={"ticket": ["in", tickets]},
+        fields=["name", "title", "status", "priority", "assigned_to", "due_date"],
+        order_by="creation desc",
+    )
+
+
+@frappe.whitelist()
+def get_contact_info_for_jid(jid: str) -> dict:
+    """Return display_name, company, assigned_team, phone for a single JID."""
+    if not jid:
+        return {}
+    contact = frappe.db.get_value(
+        "WA Contact", {"jid": jid},
+        ["custom_name", "company", "assigned_team", "phone"],
+        as_dict=True,
+    ) or {}
+    phone = contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
+    # Fall back to last message sender_name if no custom_name
+    display_name = contact.get("custom_name") or ""
+    if not display_name:
+        display_name = frappe.db.get_value(
+            "Baileys Message",
+            {"jid": jid, "direction": "Incoming"},
+            "profile_name",
+            order_by="creation desc",
+        ) or jid.split("@")[0]
+    return {
+        "display_name": display_name,
+        "company": contact.get("company") or "",
+        "assigned_team": contact.get("assigned_team") or "",
+        "phone": phone,
+    }
+
+
+@frappe.whitelist()
+def get_tickets_for_jid(jid: str) -> list[dict]:
+    """Return HD Tickets linked to the WhatsApp JID."""
+    if not jid:
+        return []
+    return frappe.get_all(
+        "HD Ticket",
+        filters={"baileys_jid": jid},
+        fields=["name", "subject", "status", "priority", "creation"],
+        order_by="creation desc",
+    )
+
+
+@frappe.whitelist()
+def create_task_from_chat(jid: str, line: str, title: str) -> str:
+    """Create an HD Task linked to the WA conversation, creating a ticket if none exists."""
+    ticket_name = frappe.db.get_value("HD Ticket", {"baileys_jid": jid}, "name")
+    if not ticket_name:
+        ticket = frappe.get_doc({
+            "doctype": "HD Ticket",
+            "subject": title,
+            "description": title,
+            "ticket_channel": "WhatsApp",
+            "baileys_jid": jid,
+            "baileys_line": line,
+        })
+        ticket.insert(ignore_permissions=True)
+        ticket_name = ticket.name
+    task = frappe.get_doc({
+        "doctype": "HD Task",
+        "title": title,
+        "ticket": ticket_name,
+        "status": "Todo",
+    })
+    task.insert(ignore_permissions=True)
+    frappe.db.commit()
+    return task.name
+
+
+@frappe.whitelist()
+def create_ticket_from_chat(jid: str, line: str, subject: str, description: str = "") -> str:
+    """Create an HD Ticket linked to the WA conversation."""
+    ticket = frappe.get_doc({
+        "doctype": "HD Ticket",
+        "subject": subject,
+        "description": description or subject,
+        "ticket_channel": "WhatsApp",
+        "baileys_jid": jid,
+        "baileys_line": line,
+    })
+    ticket.insert(ignore_permissions=True)
+    frappe.db.commit()
+    return ticket.name
+
+
+@frappe.whitelist()
+def configure_evolution_webhook(line: str) -> dict:
+	"""Register (or update) the Frappe webhook on the Evolution API instance."""
+	settings = _settings()
+	if not settings.enabled or not settings.server_url:
+		frappe.throw(_("Evolution API not configured or disabled"))
+	line_doc = frappe.get_doc("Evolution Line", line)
+	site_url = frappe.utils.get_url().rstrip("/")
+	webhook_url = f"{site_url}/api/method/helpdesk.integrations.evolution.webhook"
+	payload = {
+		"webhook": {
+			"enabled": True,
+			"url": webhook_url,
+			"webhook_by_events": False,
+			"webhook_base64": False,
+			"headers": {"apikey": settings.global_api_key or ""},
+			"events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONTACTS_UPSERT"],
+		}
+	}
+	try:
+		resp = _requests.post(
+			_url("webhook/set", line_doc.instance_name),
+			headers=_headers(line_doc),
+			json=payload,
+			timeout=10,
+		)
+		resp.raise_for_status()
+		return {"status": "ok", "webhook_url": webhook_url, "data": resp.json()}
+	except Exception as e:
+		frappe.throw(_("Failed to configure webhook: {0}").format(str(e)))
 
 
 @frappe.whitelist()

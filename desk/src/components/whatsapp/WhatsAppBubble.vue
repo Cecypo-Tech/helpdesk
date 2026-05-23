@@ -134,10 +134,20 @@
 
         <!-- Image attachment -->
         <div v-if="message.content_type === 'image' && message.attach" class="mb-1">
+          <div v-if="mediaBroken" class="flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-xs italic text-ink-gray-5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Media expired
+          </div>
+          <div v-else-if="mediaRefetching" class="flex items-center gap-2 px-1 py-1 text-xs text-ink-gray-5">
+            <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            Loading…
+          </div>
           <img
-            :src="message.attach"
+            v-else
+            :src="mediaSrc"
             class="max-h-60 max-w-full cursor-pointer rounded"
-            @click="openLightbox(message.attach, 'image')"
+            @click="openLightbox(mediaSrc, 'image')"
+            @error="handleMediaError"
           />
         </div>
 
@@ -175,7 +185,7 @@
 
         <!-- Audio -->
         <div v-if="message.content_type === 'audio' && message.attach" class="mb-1">
-          <audio controls :src="message.attach" class="max-w-full" />
+          <audio controls :src="mediaSrc" class="max-w-full" @error="handleMediaError" />
         </div>
         <div
           v-else-if="message.content_type === 'audio' && !message.attach"
@@ -187,11 +197,21 @@
 
         <!-- Video -->
         <div v-if="message.content_type === 'video' && message.attach" class="mb-1">
+          <div v-if="mediaBroken" class="flex items-center gap-2 rounded bg-surface-gray-2 px-3 py-2 text-xs italic text-ink-gray-5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Media expired
+          </div>
+          <div v-else-if="mediaRefetching" class="flex items-center gap-2 px-1 py-1 text-xs text-ink-gray-5">
+            <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            Loading…
+          </div>
           <video
-            :src="message.attach"
+            v-else
+            :src="mediaSrc"
             controls
             class="max-h-60 max-w-full cursor-pointer rounded"
-            @click.stop="openLightbox(message.attach, 'video')"
+            @click.stop="openLightbox(mediaSrc, 'video')"
+            @error="handleMediaError"
           />
         </div>
 
@@ -399,7 +419,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { toast } from "frappe-ui";
+import { call, toast } from "frappe-ui";
 
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -560,6 +580,39 @@ const attachFilename = computed(() => {
   if (!url) return null;
   return url.split("/").pop() || null;
 });
+
+// Unified reactive media src — used for image, video, audio
+const mediaSrc = ref<string>(props.message.attach || "");
+watch(() => props.message.attach, (v) => {
+  const newVal = v || "";
+  if (newVal !== mediaSrc.value) {
+    mediaSrc.value = newVal;
+    mediaBroken.value = false;  // reset if media_url was updated externally
+  }
+});
+
+const mediaBroken = ref(false);
+const mediaRefetching = ref(false);
+
+async function handleMediaError() {
+  if (mediaRefetching.value || mediaBroken.value) return;
+  mediaRefetching.value = true;
+  try {
+    const newUrl = await call("helpdesk.integrations.evolution.refetch_media_for_message", {
+      message_name: props.message.name,
+    }) as string;
+    if (newUrl && newUrl !== mediaSrc.value) {
+      mediaSrc.value = newUrl;
+      mediaBroken.value = false;
+    } else {
+      mediaBroken.value = true;
+    }
+  } catch {
+    mediaBroken.value = true;
+  } finally {
+    mediaRefetching.value = false;
+  }
+}
 
 // Lightbox
 const lightboxRef = ref<HTMLElement | null>(null);

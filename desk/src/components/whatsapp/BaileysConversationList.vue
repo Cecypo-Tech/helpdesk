@@ -155,6 +155,7 @@
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { useEvolutionLinesStore } from "@/stores/evolutionLines";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ line: string; selectedJid: string | null }>();
@@ -163,6 +164,7 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
+const evolutionLinesStore = useEvolutionLinesStore();
 
 const search = ref("");
 const lastReadMap = ref<Record<string, number>>({});
@@ -301,10 +303,16 @@ const unreadCount = computed(() =>
   (conversations.data || []).reduce((n: number, c: any) => n + (isUnread(c) ? 1 : 0), 0)
 );
 
+const markAllReadResource = createResource({
+  url: "helpdesk.integrations.evolution.mark_all_evolution_messages_read",
+  auto: false,
+  onSuccess() {
+    evolutionLinesStore.reload();
+  },
+});
+
 function markAllRead() {
-  // Pivot on each conversation's own last_message_time so the comparison in
-  // isUnread() uses the same Date.parse() source on both sides — avoids TZ
-  // skew bugs where naive server timestamps get re-interpreted as local.
+  // Update client-side read timestamps so isUnread() returns false immediately
   const next: Record<string, number> = { ...lastReadMap.value };
   for (const c of (conversations.data || [])) {
     if (!c?.jid) continue;
@@ -315,6 +323,8 @@ function markAllRead() {
     try { localStorage.setItem(`baileys_last_read_${c.jid}`, stamp || new Date(t).toISOString()); } catch {}
   }
   lastReadMap.value = next;
+  // Persist to DB so the sidebar badge also clears
+  markAllReadResource.submit({ line: props.line });
 }
 
 defineExpose({ reload: () => conversations.reload() });

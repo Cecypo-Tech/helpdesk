@@ -49,6 +49,50 @@
             </div>
           </div>
 
+          <!-- WhatsApp lines section -->
+          <div v-if="!isCustomerPortal && evolutionLines.length" class="px-2 mb-3">
+            <div
+              class="flex cursor-pointer items-center gap-1.5 px-1 mt-1 mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-gray-5 select-none"
+              @click="waExpanded = !waExpanded"
+            >
+              <FeatherIcon
+                name="chevron-right"
+                class="h-3 w-3 text-ink-gray-5 transition-transform duration-200"
+                :class="{ 'rotate-90': waExpanded }"
+              />
+              <span class="flex-1">WhatsApp</span>
+              <Badge
+                v-if="waUnread > 0"
+                :label="waUnread > 99 ? '99+' : String(waUnread)"
+                theme="green"
+                variant="subtle"
+                class="text-[10px]"
+              />
+            </div>
+            <nav v-if="waExpanded" class="flex flex-col ml-2">
+              <SidebarLink
+                v-for="line in evolutionLines"
+                :key="line.name"
+                :icon="WhatsAppIcon"
+                :label="line.display_label"
+                :to="{ name: 'WhatsAppChat', params: { lineName: line.name } }"
+                :is-expanded="true"
+                :is-active="route.params.lineName === line.name"
+                class="my-0.5"
+                :onClick="() => (sidebarOpened = false)"
+              >
+                <template #right>
+                  <Badge
+                    v-if="line.unread > 0"
+                    :label="line.unread > 99 ? '99+' : String(line.unread)"
+                    theme="green"
+                    variant="subtle"
+                  />
+                </template>
+              </SidebarLink>
+            </nav>
+          </div>
+
           <div v-for="view in allViews" :key="view.label">
             <div
               v-if="!view.hideLabel && view.views?.length"
@@ -113,7 +157,7 @@ import {
   TransitionChild,
   TransitionRoot,
 } from "@headlessui/vue";
-import { computed, markRaw, onMounted } from "vue";
+import { computed, markRaw, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { Section } from "@/components";
@@ -136,6 +180,9 @@ import {
 } from "./layoutSettings";
 import { useTelephonyStore } from "@/stores/telephony";
 import { storeToRefs } from "pinia";
+import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
+import { FeatherIcon, Badge } from "frappe-ui";
 const { pinnedViews, publicViews } = useView();
 
 const notificationStore = useNotificationStore();
@@ -144,6 +191,9 @@ const router = useRouter();
 const authStore = useAuthStore();
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
+const evolutionLinesStore = useEvolutionLinesStore();
+const { lines: evolutionLines, totalUnread: waUnread } = storeToRefs(evolutionLinesStore);
+const waExpanded = ref(true);
 
 const allViews = computed(() => {
   let items = isCustomerPortal.value

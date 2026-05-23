@@ -1,7 +1,7 @@
 import { useAuthStore } from "@/stores/auth";
 import { ListResource, Notification as HDNotification } from "@/types";
 import { isCustomerPortal } from "@/utils";
-import { createListResource, createResource } from "frappe-ui";
+import { createListResource, createResource, toast } from "frappe-ui";
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { globalStore } from "./globalStore";
@@ -168,6 +168,41 @@ export const useNotificationStore = defineStore("notification", () => {
       audio.volume = 0.4;
       audio.play();
     } catch (_) {}
+  });
+
+  $socket.on("helpdesk:new-notification", (data: { type: string; ticket: string; user_from: string; message: string }) => {
+    if (isCustomerPortal.value) return;
+    resource.reload();
+
+    let message = "";
+    let ticketUrl = "";
+
+    if (data.type === "Assignment" && data.ticket) {
+      message = `Ticket <strong>#${data.ticket}</strong> has been assigned to you`;
+      ticketUrl = `/helpdesk/tickets/${data.ticket}`;
+    } else if (data.type === "Mention" && data.ticket) {
+      message = `You were mentioned in ticket <strong>#${data.ticket}</strong>`;
+      ticketUrl = `/helpdesk/tickets/${data.ticket}`;
+    } else if (data.type === "WhatsApp" && data.ticket) {
+      message = data.message || `New WhatsApp message on ticket <strong>#${data.ticket}</strong>`;
+      ticketUrl = `/helpdesk/tickets/${data.ticket}`;
+    }
+
+    if (message) {
+      toast.create({
+        message,
+        type: "info",
+        duration: 0,
+        closable: true,
+        ...(ticketUrl ? {
+          action: {
+            label: "View →",
+            altText: "View ticket",
+            onClick: () => { window.location.href = ticketUrl; },
+          },
+        } : {}),
+      });
+    }
   });
 
   return {

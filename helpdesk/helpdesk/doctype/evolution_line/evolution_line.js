@@ -1,6 +1,23 @@
 frappe.ui.form.on("Evolution Line", {
 	refresh(frm) {
 		if (!frm.is_new()) {
+			frm.add_custom_button(__("Configure Webhook"), () => {
+				frappe.call({
+					method: "helpdesk.integrations.evolution.configure_evolution_webhook",
+					args: { line: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Registering webhook…"),
+					callback(r) {
+						if (r.exc) return;
+						frappe.msgprint({
+							title: __("Webhook Configured"),
+							message: __("Evolution API will now send events to:<br><code>{0}</code>", [r.message.webhook_url]),
+							indicator: "green",
+						});
+					},
+				});
+			}, __("WhatsApp"));
+
 			frm.add_custom_button(__("Show QR Code"), () => {
 				frappe.call({
 					method: "helpdesk.integrations.evolution.get_evolution_qr",

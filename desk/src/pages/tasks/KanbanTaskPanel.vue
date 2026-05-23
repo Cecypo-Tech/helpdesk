@@ -123,6 +123,15 @@
             >
               <LucideExternalLink class="h-3 w-3" />
             </button>
+            <button
+              v-if="linkedChat"
+              class="ml-1 flex items-center gap-0.5 rounded bg-green-50 px-1 py-0.5 text-[10px] text-green-700 hover:bg-green-100 normal-case font-medium"
+              :title="__('Open WhatsApp chat')"
+              @click="openLinkedChat"
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.524 3.66 1.438 5.168L2.2 21.8l4.742-1.22A9.958 9.958 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 0 1-4.076-1.116l-.292-.173-3.024.778.807-2.951-.19-.303A7.963 7.963 0 0 1 4 12c0-4.418 3.582-8 8-8s8 3.582 8 8-3.582 8-8 8z"/></svg>
+              Chat
+            </button>
           </label>
           <Link
             :value="form.ticket"
@@ -267,6 +276,32 @@ const currentModified = ref<string | null>(null);
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
 let descTimer: ReturnType<typeof setTimeout> | null = null;
 
+const linkedChat = ref<{ jid: string; line: string } | null>(null);
+
+async function loadLinkedChat(ticketName: string) {
+  if (!ticketName) { linkedChat.value = null; return; }
+  try {
+    const t = await call("frappe.client.get_value", {
+      doctype: "HD Ticket",
+      filters: { name: ticketName },
+      fieldname: ["baileys_jid", "baileys_line"],
+    });
+    linkedChat.value = (t?.baileys_jid && t?.baileys_line)
+      ? { jid: t.baileys_jid, line: t.baileys_line }
+      : null;
+  } catch { linkedChat.value = null; }
+}
+
+function openLinkedChat() {
+  if (!linkedChat.value) return;
+  const url = router.resolve({
+    name: "WhatsAppChat",
+    params: { lineName: linkedChat.value.line },
+    query: { jid: linkedChat.value.jid },
+  }).href;
+  window.open(url, "_blank");
+}
+
 const statusOptions = ["Backlog", "Todo", "In Progress", "Done"];
 
 interface Subtask {
@@ -323,6 +358,7 @@ watch(
       due_date: s.due_date ?? "",
     }));
     nextTick(() => { isFormLoaded.value = true; });
+    loadLinkedChat(doc.ticket ?? "");
   },
   { immediate: true }
 );

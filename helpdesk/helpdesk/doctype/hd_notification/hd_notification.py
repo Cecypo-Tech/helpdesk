@@ -50,6 +50,17 @@ class HDNotification(Document):
 
     def after_insert(self):
         self._send_push_notification()
+        frappe.publish_realtime(
+            "helpdesk:new-notification",
+            {
+                "type": self.notification_type,
+                "ticket": self.reference_ticket or "",
+                "user_from": self.user_from or "",
+                "message": self.message or "",
+            },
+            user=self.user_to,
+            after_commit=True,
+        )
 
         if self.notification_type == "Mention":
             skip_email_workflow = frappe.db.get_single_value(

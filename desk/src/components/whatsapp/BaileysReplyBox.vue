@@ -1,10 +1,10 @@
 <template>
   <div
-    class="border-t border-outline-gray-2 px-4 py-3"
+    class="border-t border-outline-gray-2 bg-surface-gray-1 px-4 py-3"
     @dragover.prevent="dragging = true"
     @dragleave.prevent="dragging = false"
     @drop.prevent="onDrop"
-    :class="{ 'bg-blue-50 ring-2 ring-inset ring-blue-400': dragging }"
+    :class="{ '!bg-blue-50 ring-2 ring-inset ring-blue-400': dragging }"
   >
     <!-- Attachment preview -->
     <div v-if="attachment" class="mb-2 flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-3 py-2">
@@ -166,7 +166,7 @@
         :disabled="sending"
         :placeholder="attachment ? 'Add a caption (optional)...' : isGroup ? 'Type a message… use @ to mention' : 'Type a message...'"
         rows="1"
-        class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-gray-2 px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
+        class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
         @input="onTextInput"
         @keydown="onTextKeydown"
         @paste="onPaste"
@@ -216,6 +216,10 @@ const sending = ref(false);
 const dragging = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
+
+watch(() => props.replyTo, (val) => {
+  if (val) nextTick(() => textareaRef.value?.focus());
+});
 const attachment = ref<File | null>(null);
 const attachmentPreview = ref<string>("");
 
@@ -493,35 +497,51 @@ async function send() {
 
   if (attachment.value) {
     sending.value = true;
-    const formData = new FormData();
-    formData.append("file", attachment.value, attachment.value.name);
-    if (props.jid) {
-      formData.append("jid", props.jid);
-    } else {
-      formData.append("ticket", props.ticketId);
-    }
-    formData.append("message", text.value.trim());
-    formData.append("content_type", contentType.value);
+    const caption = text.value.trim();
+    const replyToId = props.replyTo?.message_id || "";
+    const replyToFromMe = props.replyTo?.direction === "Outgoing";
+    const ct = contentType.value;
+    const file = attachment.value;
 
     text.value = "";
     clearAttachment();
     mentionedJids.value = [];
     if (textareaRef.value) textareaRef.value.style.height = "auto";
-    sending.value = false;
-    emit("sent");
 
-    fetch("/api/method/helpdesk.integrations.evolution.send_evolution_media", {
-      method: "POST",
-      headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
-      body: formData,
-    }).then(async (response) => {
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err?.exc_type || "Media send failed");
+    try {
+      // Step 1: upload file to Frappe
+      const uploadData = new FormData();
+      uploadData.append("file", file, file.name);
+      uploadData.append("is_private", "0");
+      const csrfToken = (window as any).frappe?.csrf_token || (window as any).csrf_token || "";
+      const uploadResp = await fetch("/api/method/upload_file", {
+        method: "POST",
+        headers: { "X-Frappe-CSRF-Token": csrfToken },
+        body: uploadData,
+      });
+      if (!uploadResp.ok) {
+        const errData = await uploadResp.json().catch(() => ({}));
+        throw new Error(errData?.exc_type || "Upload failed");
       }
-    }).catch(() => {
-      toast.error("Media send failed");
-    });
+      const uploadJson = await uploadResp.json();
+      const fileUrl: string = uploadJson?.message?.file_url || "";
+      if (!fileUrl) throw new Error("No file URL returned");
+
+      // Step 2: send via Evolution API using the uploaded file URL
+      await sendReply.submit({
+        ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
+        message: caption,
+        content_type: ct,
+        media_url: fileUrl,
+        reply_to_message_id: replyToId,
+        reply_to_from_me: replyToFromMe,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || "Media send failed");
+    } finally {
+      sending.value = false;
+      emit("sent");
+    }
   } else {
     const msgText = text.value.trim();
     const replyToId = props.replyTo?.message_id || "";
