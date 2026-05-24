@@ -79,3 +79,60 @@ class TestEvolutionWebhook(unittest.TestCase):
         test_line = next((l for l in lines if l["name"] == line.name), None)
         self.assertIsNotNone(test_line)
         self.assertGreaterEqual(test_line["unread"], 2)
+
+
+class TestExtractEdit(unittest.TestCase):
+    def test_shape1_extracts_text(self):
+        from helpdesk.integrations.evolution import _extract_edit
+        raw = {
+            "editedMessage": {
+                "message": {
+                    "protocolMessage": {
+                        "type": 14,
+                        "editedMessage": {"conversation": "new text shape1"}
+                    }
+                }
+            }
+        }
+        text, is_edit = _extract_edit(raw)
+        self.assertTrue(is_edit)
+        self.assertEqual(text, "new text shape1")
+
+    def test_shape2_extracts_text(self):
+        from helpdesk.integrations.evolution import _extract_edit
+        raw = {
+            "protocolMessage": {
+                "type": 14,
+                "editedMessage": {"conversation": "new text shape2"}
+            }
+        }
+        text, is_edit = _extract_edit(raw)
+        self.assertTrue(is_edit)
+        self.assertEqual(text, "new text shape2")
+
+    def test_shape2_extended_text_message(self):
+        from helpdesk.integrations.evolution import _extract_edit
+        raw = {
+            "protocolMessage": {
+                "type": 14,
+                "editedMessage": {
+                    "extendedTextMessage": {"text": "new text extended"}
+                }
+            }
+        }
+        text, is_edit = _extract_edit(raw)
+        self.assertTrue(is_edit)
+        self.assertEqual(text, "new text extended")
+
+    def test_regular_message_returns_false(self):
+        from helpdesk.integrations.evolution import _extract_edit
+        raw = {"conversation": "hello"}
+        text, is_edit = _extract_edit(raw)
+        self.assertFalse(is_edit)
+        self.assertEqual(text, "")
+
+    def test_empty_dict_returns_false(self):
+        from helpdesk.integrations.evolution import _extract_edit
+        text, is_edit = _extract_edit({})
+        self.assertFalse(is_edit)
+        self.assertEqual(text, "")

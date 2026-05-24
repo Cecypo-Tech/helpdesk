@@ -49,6 +49,31 @@ def _is_group(jid: str) -> bool:
     return jid.endswith("@g.us")
 
 
+def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
+    """Detect an edited-message payload and return (new_text, True) or ('', False)."""
+    # Shape 1: editedMessage wrapper → message → protocolMessage → editedMessage
+    proto_via_edit = (
+        (raw_msg.get("editedMessage") or {})
+        .get("message", {})
+        .get("protocolMessage") or {}
+    )
+    if proto_via_edit:
+        inner = proto_via_edit.get("editedMessage") or {}
+        text = inner.get("conversation") or (inner.get("extendedTextMessage") or {}).get("text") or ""
+        if text:
+            return text, True
+
+    # Shape 2: direct protocolMessage with type 14
+    proto = raw_msg.get("protocolMessage") or {}
+    if proto.get("type") == 14:
+        inner = proto.get("editedMessage") or {}
+        text = inner.get("conversation") or (inner.get("extendedTextMessage") or {}).get("text") or ""
+        if text:
+            return text, True
+
+    return "", False
+
+
 def _set_ticket_status(ticket_name: str, status_name: str) -> None:
     if not status_name or not frappe.db.exists("HD Ticket Status", status_name):
         return
