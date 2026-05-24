@@ -130,6 +130,99 @@ class TestEvolutionWebhook(unittest.TestCase):
         # Falls through — a new message record is created
         self.assertIn(result.get("status"), ("ok", "duplicate"))
 
+    def test_edit_evolution_message_updates_record(self):
+        from unittest.mock import patch, MagicMock
+        from helpdesk.integrations.evolution import edit_evolution_message, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Outgoing",
+            "jid": "254799000005@s.whatsapp.net",
+            "message": "original agent text",
+            "content_type": "text",
+            "message_id": "_test-out-edit-001",
+            "status": "Read",
+            "line": line.name,
+            "is_read": 1,
+        }).insert(ignore_permissions=True)
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {}
+
+        with patch("helpdesk.integrations.evolution._requests") as mock_req:
+            mock_req.put.return_value = mock_resp
+            result = edit_evolution_message(msg.name, "updated agent text")
+
+        self.assertEqual(result["status"], "ok")
+        updated = frappe.get_doc("Baileys Message", msg.name)
+        self.assertEqual(updated.message, "updated agent text")
+        self.assertEqual(updated.is_edited, 1)
+        self.assertEqual(len(updated.edit_history), 1)
+        self.assertEqual(updated.edit_history[0].old_message, "original agent text")
+
+        # Verify correct Evolution API endpoint was called
+        call_args = mock_req.put.call_args
+        self.assertIn("updateMessage", call_args[0][0])
+        payload = call_args[1]["json"]
+        self.assertEqual(payload["number"], "254799000005@s.whatsapp.net")
+        self.assertEqual(payload["key"]["id"], "_test-out-edit-001")
+        self.assertEqual(payload["text"], "updated agent text")
+
+    def test_edit_evolution_message_rejects_incoming(self):
+        from helpdesk.integrations.evolution import edit_evolution_message, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Incoming",
+            "jid": "254799000006@s.whatsapp.net",
+            "message": "customer text",
+            "content_type": "text",
+            "message_id": "_test-in-reject-001",
+            "status": "Pending",
+            "line": line.name,
+            "is_read": 0,
+        }).insert(ignore_permissions=True)
+
+        with self.assertRaises(frappe.ValidationError):
+            edit_evolution_message(msg.name, "attempt to edit incoming")
+
+    def test_edit_evolution_message_rejects_media(self):
+        from helpdesk.integrations.evolution import edit_evolution_message, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Outgoing",
+            "jid": "254799000007@s.whatsapp.net",
+            "message": "",
+            "content_type": "image",
+            "message_id": "_test-media-reject-001",
+            "status": "Sent",
+            "line": line.name,
+            "is_read": 1,
+        }).insert(ignore_permissions=True)
+
+        with self.assertRaises(frappe.ValidationError):
+            edit_evolution_message(msg.name, "try to edit image")
+
+    def test_edit_evolution_message_rejects_empty_text(self):
+        from helpdesk.integrations.evolution import edit_evolution_message, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Outgoing",
+            "jid": "254799000008@s.whatsapp.net",
+            "message": "some text",
+            "content_type": "text",
+            "message_id": "_test-empty-reject-001",
+            "status": "Sent",
+            "line": line.name,
+            "is_read": 1,
+        }).insert(ignore_permissions=True)
+
+        with self.assertRaises(frappe.ValidationError):
+            edit_evolution_message(msg.name, "")
+
     def test_get_evolution_lines_returns_unread_count(self):
         from helpdesk.integrations.evolution import get_evolution_lines
         line = frappe.get_doc("Evolution Line", {"instance_name": "_test-evo"})

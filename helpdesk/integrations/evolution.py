@@ -795,6 +795,49 @@ def send_evolution_reaction(
     return {"status": "ok"}
 
 
+@frappe.whitelist()
+def edit_evolution_message(message_name: str, new_text: str) -> dict:
+    """Edit an outgoing text message via Evolution API and update local record."""
+    settings = _settings()
+    if not settings.enabled:
+        frappe.throw(_("Evolution API is not enabled."))
+
+    doc = frappe.get_doc("Baileys Message", message_name)
+
+    if doc.direction != "Outgoing":
+        frappe.throw(_("Only outgoing messages can be edited."))
+    if doc.content_type != "text":
+        frappe.throw(_("Only text messages can be edited."))
+    if not (new_text or "").strip():
+        frappe.throw(_("Edit text cannot be empty."))
+
+    line = frappe.get_doc("Evolution Line", doc.line)
+
+    try:
+        resp = _requests.put(
+            _url("message/updateMessage", line.instance_name),
+            json={
+                "number": doc.jid,
+                "key": {
+                    "id": doc.message_id,
+                    "fromMe": True,
+                    "remoteJid": doc.jid,
+                },
+                "text": new_text,
+            },
+            headers=_headers(line),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        frappe.throw(_("Evolution API edit failed: {0}").format(str(e)))
+
+    agent_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
+    _apply_edit(doc.name, new_text, edited_by=agent_name, jid=doc.jid, line=line)
+
+    return {"status": "ok", "name": doc.name}
+
+
 @frappe.whitelist(allow_guest=False)
 def send_evolution_media(
     ticket: str = None,
