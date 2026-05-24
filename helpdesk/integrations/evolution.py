@@ -77,6 +77,8 @@ def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
 def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) -> None:
     """Append old text to history, update message, publish realtime edit event."""
     doc = frappe.get_doc("Baileys Message", msg_name)
+    if doc.message == new_text:
+        return
     doc.append("edit_history", {
         "old_message": doc.message or "",
         "edited_at": frappe.utils.now(),
@@ -810,6 +812,8 @@ def edit_evolution_message(message_name: str, new_text: str) -> dict:
         frappe.throw(_("Only text messages can be edited."))
     if not (new_text or "").strip():
         frappe.throw(_("Edit text cannot be empty."))
+    if doc.owner != frappe.session.user and "System Manager" not in frappe.get_roles():
+        frappe.throw(_("You can only edit your own messages."))
 
     line = frappe.get_doc("Evolution Line", doc.line)
 
