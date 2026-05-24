@@ -1285,6 +1285,7 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
 			User.full_name.as_("sender_full_name"),
 			BC.phone.as_("sender_phone"),
+			BM.is_edited,
 		)
 		.where(BM.jid == jid)
 		.orderby(BM.creation)
@@ -1297,6 +1298,24 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
 		m["attach"] = m.get("media_url") or ""
 		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
+		m["edit_history"] = []
+
+	edited_names = [m["name"] for m in rows if m.get("is_edited")]
+	if edited_names:
+		history_rows = frappe.db.get_all(
+			"Baileys Message Edit History",
+			filters={"parent": ["in", edited_names]},
+			fields=["parent", "old_message", "edited_at", "edited_by"],
+			order_by="edited_at asc",
+		)
+		history_map: dict = {}
+		for h in history_rows:
+			if h.get("edited_at") and not isinstance(h["edited_at"], str):
+				h["edited_at"] = str(h["edited_at"])
+			history_map.setdefault(h["parent"], []).append(h)
+		for m in rows:
+			if m.get("is_edited"):
+				m["edit_history"] = history_map.get(m["name"], [])
 
 	return rows
 
