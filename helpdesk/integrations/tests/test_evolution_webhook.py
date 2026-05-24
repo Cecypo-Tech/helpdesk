@@ -19,6 +19,19 @@ class TestEvolutionWebhook(unittest.TestCase):
                 "instance_name": "_test-evo",
             }).insert(ignore_permissions=True)
             frappe.db.commit()
+        # Clean up any committed test records from previous runs
+        for test_msg_id in [
+            "_test-apply-edit-001",
+            "_test-apply-edit-002",
+            "_test-incoming-edit-001",
+            "_test-edit-no-original-001",
+            "_test-out-edit-001",
+            "_test-in-reject-001",
+            "_test-media-reject-001",
+            "_test-empty-reject-001",
+        ]:
+            frappe.db.delete("Baileys Message", {"message_id": test_msg_id})
+        frappe.db.commit()
 
     def tearDown(self):
         frappe.db.rollback()
