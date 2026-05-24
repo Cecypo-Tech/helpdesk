@@ -1,0 +1,47 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-05-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "old_message",
+  "edited_at",
+  "edited_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "old_message",
+   "fieldtype": "Text",
+   "in_list_view": 1,
+   "label": "Old Message"
+  },
+  {
+   "fieldname": "edited_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Edited At"
+  },
+  {
+   "fieldname": "edited_by",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Edited By"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "Baileys Message Edit History",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": []
+}
