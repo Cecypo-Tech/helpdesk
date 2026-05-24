@@ -586,6 +586,7 @@ const editHistoryList = computed(() => {
 function formatEditTime(ts: string): string {
   if (!ts) return "";
   const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
   return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
@@ -625,6 +626,7 @@ function saveEdit() {
   if (!editText.value.trim()) return;
   emit("edit", props.message.name, editText.value.trim());
   editing.value = false;
+  editText.value = "";
 }
 
 function cancelEdit() {
