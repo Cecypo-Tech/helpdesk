@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { createResource } from "frappe-ui";
 import { ref, computed } from "vue";
 
-export interface EvolutionLine {
+export interface WaLine {
   name: string;
   label: string;
   instance_name: string;
@@ -10,13 +10,13 @@ export interface EvolutionLine {
   unread: number;
 }
 
-export const useEvolutionLinesStore = defineStore("evolutionLines", () => {
-  const lines = ref<EvolutionLine[]>([]);
+export const useWaLinesStore = defineStore("waLines", () => {
+  const lines = ref<WaLine[]>([]);
 
   const linesResource = createResource({
-    url: "helpdesk.integrations.evolution.get_evolution_lines",
+    url: "helpdesk.integrations.wa.get_wa_lines",
     auto: true,
-    onSuccess(data: EvolutionLine[]) {
+    onSuccess(data: WaLine[]) {
       lines.value = data || [];
     },
   });

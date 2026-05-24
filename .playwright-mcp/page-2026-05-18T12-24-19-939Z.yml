@@ -1,0 +1,768 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - button "Test Support Administrator" [ref=e5] [cursor=pointer]:
+        - img [ref=e6]
+        - generic [ref=e9]:
+          - generic [ref=e10]: Test Support
+          - generic [ref=e11]: Administrator
+        - img [ref=e13]
+      - generic [ref=e15] [cursor=pointer]:
+        - img [ref=e17]
+        - generic [ref=e20]:
+          - text: Search
+          - generic [ref=e21]:
+            - img [ref=e22]
+            - generic [ref=e24]: K
+      - generic [ref=e25] [cursor=pointer]:
+        - img [ref=e27]
+        - generic [ref=e32]: Dashboard
+      - generic [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e40]:
+          - text: Notifications
+          - generic [ref=e41]: "1"
+      - generic [ref=e42]:
+        - navigation [ref=e46]:
+          - generic [ref=e47] [cursor=pointer]:
+            - img [ref=e49]
+            - generic [ref=e52]: Home
+          - generic [ref=e53] [cursor=pointer]:
+            - img [ref=e55]
+            - generic [ref=e60]: Tickets
+          - generic [ref=e61] [cursor=pointer]:
+            - img [ref=e63]
+            - generic [ref=e66]:
+              - text: Tasks
+              - generic [ref=e67]: "1"
+          - generic [ref=e68] [cursor=pointer]:
+            - img [ref=e70]
+            - generic [ref=e73]: Knowledge Base
+          - generic [ref=e74] [cursor=pointer]:
+            - img [ref=e76]
+            - generic [ref=e78]: Customers
+          - generic [ref=e79] [cursor=pointer]:
+            - img [ref=e81]
+            - generic [ref=e87]: Contacts
+          - generic [ref=e88] [cursor=pointer]:
+            - img [ref=e90]
+            - generic [ref=e92]: WhatsApp
+        - generic [ref=e94]:
+          - generic [ref=e95] [cursor=pointer]:
+            - img [ref=e96]
+            - generic [ref=e98]: Public Views
+          - navigation [ref=e100]:
+            - generic [ref=e101] [cursor=pointer]:
+              - img [ref=e103]
+              - generic [ref=e105]:
+                - text: All Tasks
+                - generic [ref=e106]: "1"
+            - generic [ref=e107] [cursor=pointer]:
+              - img [ref=e109]
+              - generic [ref=e111]:
+                - text: Kanban
+                - generic [ref=e112]: "1"
+            - generic [ref=e113] [cursor=pointer]:
+              - generic [ref=e115]: 1️⃣
+              - generic [ref=e116]: Open tickets
+      - generic [ref=e118]:
+        - generic [ref=e119] [cursor=pointer]:
+          - img [ref=e121]
+          - generic [ref=e123]: Help
+        - generic [ref=e124] [cursor=pointer]:
+          - img [ref=e126]
+          - generic [ref=e128]: Dark mode
+        - generic [ref=e129] [cursor=pointer]:
+          - img [ref=e131]
+          - generic [ref=e135]: Collapse
+    - generic [ref=e138]:
+      - generic [ref=e139]:
+        - heading "WhatsApp" [level=2] [ref=e141]
+        - textbox "Search..." [ref=e143]
+        - generic [ref=e144]:
+          - generic [ref=e145] [cursor=pointer]:
+            - generic [ref=e146]: "5"
+            - generic [ref=e147]:
+              - generic [ref=e148]:
+                - generic [ref=e149]: 555standalone@g.us
+                - generic [ref=e150]: Mon
+              - generic [ref=e152]: webhook test
+          - generic [ref=e154] [cursor=pointer]:
+            - generic [ref=e155]: A
+            - generic [ref=e156]:
+              - generic [ref=e157]:
+                - generic [ref=e158]: Administrator
+                - generic [ref=e159]: Mon
+              - generic [ref=e161]: ✓✓ hello
+          - generic [ref=e162] [cursor=pointer]:
+            - generic [ref=e163]: "N"
+            - generic [ref=e164]:
+              - generic [ref=e165]:
+                - generic [ref=e166]: Nilkunth Shah
+                - generic [ref=e167]: Mon
+              - generic [ref=e169]: "[image]"
+          - generic [ref=e171] [cursor=pointer]:
+            - generic [ref=e172]: ‼
+            - generic [ref=e173]:
+              - generic [ref=e174]:
+                - generic [ref=e175]: ‼️SIMBA SECURITY A‼️
+                - generic [ref=e176]: Mon
+              - generic [ref=e178]: Several banners erected in Kisumu amid countrywide matatu strike
+          - generic [ref=e180] [cursor=pointer]:
+            - generic [ref=e181]: E
+            - generic [ref=e182]:
+              - generic [ref=e183]:
+                - generic [ref=e184]: ErpNext Express - Rio's
+                - generic [ref=e185]: Mon
+              - generic [ref=e187]: Done
+          - generic [ref=e189] [cursor=pointer]:
+            - generic [ref=e190]: C
+            - generic [ref=e191]:
+              - generic [ref=e192]:
+                - generic [ref=e193]: Cecypo.Tech
+                - generic [ref=e194]: Mon
+              - generic [ref=e196]: have we upped anyone else on 25.3.600 (last one at allparts)? Need to test if newer 25.4.000 updates automatically (help>check for update)
+          - generic [ref=e198] [cursor=pointer]:
+            - generic [ref=e199]: F
+            - generic [ref=e200]:
+              - generic [ref=e201]:
+                - generic [ref=e202]: Family 🙈🙉🙊
+                - generic [ref=e203]: Mon
+              - generic [ref=e205]: We are all eagerly waiting...
+          - generic [ref=e207] [cursor=pointer]:
+            - generic [ref=e208]: T
+            - generic [ref=e209]:
+              - generic [ref=e210]:
+                - generic [ref=e211]: TRACKER INSTALLATIONS/JRS
+                - generic [ref=e212]: Mon
+              - generic [ref=e214]: waiting on you for quite a while. now waiting on your tech. Kindly coordinate the whole thing.
+          - generic [ref=e216] [cursor=pointer]:
+            - generic [ref=e217]: E
+            - generic [ref=e218]:
+              - generic [ref=e219]:
+                - generic [ref=e220]: Erpnext.Trials ⚡
+                - generic [ref=e221]: Mon
+              - generic [ref=e223]: Noted
+          - generic [ref=e225] [cursor=pointer]:
+            - generic [ref=e226]: L
+            - generic [ref=e227]:
+              - generic [ref=e228]:
+                - generic [ref=e229]: LRTA Members
+                - generic [ref=e230]: Mon
+              - generic [ref=e232]: Hello, yes. No issues from half an hour ago.
+          - generic [ref=e234] [cursor=pointer]:
+            - generic [ref=e235]: D
+            - generic [ref=e236]:
+              - generic [ref=e237]:
+                - generic [ref=e238]: Demo Group
+                - generic [ref=e239]: Mon
+              - generic [ref=e241]: ✓✓ reply
+          - generic [ref=e242] [cursor=pointer]:
+            - generic [ref=e243]: D
+            - generic [ref=e244]:
+              - generic [ref=e245]:
+                - generic [ref=e246]: Durham Year 7 Parents Group
+                - generic [ref=e247]: Mon
+              - generic [ref=e249]: I had just asked Nial. He said maybe. I suppose they will monitor the situation and inform us accordingly
+          - generic [ref=e251] [cursor=pointer]:
+            - generic [ref=e252]: H
+            - generic [ref=e253]:
+              - generic [ref=e254]:
+                - generic [ref=e255]: H2O & Jameson Lovers😀😀
+                - generic [ref=e256]: Mon
+              - generic [ref=e258]: "[image]"
+          - generic [ref=e260] [cursor=pointer]:
+            - generic [ref=e261]: C
+            - generic [ref=e262]:
+              - generic [ref=e263]:
+                - generic [ref=e264]: CIL ✨
+                - generic [ref=e265]: Mon
+              - generic [ref=e267]: We are closing as staff are not sure how they will go home since local transport is almost to a stand still
+          - generic [ref=e269] [cursor=pointer]:
+            - generic [ref=e270]: D
+            - generic [ref=e271]:
+              - generic [ref=e272]:
+                - generic [ref=e273]: Dhiren Samji
+                - generic [ref=e274]: Mon
+              - generic [ref=e276]: Cleaned with blower
+          - generic [ref=e278] [cursor=pointer]:
+            - generic [ref=e279]: "Y"
+            - generic [ref=e280]:
+              - generic [ref=e281]:
+                - generic [ref=e282]: Year 6 / Year 5 Durham
+                - generic [ref=e283]: 15:03
+              - generic [ref=e285]: General Mathenge, peponi, enaki... No issues. We've made it to school
+          - generic [ref=e287] [cursor=pointer]:
+            - generic [ref=e288]: "1"
+            - generic [ref=e289]:
+              - generic [ref=e290]:
+                - generic [ref=e291]: 120363NEW999TEST@g.us
+                - generic [ref=e292]: 14:33
+              - generic [ref=e294]: new group test
+      - generic [ref=e300]:
+        - generic [ref=e301]:
+          - img [ref=e302]
+          - generic [ref=e305]: ‼️SIMBA SECURITY A‼️
+        - generic [ref=e307]:
+          - generic [ref=e310]: 18 May 2026
+          - generic [ref=e313]:
+            - generic [ref=e314]:
+              - button "Reply" [ref=e315] [cursor=pointer]:
+                - img [ref=e316]
+              - button "React" [ref=e319] [cursor=pointer]:
+                - img [ref=e320]
+            - generic [ref=e325]:
+              - generic [ref=e326]: Virenchi Joshi
+              - generic [ref=e327]:
+                - img [ref=e328]
+                - text: Video sent
+              - generic [ref=e331]: In between the chaos, phone snatching…
+              - generic [ref=e333]: 14:41
+          - generic [ref=e335]:
+            - generic [ref=e336]:
+              - button "Reply" [ref=e337] [cursor=pointer]:
+                - img [ref=e338]
+              - button "React" [ref=e341] [cursor=pointer]:
+                - img [ref=e342]
+            - generic [ref=e347]:
+              - generic [ref=e348]: Virenchi Joshi
+              - generic [ref=e349]:
+                - img [ref=e350]
+                - text: Video sent
+              - generic [ref=e353]: Thindugua, Kiambu Rd at present
+              - generic [ref=e355]: 14:44
+          - generic [ref=e357]:
+            - generic [ref=e358]:
+              - button "Reply" [ref=e359] [cursor=pointer]:
+                - img [ref=e360]
+              - button "React" [ref=e363] [cursor=pointer]:
+                - img [ref=e364]
+            - generic [ref=e369]:
+              - generic [ref=e370]: Virenchi Joshi
+              - generic [ref=e371]: "*SITUATION UPDATE: MONDAY, 18 MAY 2026 | 12:00 PM* *LOCATION*: Nationwide *OCASSION*: Transport Sector Alliance Industrial Action *UPDATE 4 | 1200 HRS* *Nairobi County*: At approx. 10:03 A.M. protesters barricaded Ngong road IVO Zambia area. At approx. 10:15 A.M. protest has been reported in Kawangware area over the hiked fuel prices. At approx. 10:15 A.M. suspected goons were allegedly looting vehicles plying Waiyaki Way from Kangemi to Kikuyu and also throwing stones. At approx. 10:25 A.M. police deployed CS gas to disperse protesters IVO Kencom area, Nairobi CBD. At approx. 10:33 A.M. heavy police deployment within Nairobi CBD. At approx. 10:45 A.M. reports indicate gunshots heard IVO Kitusuru area. At approx. 11:45 A.M. majority of the businesses in Nairobi CBD remain closed. *Nyeri County*: At approx. 10:05 A.M. protesters barricaded several roads and lit bonfires in Othaya town. At approx. 11:44 A.M. police deployed CS gas to disperse a group of individuals allegedly attempting to break into Khetias Supermarket in Nyeri Town. *Nakuru County*: At approx. 10:05 A.M. muggin was reported in Nakuru Town and immediate environs. At approx. 10:23 A.M. running battles was reported in several areas in Naivasha town. *Kiambu County*: At approx. 10:22 A.M. police allegedly deployed tear gas and that gunshots were heard in Gachie area as authorities attempt to disperse protesters. At approx. 10:23 A.M. police engaged protesters in running battles IVO Ruiru Bypass. At approx. 10:20 A.M. police dispersed protesters who blocked Kiambu road in Kiambu town at OLA petrol station. At approx. 10:20 A.M. protesters blocked Thika – Garissa highway at Gatitu area with stones. At approx. 10:43 A.M. reports indicate a private vehicle was set ablaze IVO Githurai area along Thika Superhighway. At approx. 10:45 A.M. reports indicate gunshots heard IVO Redhill area. At approx. 11:02 A.M. reports indicate a private vehicle was set ablaze in Gitaru area. At approx. 11:10 A.M. protesters blocked Thika Superhighway with bonfires at Juja town. At approx. 11:12 A.M. residents in Kimbo, Ruiru along Thika Superhighway staged a protest in sections of the highway. *Mura'ga County*: At approx. 11:30 A.M. protesters blocked a section of the Mukuyu-Kambirwa road at Mukuyu area with burning tyres. *Kirinyaga County*: At approx. 11:30 A.M. police cleared bonfire lit by protesters at Ngurubani town along Mwea-Embu Highway in Kirinyaga county. The area remains calm but largely deserted, with no vehicles in sight. At approx. 11:30 A.M. police have dispersed a group of individuals around Piai and Gathoge areas along Mwea-Embu Highway in Kirinyaga county. The group was allegedly forcing motorists to pay Ksh 100 to pass through the areas. At approx. 11:45 A.M. protesters lit tyres in Kagio and Kutus towns in Kirinyaga county. At approx. 11:45 A.M. heavy protests were reported in several areas within Kerugoya town with bonfires lit along multiple streets. *Machakos County*: At approx. 10:10 A.M. police deployed CS gas to disperse a group of protesters who blocked Kangundo road at Koma area in Matungulu. At approx. 10:40 A.M. a group of youth armed with machetes allegedly attacked vehicles IVO Bamburi Cement along Mombasa Road, affecting movement in the area. *Makueni County*: At approx. 11:22 A.M. protesters reportedly set ablaze the UDA offices in Wote Town after allegedly overwhelming the police and are torching UDA offices in Wote Town. Police reinforcement being called. *Kitui County*: At approx. 11:35 A.M. protesters lit bonfires in Kitui town. *Kajiado County*: At approx. 10:20 A.M. police engaged protesters who blocked the Nairobi – Namanga highway at Kitengela town. At approx. 11:10 A.M. protesters blocked sections of Ngong Road at Ngong town. *Taita Taveta County*: At approx. 10:20 A.M. protesters blocked the Voi – Taveta road blocked at Mwatunge area with stones. *Tharaka Nithi County*: At approx. 11:03 A.M. protesters blocked the Embu–Meru Highway at the National Oil petrol station, Chuka town with stones, lighting bonfires. *Bungoma, Kakamega, Kisumu, Trans Nzoia, Uasin Gishu counties*: At approx. 10:10 A.M. PSVs at Bungoma Bus Stage, Kitale Bus Park, Kakamega Matatu Stage, Kisumu Bus Park and Eldoret Bus Park are not operational. *Bomet County*: At approx. 10:20 A.M. protesters lit bonfire Bomet bus stage in Bomet town. *Kisii County*: At approx. 11:27 A.M. protesters blocked a section of the the Kisii-Sotik road with stones. At approx. 11:30 A.M. a bonfire was lit at a bus park in Ogembo town, Kisii County. *Kakamega County*: At approx. 11:35 A.M. protesters blocked the Kakamega-Kisumu Road, light bonfires at Kakmega town. *ADVISORY*: The public is advised to anticipate significant disruption to public transport services, including fare increases, traffic congestion, delays in cargo movement, and potential demonstrations in major urban areas and along key highways."
+              - generic [ref=e373]: 14:46
+          - generic [ref=e375]:
+            - generic [ref=e376]:
+              - button "Reply" [ref=e377] [cursor=pointer]:
+                - img [ref=e378]
+              - button "React" [ref=e381] [cursor=pointer]:
+                - img [ref=e382]
+            - generic [ref=e387]:
+              - generic [ref=e388]: Virenchi Joshi
+              - generic [ref=e389]:
+                - img [ref=e390]
+                - text: Video sent
+              - generic [ref=e393]: Police deploy aerial surveillance over Thika Road, Githurai and Roysambu areas
+              - generic [ref=e395]: 14:49
+          - generic [ref=e397]:
+            - generic [ref=e398]:
+              - button "Reply" [ref=e399] [cursor=pointer]:
+                - img [ref=e400]
+              - button "React" [ref=e403] [cursor=pointer]:
+                - img [ref=e404]
+            - generic [ref=e409]:
+              - generic [ref=e410]: Virenchi Joshi
+              - generic [ref=e411]:
+                - img [ref=e412]
+                - text: Video sent
+              - generic [ref=e415]: Ruaka , 12pm today
+              - generic [ref=e417]: 14:50
+          - generic [ref=e419]:
+            - generic [ref=e420]:
+              - button "Reply" [ref=e421] [cursor=pointer]:
+                - img [ref=e422]
+              - button "React" [ref=e425] [cursor=pointer]:
+                - img [ref=e426]
+            - generic [ref=e431]:
+              - generic [ref=e432]: Virenchi Joshi
+              - generic [ref=e433]: "Also over kangemi sides Chopper seen hovering around. #GTA5Star"
+              - generic [ref=e435]: 14:51
+          - generic [ref=e437]:
+            - generic [ref=e438]:
+              - button "Reply" [ref=e439] [cursor=pointer]:
+                - img [ref=e440]
+              - button "React" [ref=e443] [cursor=pointer]:
+                - img [ref=e444]
+            - generic [ref=e449]:
+              - generic [ref=e450]: Virenchi Joshi
+              - generic [ref=e451]: "PROTESTERS turn an idle bus terminus on Thika Road into a football pitch as police remain vigilant. #NoPGMOLToOfficiate"
+              - generic [ref=e453]: 14:54
+          - generic [ref=e455]:
+            - generic [ref=e456]:
+              - button "Reply" [ref=e457] [cursor=pointer]:
+                - img [ref=e458]
+              - button "React" [ref=e461] [cursor=pointer]:
+                - img [ref=e462]
+            - generic [ref=e467]:
+              - generic [ref=e468]: Virenchi Joshi
+              - generic [ref=e469]: Matatu owners condemn violence and vandalism as nationwide protests over fuel price hikes continue, urge politicians to avoid inflammatory statements
+              - generic [ref=e471]: 14:56
+          - generic [ref=e473]:
+            - generic [ref=e474]:
+              - button "Reply" [ref=e475] [cursor=pointer]:
+                - img [ref=e476]
+              - button "React" [ref=e479] [cursor=pointer]:
+                - img [ref=e480]
+            - generic [ref=e485]:
+              - generic [ref=e486]: RAJ
+              - generic [ref=e487]:
+                - img [ref=e488]
+                - text: Image sent
+              - generic [ref=e492]: 12.18pm Nyali Bridge. Cars being forced to turn back to town. Matatus & Tuktuks reportedly being stoned.
+              - generic [ref=e494]: 14:59
+          - generic [ref=e496]:
+            - generic [ref=e497]:
+              - button "Reply" [ref=e498] [cursor=pointer]:
+                - img [ref=e499]
+              - button "React" [ref=e502] [cursor=pointer]:
+                - img [ref=e503]
+            - generic [ref=e508]:
+              - generic [ref=e509]: Virenchi Joshi
+              - generic [ref=e510]: Protesters set fire to the UDA offices in Wote, over the spike in fuel prices
+              - generic [ref=e512]: 14:59
+          - generic [ref=e514]:
+            - generic [ref=e515]:
+              - button "Reply" [ref=e516] [cursor=pointer]:
+                - img [ref=e517]
+              - button "React" [ref=e520] [cursor=pointer]:
+                - img [ref=e521]
+            - generic [ref=e526]:
+              - generic [ref=e527]: Virenchi Joshi
+              - generic [ref=e528]: "Protesters set fire to the UDA offices in Wote, over the spike in fuel prices. #WapiRef"
+              - generic [ref=e530]: 14:59
+          - generic [ref=e532]:
+            - generic [ref=e533]:
+              - button "Reply" [ref=e534] [cursor=pointer]:
+                - img [ref=e535]
+              - button "React" [ref=e538] [cursor=pointer]:
+                - img [ref=e539]
+            - generic [ref=e544]:
+              - generic [ref=e545]: Virenchi Joshi
+              - generic [ref=e546]: "SITUATION UPDATE | MAY 18, 2026 | 12:20 PM – Nationwide The situation continues to escalate across several counties, with protesters blocking major highways and roads using stones, burning tyres, and bonfires, while running battles between protesters and police have been reported in parts of Nairobi, Kiambu, Nakuru, Nyeri, Kirinyaga, Machakos, Kajiado, Makueni, and other regions. Reports of looting incidents, vehicles set ablaze, gunshots, attacks on motorists, and heavy police deployment have also emerged, with transport services suspended in several towns and business operations disrupted in multiple affected areas. ADVISORY: Avoid affected areas where possible and expect severe transport disruptions, heavy traffic congestion, delays, and heightened security operations nationwide."
+              - generic [ref=e548]: 14:59
+          - generic [ref=e550]:
+            - generic [ref=e551]:
+              - button "Reply" [ref=e552] [cursor=pointer]:
+                - img [ref=e553]
+              - button "React" [ref=e556] [cursor=pointer]:
+                - img [ref=e557]
+            - generic [ref=e562]:
+              - generic [ref=e563]: Virenchi Joshi
+              - generic [ref=e564]:
+                - img [ref=e565]
+                - text: Image sent
+              - generic [ref=e570]: 15:00
+          - generic [ref=e572]:
+            - generic [ref=e573]:
+              - button "Reply" [ref=e574] [cursor=pointer]:
+                - img [ref=e575]
+              - button "React" [ref=e578] [cursor=pointer]:
+                - img [ref=e579]
+            - generic [ref=e584]:
+              - generic [ref=e585]: Virenchi Joshi
+              - generic [ref=e586]: "BREAKING: The Supreme Court has just made a massive ruling on YOUR pension money. Attorney General Dorcas Oduor and 3 others LOST the case while defending the government’s position. For years, the government treated pension money deducted from workers’ salaries as if it were public money. That is why pension schemes faced endless bureaucracy, procurement rules, delays, and costly approvals before investing your savings. The Association of Retirement Benefits Schemes challenged this in court. They lost in the High Court. Lost again in the Court of Appeal. But on 15th May 2026, the Supreme Court finally ruled in their favour. The court declared that pension schemes sponsored by public entities and state corporations are PRIVATE TRUSTS, not government money. Meaning? Your pension is YOUR money. Not the government’s. Trustees can now invest faster, avoid unnecessary procurement bureaucracy, and potentially grow retirement savings better for millions of Kenyans. This is one of the biggest financial rulings most wananchi have never heard about."
+              - generic [ref=e588]: 15:05
+          - generic [ref=e590]:
+            - generic [ref=e591]:
+              - button "Reply" [ref=e592] [cursor=pointer]:
+                - img [ref=e593]
+              - button "React" [ref=e596] [cursor=pointer]:
+                - img [ref=e597]
+            - generic [ref=e602]:
+              - generic [ref=e603]: Virenchi Joshi
+              - generic [ref=e604]:
+                - img [ref=e605]
+                - text: Image sent
+              - generic [ref=e610]: 15:06
+          - generic [ref=e612]:
+            - generic [ref=e613]:
+              - button "Reply" [ref=e614] [cursor=pointer]:
+                - img [ref=e615]
+              - button "React" [ref=e618] [cursor=pointer]:
+                - img [ref=e619]
+            - generic [ref=e624]:
+              - generic [ref=e625]: Virenchi Joshi
+              - generic [ref=e626]: Junction of Voi-Taveta- Mombasa-Nairobi being blocked as at now
+              - generic [ref=e628]: 15:07
+          - generic [ref=e630]:
+            - generic [ref=e631]:
+              - button "Reply" [ref=e632] [cursor=pointer]:
+                - img [ref=e633]
+              - button "React" [ref=e636] [cursor=pointer]:
+                - img [ref=e637]
+            - generic [ref=e642]:
+              - generic [ref=e643]: Virenchi Joshi
+              - generic [ref=e644]: Energy CS Opiyo Wandayi calls for calm amid fuel protests, says government is working to resolve the crisis
+              - generic [ref=e646]: 15:08
+          - generic [ref=e648]:
+            - generic [ref=e649]:
+              - button "Reply" [ref=e650] [cursor=pointer]:
+                - img [ref=e651]
+              - button "React" [ref=e654] [cursor=pointer]:
+                - img [ref=e655]
+            - generic [ref=e660]:
+              - generic [ref=e661]: Virenchi Joshi
+              - generic [ref=e662]: Vandalism and looting activity targeting the Coca-Cola depot in Kitengela amid ongoing unrest. The incident signals opportunistic criminal activity exploiting the prevailing instability within the area.
+              - generic [ref=e664]: 15:12
+          - generic [ref=e666]:
+            - generic [ref=e667]:
+              - button "Reply" [ref=e668] [cursor=pointer]:
+                - img [ref=e669]
+              - button "React" [ref=e672] [cursor=pointer]:
+                - img [ref=e673]
+            - generic [ref=e678]:
+              - generic [ref=e679]: Virenchi Joshi
+              - generic [ref=e680]:
+                - img [ref=e681]
+                - text: Video sent
+              - generic [ref=e684]: "Albert Karagacha, Matatu Owners Association President: We will not bow down until the government listens to us. CS Mbadi is a threat to the country."
+              - generic [ref=e686]: 15:13
+          - generic [ref=e688]:
+            - generic [ref=e689]:
+              - button "Reply" [ref=e690] [cursor=pointer]:
+                - img [ref=e691]
+              - button "React" [ref=e694] [cursor=pointer]:
+                - img [ref=e695]
+            - generic [ref=e700]:
+              - generic [ref=e701]: Virenchi Joshi
+              - generic [ref=e702]:
+                - img [ref=e703]
+                - text: Image sent
+              - generic [ref=e707]: Ngecha has been blocked by protesters. It looks like a handful of angry young men. Avoid if possible..
+              - generic [ref=e709]: 15:18
+          - generic [ref=e711]:
+            - generic [ref=e712]:
+              - button "Reply" [ref=e713] [cursor=pointer]:
+                - img [ref=e714]
+              - button "React" [ref=e717] [cursor=pointer]:
+                - img [ref=e718]
+            - generic [ref=e723]:
+              - generic [ref=e724]: Virenchi Joshi
+              - generic [ref=e725]:
+                - img [ref=e726]
+                - text: Video sent
+              - generic [ref=e729]: Passengers on a Nyamira Express bus forced to alight along Mariakani Road, Mombasa, as transport disruptions continue to affect travel across the country amid protests over the fuel price hike.
+              - generic [ref=e731]: 15:21
+          - generic [ref=e733]:
+            - generic [ref=e734]:
+              - button "Reply" [ref=e735] [cursor=pointer]:
+                - img [ref=e736]
+              - button "React" [ref=e739] [cursor=pointer]:
+                - img [ref=e740]
+            - generic [ref=e745]:
+              - generic [ref=e746]: Virenchi Joshi
+              - generic [ref=e747]: Treasury Says Fuel Prices Will Remain Until June Review Amid Nationwide Transport Strike Treasury Cabinet Secretary John Mbadi has confirmed that current fuel prices will remain in place until the next review by the Energy and Petroleum Regulatory Authority scheduled for June 14. Speaking on Monday amid widespread transport disruptions caused by the ongoing matatu strike, Mbadi said the government is monitoring the situation closely but maintained that no immediate changes would be made to pump prices. The CS noted that the government could consider additional interventions, including reducing VAT on fuel again, if global prices continue rising and the current Ksh5 billion fuel subsidy becomes insufficient. Mbadi also urged EPRA and the Ministry of Energy to improve communication ahead of future fuel reviews to avoid shocking Kenyans with abrupt price changes. He arguing that the fuel crisis is largely driven by global market pressures linked to the ongoing tensions involving the United States and Iran.
+              - generic [ref=e749]: 15:21
+          - generic [ref=e751]:
+            - generic [ref=e752]:
+              - button "Reply" [ref=e753] [cursor=pointer]:
+                - img [ref=e754]
+              - button "React" [ref=e757] [cursor=pointer]:
+                - img [ref=e758]
+            - generic [ref=e763]:
+              - generic [ref=e764]: Virenchi Joshi
+              - generic [ref=e765]: "OFFICIAL PRESS STATEMENT Chairman’s Briefing – Nationwide Transport Strike. To all members of the public and transport stakeholders, I issue this official briefing to update the nation on the status and direction of our ongoing nationwide transport strike Current Situation. Full Cooperation: The suspension of transport services is being observed across the country. Commercial transport operators and private motorists and Rig owners have voluntarily withdrawn from the roads, resulting in a successful, peaceful, and comprehensive national shutdown. Prioritize Peace: We urge the general public, drivers, SACCO leadership, and all stakeholders to remain calm and conduct themselves strictly within the law. Avoid provocation and maintain discipline at all times. Zero Disruption: We uphold a firm zero‑tolerance stance against violence, harassment, intimidation, or vandalism. Any unlawful conduct should be reported immediately to law enforcement agencies. Emergency Access: Let us safeguard one another. Ensure that ambulances, fire services, and other emergency vehicles are granted unhindered passage. Please assist vulnerable persons who may require urgent support. Upcoming Briefing: A definitive directive will be issued at 5:00 PM today. This communication will outline the next phase of our action and provide clarity on the expected timeline. Verified Information Only: To curb misinformation, all press and public inquiries must be directed exclusively to the Matatu Owners Association Communications Desk. Kindly disregard any statements circulating from unverified or unofficial sources. Finally We urge goverment officials and politicians to refrain from making reckless inflammatory statements. Our collective stance is anchored in determination, unity, and civic responsibility. We remain steadfast in advocating for equitable fuel pricing and economic relief for our operators—without compromising the peace, safety, and dignity of our nation. In solidarity and peace, Albert Karakacha President , Matatu Owners Association."
+              - generic [ref=e767]: 15:21
+          - generic [ref=e769]:
+            - generic [ref=e770]:
+              - button "Reply" [ref=e771] [cursor=pointer]:
+                - img [ref=e772]
+              - button "React" [ref=e775] [cursor=pointer]:
+                - img [ref=e776]
+            - generic [ref=e781]:
+              - generic [ref=e782]: Aryan “SIMBA”
+              - generic [ref=e783]:
+                - img [ref=e784]
+                - text: Video sent
+              - generic [ref=e787]: Khetia supermarket in Nyeri being looted..
+              - generic [ref=e789]: 16:33
+          - generic [ref=e791]:
+            - generic [ref=e792]:
+              - button "Reply" [ref=e793] [cursor=pointer]:
+                - img [ref=e794]
+              - button "React" [ref=e797] [cursor=pointer]:
+                - img [ref=e798]
+            - generic [ref=e803]:
+              - generic [ref=e804]: Aryan “SIMBA”
+              - generic [ref=e805]: "JUST IN: One person killed after being hit by a police vehicle on Kenyatta Avenue in Nakuru amid ongoing fuel protests, while another shot in Kakamega’s KIE area."
+              - generic [ref=e807]: 16:33
+          - generic [ref=e809]:
+            - generic [ref=e810]:
+              - button "Reply" [ref=e811] [cursor=pointer]:
+                - img [ref=e812]
+              - button "React" [ref=e815] [cursor=pointer]:
+                - img [ref=e816]
+            - generic [ref=e821]:
+              - generic [ref=e822]: Aryan “SIMBA”
+              - generic [ref=e823]:
+                - img [ref=e824]
+                - text: Image sent
+              - generic [ref=e828]: Outbound in Mlolongo behind the weighbridge, old mombasa road
+              - generic [ref=e830]: 16:34
+          - generic [ref=e832]:
+            - generic [ref=e833]:
+              - button "Reply" [ref=e834] [cursor=pointer]:
+                - img [ref=e835]
+              - button "React" [ref=e838] [cursor=pointer]:
+                - img [ref=e839]
+            - generic [ref=e844]:
+              - generic [ref=e845]: Aryan “SIMBA”
+              - generic [ref=e846]:
+                - img [ref=e847]
+                - text: Video sent
+              - generic [ref=e851]: 16:34
+          - generic [ref=e853]:
+            - generic [ref=e854]:
+              - button "Reply" [ref=e855] [cursor=pointer]:
+                - img [ref=e856]
+              - button "React" [ref=e859] [cursor=pointer]:
+                - img [ref=e860]
+            - generic [ref=e865]:
+              - generic [ref=e866]: Aryan “SIMBA”
+              - generic [ref=e867]:
+                - img [ref=e868]
+                - text: Video sent
+              - generic [ref=e872]: 16:37
+          - generic [ref=e874]:
+            - generic [ref=e875]:
+              - button "Reply" [ref=e876] [cursor=pointer]:
+                - img [ref=e877]
+              - button "React" [ref=e880] [cursor=pointer]:
+                - img [ref=e881]
+            - generic [ref=e886]:
+              - generic [ref=e887]: Aryan “SIMBA”
+              - generic [ref=e888]: A police vehicle was forced to turn back on the Thika Superhighway during today’s protests over fuel prices after residents blocked its way, forcing the driver to flee the scene. Thanks Mitesh Parmar
+              - generic [ref=e890]: 16:37
+          - generic [ref=e892]:
+            - generic [ref=e893]:
+              - button "Reply" [ref=e894] [cursor=pointer]:
+                - img [ref=e895]
+              - button "React" [ref=e898] [cursor=pointer]:
+                - img [ref=e899]
+            - generic [ref=e904]:
+              - generic [ref=e905]: Aryan “SIMBA”
+              - generic [ref=e906]: "*UDA Office Torched in Wote as Fuel Price Protests Escalate* An office belonging to the ruling United Democratic Alliance was set ablaze in Wote on Monday as protests over rising fuel prices intensified across the country. According to reports, angry protesters stormed the premises, vandalised property, and later set part of the office on fire during demonstrations linked to the ongoing transport strike and high fuel costs. Videos circulating online showed thick smoke billowing from the building as residents gathered nearby to watch firefighters and locals contain the blaze. No injuries were immediately reported, although property damage was reported following the incident. The unrest comes amid nationwide protests triggered by recent fuel price hikes announced by the Energy and Petroleum Regulatory Authority, which pushed petrol and diesel prices to record highs and sparked transport paralysis in several towns. Police continued patrolling affected areas as authorities monitored the protests, which have disrupted transport and business operations across parts of the country. Cyprian"
+              - generic [ref=e908]: 16:38
+          - generic [ref=e910]:
+            - generic [ref=e911]:
+              - button "Reply" [ref=e912] [cursor=pointer]:
+                - img [ref=e913]
+              - button "React" [ref=e916] [cursor=pointer]:
+                - img [ref=e917]
+            - generic [ref=e922]:
+              - generic [ref=e923]: Virenchi Joshi
+              - generic [ref=e924]:
+                - img [ref=e925]
+                - text: Video sent
+              - generic [ref=e928]: Cornelius Chepsoi, Chairman of Matatu Association..
+              - generic [ref=e930]: 16:39
+          - generic [ref=e932]:
+            - generic [ref=e933]:
+              - button "Reply" [ref=e934] [cursor=pointer]:
+                - img [ref=e935]
+              - button "React" [ref=e938] [cursor=pointer]:
+                - img [ref=e939]
+            - generic [ref=e944]:
+              - generic [ref=e945]: Virenchi Joshi
+              - generic [ref=e946]: "JUST IN: One person killed after being hit by a police vehicle on Kenyatta Avenue in Nakuru amid ongoing fuel protests, while another shot in Kakamega’s KIE area."
+              - generic [ref=e948]: 16:39
+          - generic [ref=e950]:
+            - generic [ref=e951]:
+              - button "Reply" [ref=e952] [cursor=pointer]:
+                - img [ref=e953]
+              - button "React" [ref=e956] [cursor=pointer]:
+                - img [ref=e957]
+            - generic [ref=e962]:
+              - generic [ref=e963]: Virenchi Joshi
+              - generic [ref=e964]: "*SITUATION UPDATE: MONDAY, 18 MAY 2026 | 2:07 PM* *LOCATION*: Nationwide *OCCASSION*: Transport Sector Alliance Industrial Action *UPDATE 5 | 2:00 PM* *Nairobi County*: At approx. 12:02 P.M., police arrested several protesters IVO National Archives along Moi Avenue in Nairobi CBD whilst also deploying CS gas to disperse others in the area. At approx. 12:45 P.M., protesters lit bonfire along Waiyaki Way at Kangemi's Sodom area. At approx. 12:58 P.M., protesters lit bonfire along Thika Superhigway at Roysambu area. *Kiambu County*: At approx. 12:02 P.M., police and other officials conducted clearance operations along sections of the Southern Bypass IVO Kikuyu town, removing stones and debris previously obstructing movement. At approx. 12:30 P.M., protesters lit a bonfire in Thindigua area, Kiambu County. At approx. 12:30 P.M., at least two people were allegedly shot and injured during running battles between police and protesters who had blocked Thika-Garissa highway at BAT, Makongeni area, Thika. At approx. 1:23 P.M., protesters blocked the Narobi-Garissa road at Kisii Estate in Thika with stones. *Meru County*: At approx. 12:02 P.M., police in Meru county cleared stone barricades on Nkubu-Thingithu-Uruku stretch. At approx. 12:05 P.M., police engaged in running battles with protesters who lit bonfires at Makutano area, Meru county. *Embu County*: At approx. 12:03 P.M., police removed road barricades along Muthatari-Siakago road in Embu county. *Machakos County*: At approx. 12:03 P.M., police engaged protesters in running battles at Machakos town center. The protesters had lit a bonfire at the town center earlier. At approx. 1:12 P.M., protesters blocked Mombasa road at Mlolongo area with stones. *Nakuru County*: At approx. 12:03 P.M., protesters reportedly broke into Powerstar Supermarket, Naivasha town. Police deployed to the area. At approx. 1:34 P.M., protesters blocked Kenyatta avenue in Nakuru town with stones. *Marsabit County*: At approx. 12:30 P.M. protesters lit a bonfire in Marsabit town. *Kajiado County*: At approx. 12:35 P.M., protesters broke into Coca-Cola depot in Kitengela town allegedly looting items. Police managed to disperse them. *Narok County*: At approx. 1:00 P.M., police engaged protesters in running battles in Narok town IVO new QuickMart supermarket. Protesters had earlier barricaded the road around the area with stones. *Nandi County*: At approx. 1:00 P.M., police in Kapsabet town, removed stones and wooden planks used by the protesters to block the Kapsabet-Chavakali Road in the town earlier. *Kitui County*: At approx. 12:34 P.M., police engaged protesters in running battles in Kitui town. *Murang'a County*: PSVs are not operational in Murang'a as of 1:00 P.M. *Kakamega County*: At approx. 1:00 P.M., one individual was shot and injured IVO Bukhungu Stadium in Kakamega town. *ADVISORY*: The public is advised to anticipate significant disruption to public transport services, including fare increases, traffic congestion, delays in cargo movement, and potential demonstrations in major urban areas and along key highways."
+              - generic [ref=e966]: 16:41
+          - generic [ref=e968]:
+            - generic [ref=e969]:
+              - button "Reply" [ref=e970] [cursor=pointer]:
+                - img [ref=e971]
+              - button "React" [ref=e974] [cursor=pointer]:
+                - img [ref=e975]
+            - generic [ref=e980]:
+              - generic [ref=e981]: Aryan “SIMBA”
+              - generic [ref=e982]:
+                - img [ref=e983]
+                - text: Video sent
+              - generic [ref=e986]: Narok
+              - generic [ref=e988]: 16:51
+          - generic [ref=e990]:
+            - generic [ref=e991]:
+              - button "Reply" [ref=e992] [cursor=pointer]:
+                - img [ref=e993]
+              - button "React" [ref=e996] [cursor=pointer]:
+                - img [ref=e997]
+            - generic [ref=e1002]:
+              - generic [ref=e1003]: Aryan “SIMBA”
+              - generic [ref=e1004]:
+                - img [ref=e1005]
+                - text: Video sent
+              - generic [ref=e1008]: Narok blocked
+              - generic [ref=e1010]: 16:51
+          - generic [ref=e1012]:
+            - generic [ref=e1013]:
+              - button "Reply" [ref=e1014] [cursor=pointer]:
+                - img [ref=e1015]
+              - button "React" [ref=e1018] [cursor=pointer]:
+                - img [ref=e1019]
+            - generic [ref=e1024]:
+              - generic [ref=e1025]: Virenchi Joshi
+              - generic [ref=e1026]:
+                - img [ref=e1027]
+                - text: Image sent
+              - generic [ref=e1031]: Protesting youths in Naivasha burn down a truck belonging to contractor involved in the construction of the Rironi-Mau Summit expressway, as transport along the Nairobi-Nakuru highway is paralysed.
+              - generic [ref=e1033]: 16:57
+          - generic [ref=e1035]:
+            - generic [ref=e1036]:
+              - button "Reply" [ref=e1037] [cursor=pointer]:
+                - img [ref=e1038]
+              - button "React" [ref=e1041] [cursor=pointer]:
+                - img [ref=e1042]
+            - generic [ref=e1047]:
+              - generic [ref=e1048]: Aryan “SIMBA”
+              - generic [ref=e1049]:
+                - img [ref=e1050]
+                - text: Video sent
+              - generic [ref=e1053]: They've burnt Power Star Supermarket in Naivasha.
+              - generic [ref=e1055]: 17:03
+          - generic [ref=e1057]:
+            - generic [ref=e1058]:
+              - button "Reply" [ref=e1059] [cursor=pointer]:
+                - img [ref=e1060]
+              - button "React" [ref=e1063] [cursor=pointer]:
+                - img [ref=e1064]
+            - generic [ref=e1069]:
+              - generic [ref=e1070]: Aryan “SIMBA”
+              - generic [ref=e1071]:
+                - img [ref=e1072]
+                - text: Image sent
+              - generic [ref=e1076]: Oltau Hotel in Naivasha has been vandalized
+              - generic [ref=e1078]: 17:03
+          - generic [ref=e1080]:
+            - generic [ref=e1081]:
+              - button "Reply" [ref=e1082] [cursor=pointer]:
+                - img [ref=e1083]
+              - button "React" [ref=e1086] [cursor=pointer]:
+                - img [ref=e1087]
+            - generic [ref=e1092]:
+              - generic [ref=e1093]: Aryan “SIMBA”
+              - generic [ref=e1094]:
+                - img [ref=e1095]
+                - text: Video sent
+              - generic [ref=e1098]: Roysambu is chaotic.
+              - generic [ref=e1100]: 17:03
+          - generic [ref=e1102]:
+            - generic [ref=e1103]:
+              - button "Reply" [ref=e1104] [cursor=pointer]:
+                - img [ref=e1105]
+              - button "React" [ref=e1108] [cursor=pointer]:
+                - img [ref=e1109]
+            - generic [ref=e1114]:
+              - generic [ref=e1115]: Aryan “SIMBA”
+              - generic [ref=e1116]:
+                - img [ref=e1117]
+                - text: Video sent
+              - generic [ref=e1120]: Residents are advised to avoid the Fourways Bypass area due to ongoing unrest and traffic disruption reported in the vicinity.
+              - generic [ref=e1122]: 17:09
+          - generic [ref=e1124]:
+            - generic [ref=e1125]:
+              - button "Reply" [ref=e1126] [cursor=pointer]:
+                - img [ref=e1127]
+              - button "React" [ref=e1130] [cursor=pointer]:
+                - img [ref=e1131]
+            - generic [ref=e1136]:
+              - generic [ref=e1137]: Aryan “SIMBA”
+              - generic [ref=e1138]: "*Matatu Owners Demand VAT, Levy Cuts as They Seek Talks to End Crippling Transport Strike* The Matatu Owners Association has called for urgent dialogue with the government to resolve the ongoing nationwide transport strike triggered by rising fuel prices. Speaking during a press briefing, MOA chairman Albert Karakacha said matatu operators and transport stakeholders are ready to engage the government in talks to avert continued paralysis across major towns and cities. Karakacha warned that the strike could continue if authorities fail to address concerns over soaring fuel costs, insisting that operators cannot continue transferring the burden to ordinary Kenyans. The association is demanding the removal of the 8 per cent VAT on fuel and the Ksh25 Road Maintenance Levy, arguing that the taxes are driving pump prices to unsustainable levels. MOA also claimed the government had not formally reached out to transport stakeholders despite widespread disruptions affecting commuters and businesses. Meanwhile, Treasury Cabinet Secretary John Mbadi confirmed that the government plans to hold discussions with matatu operators and energy sector agencies to explore possible measures to cushion Kenyans from the impact of rising fuel prices. -CN"
+              - generic [ref=e1140]: 17:13
+          - generic [ref=e1142]:
+            - generic [ref=e1143]:
+              - button "Reply" [ref=e1144] [cursor=pointer]:
+                - img [ref=e1145]
+              - button "React" [ref=e1148] [cursor=pointer]:
+                - img [ref=e1149]
+            - generic [ref=e1154]:
+              - generic [ref=e1155]: Aryan “SIMBA”
+              - generic [ref=e1156]:
+                - img [ref=e1157]
+                - text: Video sent
+              - generic [ref=e1160]: Kitengela Coca-Cola depot has been vandalized by looters and items stolen.
+              - generic [ref=e1162]: 17:14
+          - generic [ref=e1164]:
+            - generic [ref=e1165]:
+              - button "Reply" [ref=e1166] [cursor=pointer]:
+                - img [ref=e1167]
+              - button "React" [ref=e1170] [cursor=pointer]:
+                - img [ref=e1171]
+            - generic [ref=e1176]:
+              - generic [ref=e1177]: Aryan “SIMBA”
+              - generic [ref=e1178]:
+                - img [ref=e1179]
+                - text: Video sent
+              - generic [ref=e1183]: 17:19
+          - generic [ref=e1185]:
+            - generic [ref=e1186]:
+              - button "Reply" [ref=e1187] [cursor=pointer]:
+                - img [ref=e1188]
+              - button "React" [ref=e1191] [cursor=pointer]:
+                - img [ref=e1192]
+            - generic [ref=e1197]:
+              - generic [ref=e1198]: Aryan “SIMBA”
+              - generic [ref=e1199]: "*Demo Update* Ongoing demonstrations have been recorded in Gitaru along Waiyaki Way with reports indicating that vehicles are being burnt. Other areas that have experienced torching of vehicles include Githurai along Thika Superhighway. Individuals are advised to exercise caution and avoid unnecessary movement to the protest sites."
+              - generic [ref=e1201]: 17:23
+          - generic [ref=e1203]:
+            - generic [ref=e1204]:
+              - button "Reply" [ref=e1205] [cursor=pointer]:
+                - img [ref=e1206]
+              - button "React" [ref=e1209] [cursor=pointer]:
+                - img [ref=e1210]
+            - generic [ref=e1215]:
+              - generic [ref=e1216]: Aryan “SIMBA”
+              - generic [ref=e1217]: "*CBD Entry Points* 1. Ngong Town towards CBD blocked 2. Rongai Town towards CBD blocked 3. Kagemi Bridge blocked 4. Kawangware (Naivasha Rd) cleared by Police, traffic now flowing 5. Ruiru Town towards Thika blocked 6. Gachie blocked 7. Kiambu Rd flowing 8. Kikuyu area calm 9. Thika Rd from Rosters towards CBD flowing 10. Outering Rd from Allsops flowing upto Pipeline towards Taj Mall which is now a No Go Zone 11. Mlolongo towards CBD flowing. 12. Machakos Junction there was a burning tyre awhile ago."
+              - generic [ref=e1219]: 17:23
+          - generic [ref=e1221]:
+            - generic [ref=e1222]:
+              - button "Reply" [ref=e1223] [cursor=pointer]:
+                - img [ref=e1224]
+              - button "React" [ref=e1227] [cursor=pointer]:
+                - img [ref=e1228]
+            - generic [ref=e1233]:
+              - generic [ref=e1234]: Aryan “SIMBA”
+              - generic [ref=e1235]:
+                - img [ref=e1236]
+                - text: Video sent
+              - generic [ref=e1239]: Thieves steal gas cylinders in Naivasha Town amid ongoing protests.
+              - generic [ref=e1241]: 17:32
+          - generic [ref=e1243]:
+            - generic [ref=e1244]:
+              - button "Reply" [ref=e1245] [cursor=pointer]:
+                - img [ref=e1246]
+              - button "React" [ref=e1249] [cursor=pointer]:
+                - img [ref=e1250]
+            - generic [ref=e1255]:
+              - generic [ref=e1256]: Aryan “SIMBA”
+              - generic [ref=e1257]: "UPDATE: Treasury, Transport and Energy ministries to meet matatu owners this evening to resolve ongoing crisis, CS Mbadi says"
+              - generic [ref=e1259]: 17:32
+          - generic [ref=e1261]:
+            - generic [ref=e1262]:
+              - button "Reply" [ref=e1263] [cursor=pointer]:
+                - img [ref=e1264]
+              - button "React" [ref=e1267] [cursor=pointer]:
+                - img [ref=e1268]
+            - generic [ref=e1273]:
+              - generic [ref=e1274]: Virenchi Joshi
+              - generic [ref=e1275]:
+                - img [ref=e1276]
+                - text: Image sent
+              - generic [ref=e1280]: Several banners erected in Kisumu amid countrywide matatu strike
+              - generic [ref=e1282]: 17:32
+        - generic [ref=e1284]:
+          - button "Attach file" [ref=e1285] [cursor=pointer]:
+            - img [ref=e1286]
+          - textbox "Type a message..." [ref=e1288]
+          - button [disabled] [ref=e1289]:
+            - img [ref=e1290]
+  - region "Notifications (F8)":
+    - list

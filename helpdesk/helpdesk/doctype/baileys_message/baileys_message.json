@@ -123,8 +123,8 @@
   {
    "fieldname": "line",
    "fieldtype": "Link",
-   "label": "Evolution Line",
-   "options": "Evolution Line",
+   "label": "WA Line",
+   "options": "WA Line",
    "in_list_view": 0,
    "read_only": 1
   },

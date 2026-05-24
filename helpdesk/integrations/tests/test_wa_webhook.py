@@ -2,19 +2,19 @@ import frappe
 import unittest
 
 
-class TestEvolutionWebhook(unittest.TestCase):
+class TestWaWebhook(unittest.TestCase):
     def setUp(self):
         frappe.set_user("Administrator")
         # Ensure settings exist
-        s = frappe.get_single("Evolution API Settings")
+        s = frappe.get_single("WA API Settings")
         s.enabled = 1
         s.global_api_key = "testkey123"
         s.save(ignore_permissions=True)
         frappe.db.commit()
         # Create test line
-        if not frappe.db.exists("Evolution Line", {"instance_name": "_test-evo"}):
+        if not frappe.db.exists("WA Line", {"instance_name": "_test-evo"}):
             frappe.get_doc({
-                "doctype": "Evolution Line",
+                "doctype": "WA Line",
                 "label": "Test",
                 "instance_name": "_test-evo",
             }).insert(ignore_permissions=True)
@@ -37,7 +37,7 @@ class TestEvolutionWebhook(unittest.TestCase):
         frappe.db.rollback()
 
     def test_status_update_sets_correct_value(self):
-        from helpdesk.integrations.evolution import _handle_update, _line
+        from helpdesk.integrations.wa import _handle_update, _line
         line = _line("_test-evo")
         # Create a test outgoing message
         msg = frappe.get_doc({
@@ -62,7 +62,7 @@ class TestEvolutionWebhook(unittest.TestCase):
         self.assertEqual(updated_status, "Delivered")
 
     def test_unknown_status_code_is_ignored(self):
-        from helpdesk.integrations.evolution import _handle_update, _line
+        from helpdesk.integrations.wa import _handle_update, _line
         line = _line("_test-evo")
         # Status 99 should not raise
         result = _handle_update([{
@@ -72,7 +72,7 @@ class TestEvolutionWebhook(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
 
     def test_incoming_edit_updates_existing_message(self):
-        from helpdesk.integrations.evolution import _handle_upsert, _line, _settings
+        from helpdesk.integrations.wa import _handle_upsert, _line, _settings
         line = _line("_test-evo")
         # Create the original message
         frappe.get_doc({
@@ -118,7 +118,7 @@ class TestEvolutionWebhook(unittest.TestCase):
         self.assertEqual(msgs[0]["is_edited"], 1)
 
     def test_edit_before_original_falls_through_as_new_message(self):
-        from helpdesk.integrations.evolution import _handle_upsert, _line, _settings
+        from helpdesk.integrations.wa import _handle_upsert, _line, _settings
         line = _line("_test-evo")
         # No original message exists — should fall through to normal insert
         edit_data = {
@@ -143,9 +143,9 @@ class TestEvolutionWebhook(unittest.TestCase):
         # Falls through — a new message record is created
         self.assertIn(result.get("status"), ("ok", "duplicate"))
 
-    def test_edit_evolution_message_updates_record(self):
+    def test_edit_wa_message_updates_record(self):
         from unittest.mock import patch, MagicMock
-        from helpdesk.integrations.evolution import edit_evolution_message, _line
+        from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",
@@ -163,9 +163,9 @@ class TestEvolutionWebhook(unittest.TestCase):
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {}
 
-        with patch("helpdesk.integrations.evolution._requests") as mock_req:
+        with patch("helpdesk.integrations.wa._requests") as mock_req:
             mock_req.put.return_value = mock_resp
-            result = edit_evolution_message(msg.name, "updated agent text")
+            result = edit_wa_message(msg.name, "updated agent text")
 
         self.assertEqual(result["status"], "ok")
         updated = frappe.get_doc("Baileys Message", msg.name)
@@ -182,8 +182,8 @@ class TestEvolutionWebhook(unittest.TestCase):
         self.assertEqual(payload["key"]["id"], "_test-out-edit-001")
         self.assertEqual(payload["text"], "updated agent text")
 
-    def test_edit_evolution_message_rejects_incoming(self):
-        from helpdesk.integrations.evolution import edit_evolution_message, _line
+    def test_edit_wa_message_rejects_incoming(self):
+        from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",
@@ -198,10 +198,10 @@ class TestEvolutionWebhook(unittest.TestCase):
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
-            edit_evolution_message(msg.name, "attempt to edit incoming")
+            edit_wa_message(msg.name, "attempt to edit incoming")
 
-    def test_edit_evolution_message_rejects_media(self):
-        from helpdesk.integrations.evolution import edit_evolution_message, _line
+    def test_edit_wa_message_rejects_media(self):
+        from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",
@@ -216,10 +216,10 @@ class TestEvolutionWebhook(unittest.TestCase):
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
-            edit_evolution_message(msg.name, "try to edit image")
+            edit_wa_message(msg.name, "try to edit image")
 
-    def test_edit_evolution_message_rejects_empty_text(self):
-        from helpdesk.integrations.evolution import edit_evolution_message, _line
+    def test_edit_wa_message_rejects_empty_text(self):
+        from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",
@@ -234,11 +234,11 @@ class TestEvolutionWebhook(unittest.TestCase):
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
-            edit_evolution_message(msg.name, "")
+            edit_wa_message(msg.name, "")
 
-    def test_get_evolution_lines_returns_unread_count(self):
-        from helpdesk.integrations.evolution import get_evolution_lines
-        line = frappe.get_doc("Evolution Line", {"instance_name": "_test-evo"})
+    def test_get_wa_lines_returns_unread_count(self):
+        from helpdesk.integrations.wa import get_wa_lines
+        line = frappe.get_doc("WA Line", {"instance_name": "_test-evo"})
         # Create 2 unread incoming messages
         for i in range(2):
             frappe.get_doc({
@@ -253,7 +253,7 @@ class TestEvolutionWebhook(unittest.TestCase):
                 "is_read": 0,
             }).insert(ignore_permissions=True)
 
-        lines = get_evolution_lines()
+        lines = get_wa_lines()
         test_line = next((l for l in lines if l["name"] == line.name), None)
         self.assertIsNotNone(test_line)
         self.assertGreaterEqual(test_line["unread"], 2)
@@ -261,7 +261,7 @@ class TestEvolutionWebhook(unittest.TestCase):
 
 class TestExtractEdit(unittest.TestCase):
     def test_shape1_extracts_text(self):
-        from helpdesk.integrations.evolution import _extract_edit
+        from helpdesk.integrations.wa import _extract_edit
         raw = {
             "editedMessage": {
                 "message": {
@@ -277,7 +277,7 @@ class TestExtractEdit(unittest.TestCase):
         self.assertEqual(text, "new text shape1")
 
     def test_shape2_extracts_text(self):
-        from helpdesk.integrations.evolution import _extract_edit
+        from helpdesk.integrations.wa import _extract_edit
         raw = {
             "protocolMessage": {
                 "type": 14,
@@ -289,7 +289,7 @@ class TestExtractEdit(unittest.TestCase):
         self.assertEqual(text, "new text shape2")
 
     def test_shape2_extended_text_message(self):
-        from helpdesk.integrations.evolution import _extract_edit
+        from helpdesk.integrations.wa import _extract_edit
         raw = {
             "protocolMessage": {
                 "type": 14,
@@ -303,14 +303,14 @@ class TestExtractEdit(unittest.TestCase):
         self.assertEqual(text, "new text extended")
 
     def test_regular_message_returns_false(self):
-        from helpdesk.integrations.evolution import _extract_edit
+        from helpdesk.integrations.wa import _extract_edit
         raw = {"conversation": "hello"}
         text, is_edit = _extract_edit(raw)
         self.assertFalse(is_edit)
         self.assertEqual(text, "")
 
     def test_empty_dict_returns_false(self):
-        from helpdesk.integrations.evolution import _extract_edit
+        from helpdesk.integrations.wa import _extract_edit
         text, is_edit = _extract_edit({})
         self.assertFalse(is_edit)
         self.assertEqual(text, "")
@@ -319,9 +319,9 @@ class TestExtractEdit(unittest.TestCase):
 class TestApplyEdit(unittest.TestCase):
     def setUp(self):
         frappe.set_user("Administrator")
-        if not frappe.db.exists("Evolution Line", {"instance_name": "_test-evo"}):
+        if not frappe.db.exists("WA Line", {"instance_name": "_test-evo"}):
             frappe.get_doc({
-                "doctype": "Evolution Line",
+                "doctype": "WA Line",
                 "label": "Test",
                 "instance_name": "_test-evo",
             }).insert(ignore_permissions=True)
@@ -331,7 +331,7 @@ class TestApplyEdit(unittest.TestCase):
         frappe.db.rollback()
 
     def test_apply_edit_updates_message_and_history(self):
-        from helpdesk.integrations.evolution import _apply_edit, _line
+        from helpdesk.integrations.wa import _apply_edit, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",
@@ -355,7 +355,7 @@ class TestApplyEdit(unittest.TestCase):
         self.assertEqual(updated.edit_history[0].edited_by, "incoming")
 
     def test_apply_edit_appends_on_second_edit(self):
-        from helpdesk.integrations.evolution import _apply_edit, _line
+        from helpdesk.integrations.wa import _apply_edit, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
             "doctype": "Baileys Message",

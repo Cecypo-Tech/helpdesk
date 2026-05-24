@@ -155,7 +155,7 @@
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import { useWaLinesStore } from "@/stores/waLines";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ line: string; selectedJid: string | null }>();
@@ -164,14 +164,14 @@ const emit = defineEmits<{
 }>();
 
 const router = useRouter();
-const evolutionLinesStore = useEvolutionLinesStore();
+const waLinesStore = useWaLinesStore();
 
 const search = ref("");
 const lastReadMap = ref<Record<string, number>>({});
 const syncingContacts = ref(false);
 
 const syncContactsResource = createResource({
-  url: "helpdesk.integrations.evolution.sync_evolution_contacts",
+  url: "helpdesk.integrations.wa.sync_wa_contacts",
   onSuccess(data: { updated: number; created: number; total: number }) {
     syncGroupsResource.submit({});
   },
@@ -182,7 +182,7 @@ const syncContactsResource = createResource({
 });
 
 const syncGroupsResource = createResource({
-  url: "helpdesk.integrations.evolution.sync_evolution_groups",
+  url: "helpdesk.integrations.wa.sync_wa_groups",
   onSuccess(data: { updated: number; created: number; total: number }) {
     syncingContacts.value = false;
     toast.success(`Synced ${data.total} contacts & groups`);
@@ -213,7 +213,7 @@ const newChatError = ref("");
 const newChatInputRef = ref<HTMLInputElement | null>(null);
 
 const contactsResource = createResource({
-  url: "helpdesk.integrations.evolution.search_whatsapp_contacts",
+  url: "helpdesk.integrations.wa.search_whatsapp_contacts",
   auto: false,
 });
 
@@ -267,7 +267,7 @@ function onNewChatEnter() {
 // ── Conversations list ──────────────────────────────────────────────────────
 
 const conversations = createResource({
-  url: "helpdesk.integrations.evolution.get_evolution_conversations",
+  url: "helpdesk.integrations.wa.get_wa_conversations",
   params: { line: props.line },
   auto: true,
 });
@@ -304,10 +304,10 @@ const unreadCount = computed(() =>
 );
 
 const markAllReadResource = createResource({
-  url: "helpdesk.integrations.evolution.mark_all_evolution_messages_read",
+  url: "helpdesk.integrations.wa.mark_all_wa_messages_read",
   auto: false,
   onSuccess() {
-    evolutionLinesStore.reload();
+    waLinesStore.reload();
   },
 });
 

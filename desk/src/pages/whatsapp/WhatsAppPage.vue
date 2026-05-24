@@ -96,7 +96,7 @@ const mobileShowChat = ref(false);
 
 // ── Tasks count (badge on the tasks button) ───────────────────────────────────
 const tasksCountResource = createResource({
-  url: "helpdesk.integrations.evolution.get_tasks_for_jid",
+  url: "helpdesk.integrations.wa.get_tasks_for_jid",
   auto: false,
 });
 const tasksCount = computed<number>(() =>
@@ -104,7 +104,7 @@ const tasksCount = computed<number>(() =>
 );
 
 const ticketsCountResource = createResource({
-  url: "helpdesk.integrations.evolution.get_tickets_for_jid",
+  url: "helpdesk.integrations.wa.get_tickets_for_jid",
   auto: false,
 });
 const ticketsCount = computed<number>(() =>
@@ -190,7 +190,7 @@ onMounted(async () => {
   const qJid = String(route.query.jid || "");
   if (qJid) {
     try {
-      const info = await call("helpdesk.integrations.evolution.get_contact_info_for_jid", { jid: qJid });
+      const info = await call("helpdesk.integrations.wa.get_contact_info_for_jid", { jid: qJid });
       onSelect(qJid, info.display_name || qJid, info.company || "", info.assigned_team || "", info.phone || "");
     } catch {
       onSelect(qJid, qJid, "", "", "");

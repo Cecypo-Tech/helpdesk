@@ -57,8 +57,8 @@
         </template>
       </SidebarLink>
     </div>
-    <!-- WhatsApp lines section (dynamic, Evolution API) -->
-    <div v-if="!isCustomerPortal && evolutionLines.length" class="mb-1">
+    <!-- WhatsApp lines section (WA API) -->
+    <div v-if="!isCustomerPortal && waLines.length" class="mb-1">
       <!-- Collapsed mode: single icon with green dot when any unread -->
       <div v-if="!isExpanded" class="relative my-0.5">
         <SidebarLink
@@ -66,8 +66,8 @@
           :icon="WhatsAppIcon"
           :is-expanded="false"
           :is-active="route.path.startsWith('/whatsapp')"
-          :to="evolutionLines.length
-                ? { name: 'WhatsAppChat', params: { lineName: evolutionLines[0].name } }
+          :to="waLines.length
+                ? { name: 'WhatsAppChat', params: { lineName: waLines[0].name } }
                 : 'WhatsAppAnalytics'"
         />
         <span
@@ -98,7 +98,7 @@
         </div>
         <nav v-if="waExpanded" class="flex flex-col">
           <SidebarLink
-            v-for="line in evolutionLines"
+            v-for="line in waLines"
             :key="line.name"
             :icon="WhatsAppIcon"
             :label="line.display_label"
@@ -294,7 +294,7 @@ import {
 
 import { useShortcut } from "@/composables/shortcuts";
 import { useTelephonyStore } from "@/stores/telephony";
-import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import { useWaLinesStore } from "@/stores/waLines";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import { __ } from "@/translation";
@@ -345,8 +345,8 @@ const device = useDevice();
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
 
-const evolutionLinesStore = useEvolutionLinesStore();
-const { lines: evolutionLines, totalUnread: waUnread } = storeToRefs(evolutionLinesStore);
+const waLinesStore = useWaLinesStore();
+const { lines: waLines, totalUnread: waUnread } = storeToRefs(waLinesStore);
 const waExpanded = useStorage("wa-sidebar-expanded", true);
 
 const showShortcutsModal = ref(false);
@@ -777,11 +777,11 @@ onMounted(() => {
   });
   // Refresh WhatsApp line unread counts when a new message arrives
   const { $socket } = globalStore();
-  $socket.on("helpdesk:baileys-message", evolutionLinesStore.reload);
+  $socket.on("helpdesk:baileys-message", waLinesStore.reload);
 });
 
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
-  $socket.off("helpdesk:baileys-message", evolutionLinesStore.reload);
+  $socket.off("helpdesk:baileys-message", waLinesStore.reload);
 });
 </script>

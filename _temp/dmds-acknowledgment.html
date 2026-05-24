@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMDS — Acknowledgment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0e1116; --bg-elev:#161a22; --bg-elev-2:#1d2230;
+    --line:#262c3a; --line-soft:#1f2532;
+    --ink:#e8e6df; --ink-mute:#9aa0ad; --ink-dim:#6b7280;
+    --accent:#d97a3a; --accent-soft:#e8a878;
+    --teal:#5fb3a8; --red:#d65a5a; --green:#6fa66f; --gold:#c9a85c;
+    --grid:rgba(255,255,255,0.025);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg); color:var(--ink); font-family:'Geist',sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+  body {
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+      radial-gradient(ellipse at top,rgba(217,122,58,0.07),transparent 55%);
+    background-size:48px 48px,48px 48px,100% 100%;
+  }
+  .mono { font-family:'JetBrains Mono',monospace; }
+
+  .topbar { border-bottom:1px solid var(--line); background:rgba(14,17,22,0.85); backdrop-filter:blur(12px); }
+  .topbar-inner { max-width:760px; margin:0 auto; padding:18px 28px; display:flex; align-items:center; gap:14px; }
+  .brand-mark { width:34px; height:34px; border:1px solid var(--accent); display:grid; place-items:center; color:var(--accent); font-family:'JetBrains Mono',monospace; font-size:10px; position:relative; }
+  .brand-mark::before,.brand-mark::after { content:''; position:absolute; width:5px; height:5px; border:1px solid var(--accent); }
+  .brand-mark::before { top:-3px; left:-3px; border-right:none; border-bottom:none; }
+  .brand-mark::after { bottom:-3px; right:-3px; border-left:none; border-top:none; }
+  .brand-text h1 { font-family:'Instrument Serif',serif; font-size:20px; font-weight:400; }
+  .brand-text span { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); letter-spacing:0.16em; text-transform:uppercase; }
+
+  .wrap { max-width:760px; margin:0 auto; padding:48px 28px 80px; }
+
+  .pretitle { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); letter-spacing:0.2em; text-transform:uppercase; text-align:center; margin-bottom:14px; display:flex; align-items:center; gap:12px; justify-content:center; }
+  .pretitle::before,.pretitle::after { content:''; width:30px; height:1px; background:var(--accent); }
+  h2.title { font-family:'Instrument Serif',serif; font-size:40px; font-weight:400; text-align:center; line-height:1.1; margin-bottom:38px; }
+
+  /* card */
+  .card { border:1px solid var(--line); background:var(--bg-elev); position:relative; }
+  .card::before { content:''; position:absolute; top:-1px; left:-1px; width:22px; height:22px; border-top:1px solid var(--accent); border-left:1px solid var(--accent); }
+  .card::after { content:''; position:absolute; bottom:-1px; right:-1px; width:22px; height:22px; border-bottom:1px solid var(--accent); border-right:1px solid var(--accent); }
+
+  .doc-band { padding:24px 28px; border-bottom:1px solid var(--line); display:flex; gap:18px; align-items:flex-start; }
+  .doc-ico { width:34px; height:40px; flex-shrink:0; }
+  .doc-band h3 { font-family:'Instrument Serif',serif; font-size:25px; font-weight:400; line-height:1.15; }
+  .doc-band .dref { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.06em; margin-top:7px; }
+  .rev-chip { margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent); border:1px solid var(--accent); padding:6px 10px; white-space:nowrap; }
+
+  .meta-grid { display:grid; grid-template-columns:1fr 1fr; }
+  .meta-cell { padding:16px 28px; border-bottom:1px solid var(--line-soft); border-right:1px solid var(--line-soft); }
+  .meta-cell:nth-child(even) { border-right:none; }
+  .meta-cell .mk { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:6px; }
+  .meta-cell .mv { font-size:14px; color:var(--ink); }
+
+  .section { padding:24px 28px; border-bottom:1px solid var(--line); }
+  .section-l { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.14em; text-transform:uppercase; margin-bottom:14px; }
+
+  .whatsnew { background:var(--bg-elev-2); border-left:2px solid var(--teal); padding:14px 16px; font-size:13px; line-height:1.6; color:var(--ink-mute); }
+  .whatsnew b { color:var(--ink); font-weight:500; }
+
+  /* reading progress */
+  .readbar { display:flex; align-items:center; gap:14px; }
+  .readbar .track { flex:1; height:6px; background:var(--bg-elev-2); }
+  .readbar .track i { display:block; height:100%; width:100%; background:var(--green); }
+  .readbar .rp { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--green); }
+  .read-meta { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:8px; }
+
+  /* statement */
+  .statement { background:var(--bg-elev-2); border:1px solid var(--line); padding:18px 20px; font-size:14px; line-height:1.65; color:var(--ink-mute); }
+  .statement b { color:var(--ink); font-weight:500; }
+
+  /* record preview */
+  .record { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); }
+  .rec-cell { background:var(--bg-elev); padding:13px 16px; }
+  .rec-cell .rk { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:5px; }
+  .rec-cell .rv { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink); }
+
+  /* confirm */
+  .confirm-check { display:flex; gap:13px; align-items:flex-start; padding:18px; border:1px solid var(--line); background:var(--bg-elev-2); cursor:pointer; transition:border-color .15s; margin-bottom:18px; }
+  .confirm-check:hover { border-color:var(--ink-dim); }
+  .confirm-check.on { border-color:var(--accent); background:rgba(217,122,58,0.06); }
+  .confirm-check .box { width:20px; height:20px; border:1px solid var(--line); flex-shrink:0; display:grid; place-items:center; margin-top:1px; transition:all .15s; }
+  .confirm-check.on .box { background:var(--accent); border-color:var(--accent); }
+  .confirm-check .box svg { opacity:0; }
+  .confirm-check.on .box svg { opacity:1; }
+  .confirm-check .ct { font-size:13.5px; line-height:1.55; color:var(--ink-mute); }
+  .confirm-check.on .ct { color:var(--ink); }
+
+  .btn-confirm { width:100%; font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:0.1em; text-transform:uppercase; padding:17px; border:1px solid var(--accent); background:var(--accent); color:#0e1116; font-weight:600; cursor:pointer; transition:all .2s; }
+  .btn-confirm:hover:not(:disabled) { background:var(--accent-soft); }
+  .btn-confirm:disabled { background:var(--bg-elev-2); border-color:var(--line); color:var(--ink-dim); cursor:not-allowed; }
+  .gatenote { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); text-align:center; margin-top:12px; }
+
+  /* success state */
+  #receipt { display:none; }
+  .success-mark { width:64px; height:64px; border:1.5px solid var(--green); border-radius:50%; display:grid; place-items:center; margin:0 auto 22px; }
+  .success-mark svg { stroke:var(--green); }
+  .receipt-card { border:1px solid var(--green); background:var(--bg-elev); padding:34px 30px; text-align:center; position:relative; }
+  .receipt-card h3 { font-family:'Instrument Serif',serif; font-size:30px; font-weight:400; margin-bottom:10px; }
+  .receipt-card p { color:var(--ink-mute); font-size:14px; line-height:1.6; max-width:420px; margin:0 auto 26px; }
+  .receipt-id { display:inline-flex; flex-direction:column; gap:5px; border:1px dashed var(--line); padding:14px 26px; }
+  .receipt-id .ril { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); letter-spacing:0.14em; text-transform:uppercase; }
+  .receipt-id .riv { font-family:'JetBrains Mono',monospace; font-size:17px; color:var(--green); letter-spacing:0.05em; }
+  .receipt-foot { margin-top:24px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); line-height:1.7; }
+
+  @media (max-width:560px) {
+    h2.title { font-size:30px; }
+    .meta-grid, .record { grid-template-columns:1fr; }
+    .meta-cell { border-right:none; }
+    .doc-band { flex-wrap:wrap; }
+    .rev-chip { margin-left:0; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand-mark">DM</div>
+    <div class="brand-text">
+      <h1>Document Management &amp; Distribution</h1>
+      <span>DMDS · Acknowledgment</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ============ FORM STATE ============ -->
+  <div id="form">
+    <div class="pretitle">Acknowledgment Required</div>
+    <h2 class="title">Confirm receipt &amp; reading</h2>
+
+    <div class="card">
+      <!-- document band -->
+      <div class="doc-band">
+        <div class="doc-ico">
+          <svg viewBox="0 0 34 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 2 L22 2 L30 10 L30 38 L4 38 Z" stroke="#d97a3a" stroke-width="1.3"/>
+            <path d="M22 2 L22 10 L30 10" stroke="#d97a3a" stroke-width="1.3"/>
+            <line x1="9" y1="18" x2="25" y2="18" stroke="#9aa0ad" stroke-width="1"/>
+            <line x1="9" y1="23" x2="25" y2="23" stroke="#9aa0ad" stroke-width="1"/>
+            <line x1="9" y1="28" x2="19" y2="28" stroke="#9aa0ad" stroke-width="1"/>
+          </svg>
+        </div>
+        <div>
+          <h3>Flight Operations Manual — Volume 1</h3>
+          <div class="dref">REF FOM/V1 · COMPANY MANUALS</div>
+        </div>
+        <div class="rev-chip">ED 8 · REV 3</div>
+      </div>
+
+      <!-- meta grid -->
+      <div class="meta-grid">
+        <div class="meta-cell"><div class="mk">Manual Holder</div><div class="mv">Capt. J. Mwende</div></div>
+        <div class="meta-cell"><div class="mk">Effective Date</div><div class="mv">20 May 2026</div></div>
+        <div class="meta-cell"><div class="mk">Supersedes</div><div class="mv">Edition 8 · Revision 2</div></div>
+        <div class="meta-cell"><div class="mk">Acknowledge By</div><div class="mv" style="color:var(--accent-soft)">30 May 2026</div></div>
+      </div>
+
+      <!-- what's new -->
+      <div class="section">
+        <div class="section-l">What changed in this revision</div>
+        <div class="whatsnew">
+          <b>§4.7</b> CAT II/III minima tables revised per AIC 04/2026. &nbsp;<b>§4.9</b> new Enhanced Flight Vision Systems procedure added. &nbsp;<b>§4.12</b> legacy NDB approach guidance withdrawn.
+        </div>
+      </div>
+
+      <!-- reading progress -->
+      <div class="section">
+        <div class="section-l">Reading Confirmation</div>
+        <div class="readbar">
+          <div class="track"><i></i></div>
+          <div class="rp">100%</div>
+        </div>
+        <div class="read-meta">DOCUMENT OPENED 16 MAY 26 · 14:22 EAT — ALL 86 PAGES VIEWED</div>
+      </div>
+
+      <!-- statement -->
+      <div class="section">
+        <div class="section-l">Acknowledgment Statement</div>
+        <div class="statement">
+          I confirm that I have <b>received</b> and <b>read</b> Edition 8, Revision 3 of the <b>Flight Operations Manual Volume 1</b>, that I <b>understand its contents</b>, and that I will comply with the procedures it contains from its effective date.
+        </div>
+      </div>
+
+      <!-- record preview -->
+      <div class="section" style="border-bottom:none;">
+        <div class="section-l">This acknowledgment will be recorded as</div>
+        <div class="record">
+          <div class="rec-cell"><div class="rk">Name</div><div class="rv">First Officer A. Otieno</div></div>
+          <div class="rec-cell"><div class="rk">Employee No.</div><div class="rv">EMP-20492</div></div>
+          <div class="rec-cell"><div class="rk">Profile</div><div class="rv">FLT-OPS-FO-B737</div></div>
+          <div class="rec-cell"><div class="rk">Timestamp</div><div class="rv" id="tsCell">16 MAY 26 · 14:31 EAT</div></div>
+          <div class="rec-cell"><div class="rk">Document Version</div><div class="rv">FOM/V1 · ED8 R3</div></div>
+          <div class="rec-cell"><div class="rk">Session / Device</div><div class="rv">0x4A2F · iPad EFB</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- confirm -->
+    <div style="margin-top:24px;">
+      <div class="confirm-check" id="cc" onclick="toggleConfirm()">
+        <div class="box"><svg width="11" height="9" viewBox="0 0 11 9"><path d="M1 4.5 L4.5 8 L10 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+        <div class="ct">I have received and read this document and I understand its contents. I am submitting this acknowledgment as my electronic signature.</div>
+      </div>
+      <button class="btn-confirm" id="confirmBtn" disabled onclick="submitAck()">Confirm Acknowledgment</button>
+      <div class="gatenote" id="gate">Tick the box above to enable confirmation.</div>
+    </div>
+  </div>
+
+  <!-- ============ SUCCESS STATE ============ -->
+  <div id="receipt">
+    <div class="pretitle" style="color:var(--green);">Acknowledgment Recorded</div>
+    <h2 class="title">Thank you — you're done</h2>
+    <div class="receipt-card">
+      <div class="success-mark">
+        <svg width="28" height="22" viewBox="0 0 28 22" fill="none"><path d="M2 11 L10 19 L26 2" stroke-width="2.5"/></svg>
+      </div>
+      <h3>Receipt confirmed</h3>
+      <p>Your acknowledgment of <b style="color:var(--ink)">FOM/V1 — Edition 8, Revision 3</b> has been logged against your record and is now visible to the Manual Holder's compliance dashboard.</p>
+      <div class="receipt-id">
+        <span class="ril">Acknowledgment Reference</span>
+        <span class="riv" id="ackRef">ACK-26-0000</span>
+      </div>
+      <div class="receipt-foot" id="receiptFoot">
+        RECORDED — · FIRST OFFICER A. OTIENO · EMP-20492<br>
+        WRITTEN TO AUDIT LOG · ENTRY IS IMMUTABLE
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  function toggleConfirm(){
+    const cc = document.getElementById('cc');
+    cc.classList.toggle('on');
+    const on = cc.classList.contains('on');
+    document.getElementById('confirmBtn').disabled = !on;
+    document.getElementById('gate').textContent = on
+      ? 'Ready to submit.'
+      : 'Tick the box above to enable confirmation.';
+  }
+  function stamp(){
+    const d = new Date();
+    const months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    const p=n=>String(n).padStart(2,'0');
+    return p(d.getDate())+' '+months[d.getMonth()]+' '+String(d.getFullYear()).slice(2)+' · '+p(d.getHours())+':'+p(d.getMinutes())+' EAT';
+  }
+  function submitAck(){
+    const ref = 'ACK-26-' + Math.floor(1000+Math.random()*9000);
+    document.getElementById('ackRef').textContent = ref;
+    const ts = stamp();
+    document.getElementById('receiptFoot').innerHTML =
+      'RECORDED ' + ts + ' · FIRST OFFICER A. OTIENO · EMP-20492<br>WRITTEN TO AUDIT LOG · ENTRY IS IMMUTABLE';
+    document.getElementById('form').style.display='none';
+    document.getElementById('receipt').style.display='block';
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  document.getElementById('tsCell').textContent = stamp();
+</script>
+</body>
+</html>

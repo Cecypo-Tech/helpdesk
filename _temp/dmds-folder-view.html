@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMDS — Company Manuals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0e1116; --bg-elev:#161a22; --bg-elev-2:#1d2230;
+    --line:#262c3a; --line-soft:#1f2532;
+    --ink:#e8e6df; --ink-mute:#9aa0ad; --ink-dim:#6b7280;
+    --accent:#d97a3a; --accent-soft:#e8a878;
+    --teal:#5fb3a8; --red:#d65a5a; --green:#6fa66f; --gold:#c9a85c;
+    --grid:rgba(255,255,255,0.025);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg); color:var(--ink); font-family:'Geist',sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+  body {
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+      radial-gradient(ellipse at top right,rgba(217,122,58,0.06),transparent 50%);
+    background-size:48px 48px,48px 48px,100% 100%;
+  }
+  .mono { font-family:'JetBrains Mono',monospace; }
+
+  .topbar { border-bottom:1px solid var(--line); background:rgba(14,17,22,0.85); backdrop-filter:blur(12px); position:sticky; top:0; z-index:50; }
+  .topbar-inner { max-width:1300px; margin:0 auto; padding:18px 36px; display:flex; align-items:center; justify-content:space-between; }
+  .brand { display:flex; align-items:center; gap:14px; }
+  .brand-mark { width:36px; height:36px; border:1px solid var(--accent); display:grid; place-items:center; color:var(--accent); font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.05em; position:relative; }
+  .brand-mark::before,.brand-mark::after { content:''; position:absolute; width:5px; height:5px; border:1px solid var(--accent); }
+  .brand-mark::before { top:-3px; left:-3px; border-right:none; border-bottom:none; }
+  .brand-mark::after { bottom:-3px; right:-3px; border-left:none; border-top:none; }
+  .brand-text h1 { font-family:'Instrument Serif',serif; font-size:22px; font-weight:400; }
+  .brand-text span { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.18em; text-transform:uppercase; }
+  .avatar { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#3a4150,#1d2230); border:1px solid var(--line); display:grid; place-items:center; font-family:'JetBrains Mono',monospace; font-size:11px; }
+
+  main { max-width:1300px; margin:0 auto; padding:36px 36px 80px; }
+
+  .crumb { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-dim); letter-spacing:0.08em; margin-bottom:28px; }
+  .crumb a { color:var(--ink-mute); text-decoration:none; }
+  .crumb a:hover { color:var(--accent); }
+  .crumb .sep { margin:0 8px; color:var(--line); }
+  .crumb .here { color:var(--ink); }
+
+  .fhead { display:flex; justify-content:space-between; align-items:flex-start; gap:36px; padding-bottom:28px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+  .fhead-left { display:flex; gap:22px; }
+  .fhead-icon { width:54px; height:46px; flex-shrink:0; }
+  .fhead-label { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:8px; }
+  .fhead h2 { font-family:'Instrument Serif',serif; font-size:46px; line-height:1; font-weight:400; margin-bottom:12px; }
+  .fhead p { color:var(--ink-mute); font-size:14px; max-width:520px; line-height:1.6; }
+
+  .compliance { border:1px solid var(--line); background:var(--bg-elev); padding:20px 24px; min-width:248px; flex-shrink:0; }
+  .compliance .ttl { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.18em; text-transform:uppercase; margin-bottom:14px; }
+  .bar { height:6px; background:var(--bg-elev-2); display:flex; margin-bottom:14px; gap:2px; }
+  .bar i { display:block; height:100%; }
+  .bar .done { background:var(--green); width:55%; }
+  .bar .due  { background:var(--accent); width:22%; }
+  .bar .na   { background:var(--line); width:23%; }
+  .clegend { display:flex; flex-direction:column; gap:8px; }
+  .clegend div { display:flex; justify-content:space-between; font-size:12px; }
+  .clegend .k { color:var(--ink-mute); display:flex; align-items:center; gap:7px; }
+  .dotc { width:7px; height:7px; }
+  .clegend .v { font-family:'JetBrains Mono',monospace; }
+
+  .toolbar { display:flex; justify-content:space-between; align-items:center; padding:22px 0; flex-wrap:wrap; gap:14px; }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tabs button { background:transparent; border:1px solid transparent; color:var(--ink-mute); font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; padding:8px 14px; cursor:pointer; transition:all .2s; }
+  .tabs button:hover { color:var(--ink); }
+  .tabs button.on { color:var(--accent); border-color:var(--line); background:var(--bg-elev); }
+  .sort { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-dim); display:flex; align-items:center; gap:8px; }
+  .sort select { background:var(--bg-elev); color:var(--ink-mute); border:1px solid var(--line); font-family:'JetBrains Mono',monospace; font-size:11px; padding:6px 10px; }
+
+  .doclist { border:1px solid var(--line); }
+  .doc { border-bottom:1px solid var(--line); background:var(--bg-elev); }
+  .doc:last-child { border-bottom:none; }
+  .doc-row { display:grid; grid-template-columns:40px 1fr 150px 130px 170px 160px; gap:18px; align-items:center; padding:20px 24px; cursor:pointer; transition:background .2s; }
+  .doc-row:hover { background:var(--bg-elev-2); }
+  .doc-ico { width:26px; height:30px; }
+  .doc-title { font-family:'Instrument Serif',serif; font-size:21px; line-height:1.15; }
+  .doc-sub { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:5px; letter-spacing:0.04em; }
+  .rev-pill { display:inline-block; font-family:'JetBrains Mono',monospace; font-size:10px; padding:5px 9px; border:1px solid var(--line); color:var(--ink); letter-spacing:0.05em; }
+  .colh { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:5px; }
+  .colv { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink-mute); }
+  .status { display:flex; align-items:center; gap:7px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.05em; text-transform:uppercase; }
+  .sdot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .s-ack .sdot { background:var(--green); } .s-ack { color:var(--green); }
+  .s-due .sdot { background:var(--accent); } .s-due { color:var(--accent-soft); }
+  .s-na  .sdot { background:var(--line); } .s-na { color:var(--ink-dim); }
+  .s-lock .sdot { background:var(--red); } .s-lock { color:var(--red); }
+  .act { text-align:right; }
+  .btn { font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; padding:9px 14px; border:1px solid var(--line); background:transparent; color:var(--ink-mute); cursor:pointer; transition:all .2s; }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#0e1116; font-weight:500; }
+  .btn.primary:hover { background:var(--accent-soft); }
+  .btn.disabled { opacity:0.4; cursor:not-allowed; }
+  .btn.disabled:hover { border-color:var(--line); color:var(--ink-mute); }
+
+  .revs { display:none; padding:4px 24px 24px 82px; background:var(--bg-elev-2); border-top:1px dashed var(--line); }
+  .doc.open .revs { display:block; }
+  .doc.open .chev { transform:rotate(90deg); }
+  .chev { display:inline-block; transition:transform .2s; color:var(--ink-dim); font-family:'JetBrains Mono',monospace; margin-left:8px; font-size:13px; }
+  .revs-ttl { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.15em; text-transform:uppercase; padding:18px 0 12px; }
+  .rev { display:grid; grid-template-columns:140px 1fr 160px; gap:18px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line-soft); }
+  .rev:last-child { border-bottom:none; }
+  .rev .rid { font-family:'JetBrains Mono',monospace; font-size:11px; }
+  .rstate { font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; text-transform:uppercase; padding:3px 8px; border:1px solid; display:inline-block; }
+  .rstate.cur { color:var(--green); border-color:var(--green); }
+  .rstate.sup { color:var(--ink-dim); border-color:var(--line); }
+  .rev .rmeta { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-dim); }
+  .rev .rchg { color:var(--ink-mute); font-size:12px; line-height:1.5; }
+  .archived-note { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:14px; padding:10px 12px; border-left:2px solid var(--red); background:rgba(214,90,90,0.05); line-height:1.7; }
+
+  @media (max-width:980px) {
+    .fhead { flex-direction:column; gap:24px; }
+    .doc-row { grid-template-columns:1fr; gap:10px; }
+    .doc-row .colh { display:inline-block; margin-right:8px; }
+    .rev { grid-template-columns:1fr; gap:6px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">DM</div>
+      <div class="brand-text">
+        <h1>Document Management &amp; Distribution</h1>
+        <span>DMDS · v2.4 · ISO 9001 Compliant</span>
+      </div>
+    </div>
+    <div class="avatar">JM</div>
+  </div>
+</header>
+
+<main>
+  <div class="crumb">
+    <a href="#">LIBRARY</a><span class="sep">/</span>
+    <a href="#">FOLDERS</a><span class="sep">/</span>
+    <span class="here">COMPANY MANUALS</span>
+  </div>
+
+  <div class="fhead">
+    <div class="fhead-left">
+      <div class="fhead-icon">
+        <svg viewBox="0 0 54 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 8 L22 8 L27 13 L51 13 L51 40 L3 40 Z" stroke="#d97a3a" stroke-width="1.3"/>
+          <line x1="3" y1="18" x2="51" y2="18" stroke="#d97a3a" stroke-width="1.3"/>
+          <line x1="10" y1="26" x2="26" y2="26" stroke="#9aa0ad" stroke-width="1"/>
+          <line x1="10" y1="31" x2="34" y2="31" stroke="#9aa0ad" stroke-width="1"/>
+        </svg>
+      </div>
+      <div>
+        <div class="fhead-label">Folder · CM</div>
+        <h2>Company Manuals</h2>
+        <p>Department-controlled manuals. Only the current published edition of each manual is shown; superseded editions are retained in the audit archive and cannot be opened.</p>
+      </div>
+    </div>
+    <div class="compliance">
+      <div class="ttl">Your Acknowledgment Status</div>
+      <div class="bar"><i class="done"></i><i class="due"></i><i class="na"></i></div>
+      <div class="clegend">
+        <div><span class="k"><span class="dotc" style="background:var(--green)"></span>Acknowledged</span><span class="v" style="color:var(--green)">5</span></div>
+        <div><span class="k"><span class="dotc" style="background:var(--accent)"></span>Action required</span><span class="v" style="color:var(--accent-soft)">2</span></div>
+        <div><span class="k"><span class="dotc" style="background:var(--line)"></span>Not in your profile</span><span class="v" style="color:var(--ink-dim)">2</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="tabs">
+      <button class="on">All · 9</button>
+      <button>Action Required · 2</button>
+      <button>Acknowledged · 5</button>
+      <button>Restricted · 1</button>
+    </div>
+    <div class="sort">
+      Sort
+      <select>
+        <option>Most recent revision</option>
+        <option>Title A–Z</option>
+        <option>Acknowledgment status</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="doclist">
+
+    <!-- DOC 1 — expanded by default -->
+    <div class="doc open">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico">
+          <svg viewBox="0 0 26 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#d97a3a" stroke-width="1.2"/>
+            <path d="M17 2 L17 8 L23 8" stroke="#d97a3a" stroke-width="1.2"/>
+            <line x1="7" y1="14" x2="19" y2="14" stroke="#9aa0ad" stroke-width="0.9"/>
+            <line x1="7" y1="18" x2="19" y2="18" stroke="#9aa0ad" stroke-width="0.9"/>
+            <line x1="7" y1="22" x2="14" y2="22" stroke="#9aa0ad" stroke-width="0.9"/>
+          </svg>
+        </div>
+        <div>
+          <div class="doc-title">Flight Operations Manual — Volume 1<span class="chev">▸</span></div>
+          <div class="doc-sub">REF FOM/V1 · HOLDER: DIRECTOR OF FLIGHT OPERATIONS</div>
+        </div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 8 · REV 3</span></div>
+        <div><div class="colh">Effective</div><div class="colv">01 MAY 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-due"><span class="sdot"></span>Action required</div></div>
+        <div class="act"><button class="btn primary" onclick="event.stopPropagation()">Read &amp; Acknowledge</button></div>
+      </div>
+      <div class="revs">
+        <div class="revs-ttl">Revision History</div>
+        <div class="rev">
+          <div class="rid">ED 8 · REV 3</div>
+          <div><span class="rstate cur">Current · Published</span></div>
+          <div class="rmeta">EFF 01 MAY 26</div>
+        </div>
+        <div class="rev"><div class="rid">ED 8 · REV 2</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 01 MAY 26</div></div>
+        <div class="rev"><div class="rid">ED 8 · REV 1</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 12 FEB 26</div></div>
+        <div class="rev"><div class="rid">ED 7 · REV 4</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 03 NOV 25</div></div>
+        <div class="archived-note">⚠ SUPERSEDED EDITIONS APPEAR HERE FOR TRACEABILITY ONLY. THEY ARE HELD IN THE RESTRICTED AUDIT ARCHIVE AND CANNOT BE OPENED, DOWNLOADED, OR DISTRIBUTED. ONLY ED 8 · REV 3 IS IN FORCE.</div>
+      </div>
+    </div>
+
+    <!-- DOC 2 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#5fb3a8" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#5fb3a8" stroke-width="1.2"/><line x1="7" y1="14" x2="19" y2="14" stroke="#9aa0ad" stroke-width="0.9"/><line x1="7" y1="18" x2="19" y2="18" stroke="#9aa0ad" stroke-width="0.9"/></svg></div>
+        <div><div class="doc-title">Flight Operations Manual — Volume 2<span class="chev">▸</span></div><div class="doc-sub">REF FOM/V2 · HOLDER: DIRECTOR OF FLIGHT OPERATIONS</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 8 · REV 1</span></div>
+        <div><div class="colh">Effective</div><div class="colv">15 MAR 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-ack"><span class="sdot"></span>Acknowledged</div></div>
+        <div class="act"><button class="btn" onclick="event.stopPropagation()">Open</button></div>
+      </div>
+      <div class="revs">
+        <div class="revs-ttl">Revision History</div>
+        <div class="rev"><div class="rid">ED 8 · REV 1</div><div><span class="rstate cur">Current · Published</span></div><div class="rmeta">EFF 15 MAR 26 · ACK BY YOU 18 MAR</div></div>
+        <div class="rev"><div class="rid">ED 8 · REV 0</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 15 MAR 26</div></div>
+      </div>
+    </div>
+
+    <!-- DOC 3 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#5fb3a8" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#5fb3a8" stroke-width="1.2"/><line x1="7" y1="14" x2="19" y2="14" stroke="#9aa0ad" stroke-width="0.9"/></svg></div>
+        <div><div class="doc-title">Minimum Equipment List (MEL)<span class="chev">▸</span></div><div class="doc-sub">REF MEL · HOLDER: CHIEF PILOT</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 5 · REV 2</span></div>
+        <div><div class="colh">Effective</div><div class="colv">02 APR 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-ack"><span class="sdot"></span>Acknowledged</div></div>
+        <div class="act"><button class="btn" onclick="event.stopPropagation()">Open</button></div>
+      </div>
+      <div class="revs">
+        <div class="revs-ttl">Revision History</div>
+        <div class="rev"><div class="rid">ED 5 · REV 2</div><div><span class="rstate cur">Current · Published</span></div><div class="rmeta">EFF 02 APR 26 · ACK BY YOU 04 APR</div></div>
+        <div class="rev"><div class="rid">ED 5 · REV 1</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 02 APR 26</div></div>
+      </div>
+    </div>
+
+    <!-- DOC 4 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#6b7280" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#6b7280" stroke-width="1.2"/></svg></div>
+        <div><div class="doc-title" style="color:var(--ink-mute)">Cabin Crew Operations Manual<span class="chev">▸</span></div><div class="doc-sub">REF CCOM · HOLDER: MANAGER, CABIN SERVICES</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill" style="color:var(--ink-dim)">ED 4 · REV 0</span></div>
+        <div><div class="colh">Effective</div><div class="colv">10 FEB 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-na"><span class="sdot"></span>Not in profile</div></div>
+        <div class="act"><button class="btn disabled" onclick="event.stopPropagation()">No Access</button></div>
+      </div>
+      <div class="revs">
+        <div class="revs-ttl">Access Note</div>
+        <div class="archived-note" style="border-color:var(--line)">THIS MANUAL IS OUTSIDE THE DOCUMENT SET GRANTED TO YOUR PROFILE (FLT-OPS-CAPT-B737). REQUEST ACCESS VIA YOUR DEPARTMENT HEAD IF REQUIRED.</div>
+      </div>
+    </div>
+
+    <!-- DOC 5 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#d97a3a" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#d97a3a" stroke-width="1.2"/><line x1="7" y1="14" x2="19" y2="14" stroke="#9aa0ad" stroke-width="0.9"/></svg></div>
+        <div><div class="doc-title">Safety Management Manual (SMM)<span class="chev">▸</span></div><div class="doc-sub">REF SMM · HOLDER: SAFETY MANAGER</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 2 · REV 4</span></div>
+        <div><div class="colh">Effective</div><div class="colv">28 APR 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-due"><span class="sdot"></span>Action required</div></div>
+        <div class="act"><button class="btn primary" onclick="event.stopPropagation()">Read &amp; Acknowledge</button></div>
+      </div>
+      <div class="revs">
+        <div class="revs-ttl">Revision History</div>
+        <div class="rev"><div class="rid">ED 2 · REV 4</div><div><span class="rstate cur">Current · Published</span></div><div class="rmeta">EFF 28 APR 26</div></div>
+        <div class="rev"><div class="rid">ED 2 · REV 3</div><div><span class="rstate sup">Superseded</span></div><div class="rmeta">ARCHIVED 28 APR 26</div></div>
+      </div>
+    </div>
+
+    <!-- DOC 6 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#5fb3a8" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#5fb3a8" stroke-width="1.2"/></svg></div>
+        <div><div class="doc-title">Ground Operations Manual<span class="chev">▸</span></div><div class="doc-sub">REF GOM · HOLDER: MANAGER, GROUND OPERATIONS</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 3 · REV 2</span></div>
+        <div><div class="colh">Effective</div><div class="colv">05 JAN 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-ack"><span class="sdot"></span>Acknowledged</div></div>
+        <div class="act"><button class="btn" onclick="event.stopPropagation()">Open</button></div>
+      </div>
+      <div class="revs"><div class="revs-ttl">Revision History</div><div class="rev"><div class="rid">ED 3 · REV 2</div><div><span class="rstate cur">Current · Published</span></div><div class="rmeta">EFF 05 JAN 26 · ACK BY YOU 07 JAN</div></div></div>
+    </div>
+
+    <!-- DOC 7 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#5fb3a8" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#5fb3a8" stroke-width="1.2"/></svg></div>
+        <div><div class="doc-title">Training &amp; Checking Manual<span class="chev">▸</span></div><div class="doc-sub">REF TCM · HOLDER: HEAD OF TRAINING</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill">ED 5 · REV 0</span></div>
+        <div><div class="colh">Effective</div><div class="colv">12 APR 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-ack"><span class="sdot"></span>Acknowledged</div></div>
+        <div class="act"><button class="btn" onclick="event.stopPropagation()">Open</button></div>
+      </div>
+      <div class="revs"><div class="revs-ttl">Revision History</div><div class="rev"><div class="rid">ED 5 · REV 0</div><div><span class="rstate cur">Current · Published</span></div><div class="rmeta">EFF 12 APR 26 · ACK BY YOU 13 APR</div></div></div>
+    </div>
+
+    <!-- DOC 8 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><path d="M3 2 L17 2 L23 8 L23 28 L3 28 Z" stroke="#6b7280" stroke-width="1.2"/><path d="M17 2 L17 8 L23 8" stroke="#6b7280" stroke-width="1.2"/></svg></div>
+        <div><div class="doc-title" style="color:var(--ink-mute)">Maintenance Management Manual<span class="chev">▸</span></div><div class="doc-sub">REF MMM · HOLDER: DIRECTOR OF ENGINEERING</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill" style="color:var(--ink-dim)">ED 6 · REV 1</span></div>
+        <div><div class="colh">Effective</div><div class="colv">20 JAN 2026</div></div>
+        <div><div class="colh">Status</div><div class="status s-na"><span class="sdot"></span>Not in profile</div></div>
+        <div class="act"><button class="btn disabled" onclick="event.stopPropagation()">No Access</button></div>
+      </div>
+      <div class="revs"><div class="revs-ttl">Access Note</div><div class="archived-note" style="border-color:var(--line)">OUTSIDE YOUR PROFILE'S DOCUMENT SET — ENGINEERING-SCOPED MANUAL.</div></div>
+    </div>
+
+    <!-- DOC 9 -->
+    <div class="doc">
+      <div class="doc-row" onclick="toggle(this)">
+        <div class="doc-ico"><svg viewBox="0 0 26 30" fill="none"><rect x="6" y="13" width="14" height="11" stroke="#d65a5a" stroke-width="1.2"/><path d="M9 13 V9 a4 4 0 0 1 8 0 V13" stroke="#d65a5a" stroke-width="1.2"/></svg></div>
+        <div><div class="doc-title" style="color:var(--ink-mute)">Security Programme Manual<span class="chev">▸</span></div><div class="doc-sub">REF SeMS · HOLDER: SECURITY MANAGER · ACL-RESTRICTED</div></div>
+        <div><div class="colh">Current</div><span class="rev-pill" style="color:var(--ink-dim)">RESTRICTED</span></div>
+        <div><div class="colh">Effective</div><div class="colv">——</div></div>
+        <div><div class="colh">Status</div><div class="status s-lock"><span class="sdot"></span>Restricted</div></div>
+        <div class="act"><button class="btn disabled" onclick="event.stopPropagation()">Locked</button></div>
+      </div>
+      <div class="revs"><div class="revs-ttl">Access Note</div><div class="archived-note">THIS DOCUMENT CARRIES AN ADDITIONAL ACCESS-CONTROL LIST. VISIBILITY REQUIRES EXPLICIT NAMED ASSIGNMENT BY THE SECURITY MANAGER, INDEPENDENT OF PROFILE.</div></div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+  function toggle(row){ row.closest('.doc').classList.toggle('open'); }
+</script>
+</body>
+</html>

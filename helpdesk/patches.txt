@@ -39,3 +39,4 @@ helpdesk.patches.add_agent_manager_perms_in_assignment_rule
 helpdesk.patches.seed_whatsapp_templates
 helpdesk.patches.seed_hd_task_default_views
 helpdesk.patches.set_std_views_non_public
+helpdesk.patches.rename_evolution_doctypes_to_wa

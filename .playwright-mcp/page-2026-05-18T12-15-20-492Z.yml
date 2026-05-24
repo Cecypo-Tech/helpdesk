@@ -1,0 +1,33 @@
+- generic [ref=e1]:
+  - link [ref=e2] [cursor=pointer]:
+    - /url: https://wa.me/254700000000?text=Hello%2C%20I%27d%20like%20to%20enquire%20about%20your%20products
+    - img [ref=e3]
+  - main [ref=e8]:
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - img [ref=e13]
+        - heading "Login to Frappe" [level=4] [ref=e14]
+      - form [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - generic [ref=e19]:
+              - generic [ref=e20]: Email
+              - generic [ref=e21]:
+                - textbox "Email" [active] [ref=e22]:
+                  - /placeholder: jane@example.com
+                - img [ref=e23]
+            - generic [ref=e25]:
+              - generic [ref=e26]: Password
+              - generic [ref=e27]:
+                - textbox "Password" [ref=e28]:
+                  - /placeholder: •••••
+                - img [ref=e29]
+                - generic [ref=e31] [cursor=pointer]: Show
+            - paragraph [ref=e32]:
+              - link "Forgot Password?" [ref=e33] [cursor=pointer]:
+                - /url: "#forgot"
+          - button "Login" [ref=e35] [cursor=pointer]
+          - generic [ref=e36]:
+            - paragraph [ref=e37]: or
+            - link "Login with Email Link" [ref=e40] [cursor=pointer]:
+              - /url: "#login-with-email-link"

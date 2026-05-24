@@ -372,7 +372,7 @@ const mentionPickerRef = ref<HTMLElement | null>(null);
 const mentionPickerStyle = ref<Record<string, string>>({});
 
 const participantsResource = createResource({
-  url: "helpdesk.integrations.evolution.get_evolution_group_participants",
+  url: "helpdesk.integrations.wa.get_wa_group_participants",
   auto: false,
 });
 
@@ -483,7 +483,7 @@ function onTextKeydown(e: KeyboardEvent) {
 
 // ── Send ──────────────────────────────────────────────────────────────────────
 const sendReply = createResource({
-  url: "helpdesk.integrations.evolution.send_evolution_reply",
+  url: "helpdesk.integrations.wa.send_wa_reply",
   onSuccess() {
     emit("sent");
   },
@@ -527,7 +527,7 @@ async function send() {
       const fileUrl: string = uploadJson?.message?.file_url || "";
       if (!fileUrl) throw new Error("No file URL returned");
 
-      // Step 2: send via Evolution API using the uploaded file URL
+      // Step 2: send via WA API using the uploaded file URL
       await sendReply.submit({
         ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
         message: caption,

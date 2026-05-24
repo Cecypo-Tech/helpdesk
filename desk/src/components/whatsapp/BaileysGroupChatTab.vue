@@ -16,23 +16,23 @@ const pickingUp = ref(false);
 const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
-  url: "helpdesk.integrations.evolution.get_whatsapp_messages",
+  url: "helpdesk.integrations.wa.get_whatsapp_messages",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const tabInfo = createResource({
-  url: "helpdesk.integrations.evolution.get_whatsapp_ticket_info",
+  url: "helpdesk.integrations.wa.get_whatsapp_ticket_info",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const markReadResource = createResource({
-  url: "helpdesk.integrations.evolution.mark_evolution_messages_read",
+  url: "helpdesk.integrations.wa.mark_wa_messages_read",
 });
 
 const pickUpResource = createResource({
-  url: "helpdesk.integrations.evolution.pickup_whatsapp_ticket",
+  url: "helpdesk.integrations.wa.pickup_whatsapp_ticket",
   onSuccess() {
     pickingUp.value = false;
     tabInfo.reload();
@@ -45,7 +45,7 @@ const pickUpResource = createResource({
 });
 
 const sendReactionResource = createResource({
-  url: "helpdesk.integrations.evolution.send_evolution_reaction",
+  url: "helpdesk.integrations.wa.send_wa_reaction",
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send reaction");
   },

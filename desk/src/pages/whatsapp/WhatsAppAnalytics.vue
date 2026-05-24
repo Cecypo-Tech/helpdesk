@@ -256,12 +256,12 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
-import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import { useWaLinesStore } from "@/stores/waLines";
 
 const router = useRouter();
 
-const evolutionLinesStore = useEvolutionLinesStore();
-const { lines } = storeToRefs(evolutionLinesStore);
+const waLinesStore = useWaLinesStore();
+const { lines } = storeToRefs(waLinesStore);
 const selectedLine = ref("");
 
 // ── Date presets ──────────────────────────────────────────────────────────────
@@ -303,7 +303,7 @@ function applyPreset(p: { label: string; days: number }) {
 // ── Data ──────────────────────────────────────────────────────────────────────
 
 const analytics = createResource({
-  url: "helpdesk.integrations.evolution.get_whatsapp_analytics",
+  url: "helpdesk.integrations.wa.get_whatsapp_analytics",
   auto: false,
 });
 

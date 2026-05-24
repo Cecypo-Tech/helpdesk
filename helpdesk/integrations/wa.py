@@ -1,4 +1,4 @@
-# helpdesk/integrations/evolution.py
+# helpdesk/integrations/wa.py
 import re
 
 import frappe
@@ -10,20 +10,20 @@ from frappe.utils import now_datetime, time_diff_in_hours
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _settings():
-    return frappe.get_cached_doc("Evolution API Settings")
+    return frappe.get_cached_doc("WA API Settings")
 
 
 def _line(instance_name: str):
-    """Return the Evolution Line doc for the given instance_name, or throw."""
+    """Return the WA Line doc for the given instance_name, or throw."""
     names = frappe.get_all(
-        "Evolution Line", filters={"instance_name": instance_name}, pluck="name", limit=1
+        "WA Line", filters={"instance_name": instance_name}, pluck="name", limit=1
     )
     if not names:
         frappe.throw(
-            _("Unknown Evolution instance: {0}").format(instance_name),
+            _("Unknown WA instance: {0}").format(instance_name),
             frappe.AuthenticationError,
         )
-    return frappe.get_doc("Evolution Line", names[0])
+    return frappe.get_doc("WA Line", names[0])
 
 
 def _headers(line_doc=None) -> dict:
@@ -141,7 +141,7 @@ def _group_label(jid: str, line) -> str:
 
 
 def _extract_text(msg: dict) -> tuple[str, str]:
-    """Return (text, content_type) from a raw Evolution API message object."""
+    """Return (text, content_type) from a raw WA API message object."""
     inner = (
         msg.get("viewOnceMessage", {}).get("message")
         or msg.get("ephemeralMessage", {}).get("message")
@@ -203,9 +203,9 @@ def _save_base64_media(b64: str, mime: str) -> str:
         return ""
 
 
-def _download_media_via_evolution(line, full_data: dict) -> str:
-    """Call Evolution API /chat/getBase64FromMediaMessage.
-    Only needs the message key — Evolution decrypts the CDN-encrypted media using its Baileys session."""
+def _download_media_via_wa(line, full_data: dict) -> str:
+    """Call WA API /chat/getBase64FromMediaMessage.
+    Only needs the message key — WA decrypts the CDN-encrypted media using its Baileys session."""
     key = full_data.get("key") or {}
     if not key.get("id"):
         return ""
@@ -215,29 +215,29 @@ def _download_media_via_evolution(line, full_data: dict) -> str:
     try:
         resp = _requests.post(endpoint, json=payload, headers=_headers(line), timeout=60)
         if not resp.ok:
-            frappe.logger().warning(f"Evolution download failed {resp.status_code}: {resp.text[:200]}")
+            frappe.logger().warning(f"WA download failed {resp.status_code}: {resp.text[:200]}")
             return ""
         result = resp.json()
         b64 = result.get("base64") or result.get("data") or result.get("buffer") or ""
         mime = result.get("mimetype") or result.get("mediaType") or "application/octet-stream"
         if b64:
             return _save_base64_media(b64, mime)
-        frappe.logger().warning(f"Evolution download: no base64 in response keys={list(result.keys())}")
+        frappe.logger().warning(f"WA download: no base64 in response keys={list(result.keys())}")
     except Exception as e:
-        frappe.logger().warning(f"Evolution download exception: {e}")
+        frappe.logger().warning(f"WA download exception: {e}")
     return ""
 
 
 @frappe.whitelist()
 def refetch_media_for_message(message_name: str) -> str:
-    """Re-download media for an existing Baileys Message via Evolution API. Returns new local URL."""
+    """Re-download media for an existing Baileys Message via WA API. Returns new local URL."""
     doc = frappe.get_doc("Baileys Message", message_name)
 
     if not doc.line or not doc.message_id:
         return ""
 
     try:
-        line = frappe.get_doc("Evolution Line", doc.line)
+        line = frappe.get_doc("WA Line", doc.line)
     except Exception:
         return ""
 
@@ -248,7 +248,7 @@ def refetch_media_for_message(message_name: str) -> str:
             "id": doc.message_id,
         },
     }
-    new_url = _download_media_via_evolution(line, full_data)
+    new_url = _download_media_via_wa(line, full_data)
     if new_url:
         frappe.db.set_value("Baileys Message", message_name, "media_url", new_url)
         frappe.db.commit()
@@ -280,7 +280,7 @@ def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = No
 
         # 2. Evolution /chat/getBase64FromMediaMessage — only needs message key
         if line and full_webhook_data:
-            saved = _download_media_via_evolution(line, full_webhook_data)
+            saved = _download_media_via_wa(line, full_webhook_data)
             if saved:
                 return saved
 
@@ -293,7 +293,7 @@ def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = No
     return ""
 
 
-def _publish_evolution_event(jid: str, is_incoming: bool, line: str, ticket: str = "") -> None:
+def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "") -> None:
     frappe.db.commit()
     event_data = {"jid": jid, "is_incoming": is_incoming, "line": line}
     if ticket:
@@ -369,16 +369,16 @@ def _upsert_contact_name(jid: str, sender_name: str) -> None:
 
 @frappe.whitelist(allow_guest=True)
 def webhook():
-    """Single webhook endpoint for all Evolution API events across all instances."""
-    if not frappe.db.exists("DocType", "Evolution API Settings"):
+    """Single webhook endpoint for all WA API events across all instances."""
+    if not frappe.db.exists("DocType", "WA API Settings"):
         frappe.response["http_status_code"] = 503
-        return {"error": "Evolution API Settings not configured"}
+        return {"error": "WA API Settings not configured"}
 
     settings = _settings()
     if not settings.enabled:
         return {"status": "disabled"}
 
-    # Auth: Evolution API sends the global apikey in the request header
+    # Auth: WA API sends the global apikey in the request header
     incoming_key = (
         frappe.get_request_header("apikey")
         or frappe.get_request_header("x-api-key")
@@ -499,7 +499,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
             "is_read": 1,
         }).insert(ignore_permissions=True)
         frappe.db.set_value("Baileys Message", doc.name, "owner", owner, update_modified=False)
-        _publish_evolution_event(jid, is_incoming=False, line=line.name)
+        _publish_wa_event(jid, is_incoming=False, line=line.name)
         return {"status": "ok", "mirrored": True}
 
     # Incoming message
@@ -523,7 +523,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
     }).insert(ignore_permissions=True)
 
     _upsert_contact_name(jid, sender_name)
-    _publish_evolution_event(jid, is_incoming=True, line=line.name)
+    _publish_wa_event(jid, is_incoming=True, line=line.name)
     if content_type != "reaction":
         _notify_agents(jid, text, sender_name, line, settings)
 
@@ -539,7 +539,7 @@ def _handle_contacts_upsert(contacts: list) -> None:
             _upsert_contact(jid, phone, name)
 
 
-# Evolution API v2 message status integer codes
+# WA API v2 message status integer codes
 _STATUS_MAP = {
     0: None,         # ERROR — ignore
     1: "Sent",       # PENDING
@@ -577,7 +577,7 @@ def _handle_update(updates: list, line) -> dict:
 # ── Agent send ────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
-def send_evolution_reply(
+def send_wa_reply(
     ticket: str = None,
     jid: str = None,
     message: str = "",
@@ -588,10 +588,10 @@ def send_evolution_reply(
     reply_to_from_me: bool = False,
     mentioned_jids: str | None = None,
 ) -> dict:
-    """Send a text reply via Evolution API."""
+    """Send a text reply via WA API."""
     settings = _settings()
     if not settings.enabled:
-        frappe.throw(_("Evolution API is not enabled."))
+        frappe.throw(_("WA API is not enabled."))
 
     if not jid and ticket:
         jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
@@ -613,7 +613,7 @@ def send_evolution_reply(
     if not line_name:
         frappe.throw(_("Cannot determine WhatsApp line for this conversation."))
 
-    line = frappe.get_doc("Evolution Line", line_name)
+    line = frappe.get_doc("WA Line", line_name)
 
     if settings.append_agent_initials:
         suffix = f"\n^{_agent_initials()}"
@@ -686,7 +686,7 @@ def send_evolution_reply(
         resp.raise_for_status()
         sent_id = resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
     except Exception as e:
-        frappe.throw(_("Evolution API send failed: {0}").format(str(e)))
+        frappe.throw(_("WA API send failed: {0}").format(str(e)))
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     msg_doc = frappe.get_doc({
@@ -719,21 +719,21 @@ def send_evolution_reply(
         if settings.agent_reply_status:
             _set_ticket_status(ticket, settings.agent_reply_status)
 
-    _publish_evolution_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
+    _publish_wa_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
     return {"name": msg_doc.name, "message_id": sent_id, "status": "Sent"}
 
 
 @frappe.whitelist()
-def send_evolution_reaction(
+def send_wa_reaction(
     ticket: str = None,
     jid: str = None,
     target_message_id: str = "",
     emoji: str = "",
 ) -> dict:
-    """Send a reaction to a message via Evolution API."""
+    """Send a reaction to a message via WA API."""
     settings = _settings()
     if not settings.enabled:
-        frappe.throw(_("Evolution API is not enabled."))
+        frappe.throw(_("WA API is not enabled."))
 
     if not jid and ticket:
         jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
@@ -748,7 +748,7 @@ def send_evolution_reaction(
     )
     if not line_name:
         frappe.throw(_("Cannot determine WhatsApp line for this conversation."))
-    line = frappe.get_doc("Evolution Line", line_name)
+    line = frappe.get_doc("WA Line", line_name)
 
     target_msg = frappe.db.get_value(
         "Baileys Message",
@@ -776,7 +776,7 @@ def send_evolution_reaction(
         resp.raise_for_status()
         sent_id = resp.json().get("key", {}).get("id") or frappe.generate_hash(length=16)
     except Exception as e:
-        frappe.throw(_("Evolution API reaction failed: {0}").format(str(e)))
+        frappe.throw(_("WA API reaction failed: {0}").format(str(e)))
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     frappe.get_doc({
@@ -793,16 +793,16 @@ def send_evolution_reaction(
         "is_read": 1,
     }).insert(ignore_permissions=True)
     frappe.db.commit()
-    _publish_evolution_event(jid, is_incoming=False, line=line.name)
+    _publish_wa_event(jid, is_incoming=False, line=line.name)
     return {"status": "ok"}
 
 
 @frappe.whitelist()
-def edit_evolution_message(message_name: str, new_text: str) -> dict:
-    """Edit an outgoing text message via Evolution API and update local record."""
+def edit_wa_message(message_name: str, new_text: str) -> dict:
+    """Edit an outgoing text message via WA API and update local record."""
     settings = _settings()
     if not settings.enabled:
-        frappe.throw(_("Evolution API is not enabled."))
+        frappe.throw(_("WA API is not enabled."))
 
     doc = frappe.get_doc("Baileys Message", message_name)
 
@@ -815,7 +815,7 @@ def edit_evolution_message(message_name: str, new_text: str) -> dict:
     if doc.owner != frappe.session.user and "System Manager" not in frappe.get_roles():
         frappe.throw(_("You can only edit your own messages."))
 
-    line = frappe.get_doc("Evolution Line", doc.line)
+    line = frappe.get_doc("WA Line", doc.line)
 
     try:
         resp = _requests.put(
@@ -834,7 +834,7 @@ def edit_evolution_message(message_name: str, new_text: str) -> dict:
         )
         resp.raise_for_status()
     except Exception as e:
-        frappe.throw(_("Evolution API edit failed: {0}").format(str(e)))
+        frappe.throw(_("WA API edit failed: {0}").format(str(e)))
 
     agent_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     _apply_edit(doc.name, new_text, edited_by=agent_name, jid=doc.jid, line=line)
@@ -843,13 +843,13 @@ def edit_evolution_message(message_name: str, new_text: str) -> dict:
 
 
 @frappe.whitelist(allow_guest=False)
-def send_evolution_media(
+def send_wa_media(
     ticket: str = None,
     jid: str = None,
     message: str = "",
     content_type: str = "document",
 ) -> dict:
-    """Upload file to Frappe storage and send via Evolution API."""
+    """Upload file to Frappe storage and send via WA API."""
     file_obj = frappe.request.files.get("file")
     if not file_obj:
         frappe.throw(_("No file provided."))
@@ -874,10 +874,10 @@ def send_evolution_media(
         "is_private": 0,
     })
     file_doc.insert(ignore_permissions=True)
-    # Store relative path — send_evolution_reply converts to absolute for the API call
+    # Store relative path — send_wa_reply converts to absolute for the API call
     relative_url = file_doc.file_url
 
-    return send_evolution_reply(
+    return send_wa_reply(
         ticket=ticket,
         jid=jid,
         message=message,
@@ -889,10 +889,10 @@ def send_evolution_media(
 # ── Utility APIs ──────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
-def get_evolution_lines() -> list[dict]:
-    """Return all Evolution Lines with unread counts — used by the sidebar."""
+def get_wa_lines() -> list[dict]:
+    """Return all WA Lines with unread counts — used by the sidebar."""
     lines = frappe.get_all(
-        "Evolution Line",
+        "WA Line",
         fields=["name", "label", "instance_name"],
         order_by="label asc",
     )
@@ -906,7 +906,7 @@ def get_evolution_lines() -> list[dict]:
 
 
 @frappe.whitelist()
-def get_evolution_conversations(line: str = "") -> list[dict]:
+def get_wa_conversations(line: str = "") -> list[dict]:
     """Return one entry per unique JID for the given line, sorted by most-recent first."""
     from frappe.query_builder import DocType
     from frappe.query_builder.functions import Max
@@ -942,12 +942,12 @@ def get_evolution_conversations(line: str = "") -> list[dict]:
             seen.add(r.jid)
             deduped.append(r)
 
-    line_doc = frappe.get_doc("Evolution Line", line) if line else None
+    line_doc = frappe.get_doc("WA Line", line) if line else None
     group_names = {}
     if line_doc:
         group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
 
-    settings = frappe.get_cached_doc("Evolution API Settings")
+    settings = frappe.get_cached_doc("WA API Settings")
     restrict = settings.get("restrict_chats_by_team")
     user_teams: set[str] = set()
     user_has_any_team = False
@@ -1006,7 +1006,7 @@ def get_evolution_conversations(line: str = "") -> list[dict]:
 
 
 @frappe.whitelist()
-def mark_evolution_messages_read(jid: str = "", ticket: str = "") -> int:
+def mark_wa_messages_read(jid: str = "", ticket: str = "") -> int:
     """Mark all unread incoming Baileys Messages for a JID as read."""
     if not jid and ticket:
         jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
@@ -1025,7 +1025,7 @@ def mark_evolution_messages_read(jid: str = "", ticket: str = "") -> int:
 
 
 @frappe.whitelist()
-def mark_all_evolution_messages_read(line: str) -> int:
+def mark_all_wa_messages_read(line: str) -> int:
     """Mark all unread incoming Baileys Messages for an entire line as read."""
     if not line:
         return 0
@@ -1039,14 +1039,14 @@ def mark_all_evolution_messages_read(line: str) -> int:
 
 
 @frappe.whitelist()
-def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
-    """Fetch group participants from Evolution API and enrich names from WA Contacts."""
+def get_wa_group_participants(jid: str, line: str) -> list[dict]:
+    """Fetch group participants from WA API and enrich names from WA Contacts."""
     if not line:
         return []
     settings = _settings()
     if not settings.enabled or not settings.server_url:
         return []
-    line_doc = frappe.get_doc("Evolution Line", line)
+    line_doc = frappe.get_doc("WA Line", line)
     try:
         resp = _requests.get(
             _url("group/findParticipants", line_doc.instance_name),
@@ -1057,7 +1057,7 @@ def get_evolution_group_participants(jid: str, line: str) -> list[dict]:
         resp.raise_for_status()
         participants = resp.json().get("participants", [])
     except Exception as e:
-        frappe.log_error(f"get_evolution_group_participants failed for {jid}: {e}")
+        frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
         return []
 
     normalised = []
@@ -1187,12 +1187,12 @@ def create_ticket_from_chat(jid: str, line: str, subject: str, description: str 
 
 
 @frappe.whitelist()
-def configure_evolution_webhook(line: str) -> dict:
-	"""Register (or update) the Frappe webhook on the Evolution API instance."""
+def configure_wa_webhook(line: str) -> dict:
+	"""Register (or update) the Frappe webhook on the WA API instance."""
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
-		frappe.throw(_("Evolution API not configured or disabled"))
-	line_doc = frappe.get_doc("Evolution Line", line)
+		frappe.throw(_("WA API not configured or disabled"))
+	line_doc = frappe.get_doc("WA Line", line)
 	site_url = frappe.utils.get_url().rstrip("/")
 	webhook_url = f"{site_url}/api/method/helpdesk.integrations.evolution.webhook"
 	payload = {
@@ -1219,12 +1219,12 @@ def configure_evolution_webhook(line: str) -> dict:
 
 
 @frappe.whitelist()
-def get_evolution_instance_status(line: str) -> dict:
-    """Return connection state for a given Evolution Line."""
+def get_wa_instance_status(line: str) -> dict:
+    """Return connection state for a given WA Line."""
     settings = _settings()
     if not settings.enabled or not settings.server_url:
-        return {"connected": False, "error": "Evolution API not configured"}
-    line_doc = frappe.get_doc("Evolution Line", line)
+        return {"connected": False, "error": "WA API not configured"}
+    line_doc = frappe.get_doc("WA Line", line)
     try:
         resp = _requests.get(
             _url("instance/connectionState", line_doc.instance_name),
@@ -1240,12 +1240,12 @@ def get_evolution_instance_status(line: str) -> dict:
 
 
 @frappe.whitelist()
-def get_evolution_qr(line: str) -> dict:
-    """Fetch QR code (or pairing code) for an Evolution Line instance."""
+def get_wa_qr(line: str) -> dict:
+    """Fetch QR code (or pairing code) for an WA Line instance."""
     settings = _settings()
     if not settings.enabled or not settings.server_url:
-        frappe.throw(_("Evolution API not configured or disabled"))
-    line_doc = frappe.get_doc("Evolution Line", line)
+        frappe.throw(_("WA API not configured or disabled"))
+    line_doc = frappe.get_doc("WA Line", line)
     try:
         resp = _requests.get(
             _url("instance/connect", line_doc.instance_name),
@@ -1254,7 +1254,7 @@ def get_evolution_qr(line: str) -> dict:
         )
         resp.raise_for_status()
         data = resp.json()
-        # Evolution API returns { base64: "data:image/png;base64,..." } or { code: "..." }
+        # WA API returns { base64: "data:image/png;base64,..." } or { code: "..." }
         return {
             "base64": data.get("base64") or data.get("qrcode", {}).get("base64") or "",
             "code": data.get("code") or "",
@@ -1504,7 +1504,7 @@ def pickup_whatsapp_ticket(ticket: str) -> dict:
 
 @frappe.whitelist()
 def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str = None) -> dict:
-	"""Return WhatsApp analytics for the given date range, optionally filtered by Evolution Line."""
+	"""Return WhatsApp analytics for the given date range, optionally filtered by WA Line."""
 	from collections import defaultdict
 	from frappe.utils import add_days, today
 
@@ -1600,8 +1600,8 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 		):
 			contacts[c.jid] = c
 
-	if line and frappe.db.exists("Evolution Line", line):
-		line_doc = frappe.get_doc("Evolution Line", line)
+	if line and frappe.db.exists("WA Line", line):
+		line_doc = frappe.get_doc("WA Line", line)
 		group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
 	else:
 		group_names = {}
@@ -1700,13 +1700,13 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 
 
 @frappe.whitelist()
-def sync_evolution_contacts() -> dict:
-	"""Fetch contacts from all Evolution Lines and upsert into WA Contact."""
+def sync_wa_contacts() -> dict:
+	"""Fetch contacts from all WA Lines and upsert into WA Contact."""
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
-		frappe.throw(_("Evolution API not configured or disabled"))
+		frappe.throw(_("WA API not configured or disabled"))
 
-	lines = frappe.get_all("Evolution Line", fields=["name", "instance_name", "instance_token"])
+	lines = frappe.get_all("WA Line", fields=["name", "instance_name", "instance_token"])
 	created = updated = 0
 
 	for line_row in lines:
@@ -1752,13 +1752,13 @@ def sync_evolution_contacts() -> dict:
 
 
 @frappe.whitelist()
-def sync_evolution_groups() -> dict:
-	"""Fetch groups from all Evolution Lines and upsert group subjects into WA Contact."""
+def sync_wa_groups() -> dict:
+	"""Fetch groups from all WA Lines and upsert group subjects into WA Contact."""
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
-		frappe.throw(_("Evolution API not configured or disabled"))
+		frappe.throw(_("WA API not configured or disabled"))
 
-	lines = frappe.get_all("Evolution Line", fields=["name", "instance_name", "instance_token"])
+	lines = frappe.get_all("WA Line", fields=["name", "instance_name", "instance_token"])
 	created = updated = 0
 
 	for line_row in lines:

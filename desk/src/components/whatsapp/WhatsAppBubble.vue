@@ -690,7 +690,7 @@ async function handleMediaError() {
   if (mediaRefetching.value || mediaBroken.value) return;
   mediaRefetching.value = true;
   try {
-    const newUrl = await call("helpdesk.integrations.evolution.refetch_media_for_message", {
+    const newUrl = await call("helpdesk.integrations.wa.refetch_media_for_message", {
       message_name: props.message.name,
     }) as string;
     if (newUrl && newUrl !== mediaSrc.value) {

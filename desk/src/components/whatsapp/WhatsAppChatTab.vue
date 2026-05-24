@@ -311,7 +311,7 @@ function handleMessageEdit(data: { message_id: string; new_text: string; name: s
 
 async function applyEdit(messageName: string, newText: string) {
   try {
-    await call("helpdesk.integrations.evolution.edit_evolution_message", {
+    await call("helpdesk.integrations.wa.edit_wa_message", {
       message_name: messageName,
       new_text: newText,
     })

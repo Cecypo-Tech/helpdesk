@@ -343,7 +343,7 @@ const isGroup = computed(() => !!props.jid?.endsWith("@g.us"));
 const showNotes = ref(false);
 
 const customerNotesResource = createResource({
-  url: "helpdesk.integrations.evolution.get_customer_notes",
+  url: "helpdesk.integrations.wa.get_customer_notes",
   auto: false,
 });
 const notesText = computed(() => (customerNotesResource.data as { notes?: string } | null)?.notes || "");
@@ -368,7 +368,7 @@ watch(() => props.company, (newCustomer) => {
 const showMembers = ref(false);
 
 const participantsResource = createResource({
-  url: "helpdesk.integrations.evolution.get_evolution_group_participants",
+  url: "helpdesk.integrations.wa.get_wa_group_participants",
   auto: false,
 });
 
@@ -421,7 +421,7 @@ const editTeam = ref("");
 const savingContact = ref(false);
 
 const customerSearchResource = createResource({
-  url: "helpdesk.integrations.evolution.get_hd_customers",
+  url: "helpdesk.integrations.wa.get_hd_customers",
   auto: false,
   onSuccess(data: HdCustomer[]) {
     customerResults.value = data;
@@ -461,16 +461,16 @@ const loadingMore = ref(false);
 
 
 const messages = createResource({
-  url: "helpdesk.integrations.evolution.get_whatsapp_messages",
+  url: "helpdesk.integrations.wa.get_whatsapp_messages",
   auto: false,
 });
 
 const markReadResource = createResource({
-  url: "helpdesk.integrations.evolution.mark_evolution_messages_read",
+  url: "helpdesk.integrations.wa.mark_wa_messages_read",
 });
 
 const sendReactionResource = createResource({
-  url: "helpdesk.integrations.evolution.send_evolution_reaction",
+  url: "helpdesk.integrations.wa.send_wa_reaction",
   onSuccess() {
     loadMessages();
   },
@@ -480,7 +480,7 @@ const sendReactionResource = createResource({
 });
 
 const saveContactResource = createResource({
-  url: "helpdesk.integrations.evolution.save_whatsapp_contact",
+  url: "helpdesk.integrations.wa.save_whatsapp_contact",
   onSuccess(data: { custom_name: string; company: string; assigned_team: string; phone: string }) {
     savingContact.value = false;
     editingContact.value = false;
@@ -494,7 +494,7 @@ const saveContactResource = createResource({
 });
 
 const teamsResource = createResource({
-  url: "helpdesk.integrations.evolution.get_hd_teams",
+  url: "helpdesk.integrations.wa.get_hd_teams",
   auto: true,
 });
 

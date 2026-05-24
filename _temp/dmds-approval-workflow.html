@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DMDS — Revision Approval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0e1116; --bg-elev:#161a22; --bg-elev-2:#1d2230;
+    --line:#262c3a; --line-soft:#1f2532;
+    --ink:#e8e6df; --ink-mute:#9aa0ad; --ink-dim:#6b7280;
+    --accent:#d97a3a; --accent-soft:#e8a878;
+    --teal:#5fb3a8; --red:#d65a5a; --green:#6fa66f; --gold:#c9a85c;
+    --grid:rgba(255,255,255,0.025);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg); color:var(--ink); font-family:'Geist',sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+  body {
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+      radial-gradient(ellipse at top right,rgba(217,122,58,0.06),transparent 50%);
+    background-size:48px 48px,48px 48px,100% 100%;
+  }
+  .mono { font-family:'JetBrains Mono',monospace; }
+
+  .topbar { border-bottom:1px solid var(--line); background:rgba(14,17,22,0.85); backdrop-filter:blur(12px); position:sticky; top:0; z-index:50; }
+  .topbar-inner { max-width:1340px; margin:0 auto; padding:18px 36px; display:flex; align-items:center; justify-content:space-between; }
+  .brand { display:flex; align-items:center; gap:14px; }
+  .brand-mark { width:36px; height:36px; border:1px solid var(--accent); display:grid; place-items:center; color:var(--accent); font-family:'JetBrains Mono',monospace; font-size:11px; position:relative; }
+  .brand-mark::before,.brand-mark::after { content:''; position:absolute; width:5px; height:5px; border:1px solid var(--accent); }
+  .brand-mark::before { top:-3px; left:-3px; border-right:none; border-bottom:none; }
+  .brand-mark::after { bottom:-3px; right:-3px; border-left:none; border-top:none; }
+  .brand-text h1 { font-family:'Instrument Serif',serif; font-size:22px; font-weight:400; }
+  .brand-text span { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.18em; text-transform:uppercase; }
+  .role-tag { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--gold); border:1px solid var(--gold); padding:6px 11px; letter-spacing:0.1em; text-transform:uppercase; }
+
+  main { max-width:1340px; margin:0 auto; padding:32px 36px 80px; }
+
+  .crumb { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-dim); letter-spacing:0.08em; margin-bottom:24px; }
+  .crumb a { color:var(--ink-mute); text-decoration:none; }
+  .crumb a:hover { color:var(--accent); }
+  .crumb .sep { margin:0 8px; color:var(--line); }
+  .crumb .here { color:var(--ink); }
+
+  .page-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:30px; }
+  .page-head .label { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:10px; }
+  .page-head h2 { font-family:'Instrument Serif',serif; font-size:42px; line-height:1.05; font-weight:400; }
+  .page-head h2 em { color:var(--accent); font-style:italic; }
+  .await-badge { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent); border:1px solid var(--accent); padding:8px 13px; letter-spacing:0.1em; text-transform:uppercase; display:flex; align-items:center; gap:8px; }
+  .await-badge .pd { width:7px; height:7px; border-radius:50%; background:var(--accent); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  /* stepper */
+  .stepper { display:flex; border:1px solid var(--line); background:var(--bg-elev); margin-bottom:32px; }
+  .step { flex:1; padding:18px 22px; border-right:1px solid var(--line); position:relative; }
+  .step:last-child { border-right:none; }
+  .step .sn { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.1em; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .step .sname { font-family:'Geist',sans-serif; font-size:14px; font-weight:500; }
+  .step .smeta { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:5px; }
+  .step .tick { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; font-size:9px; }
+  .step.done .tick { background:var(--green); color:#0e1116; }
+  .step.done .sname { color:var(--ink-mute); }
+  .step.current { background:var(--bg-elev-2); }
+  .step.current .tick { background:var(--accent); color:#0e1116; }
+  .step.current .sname { color:var(--accent-soft); }
+  .step.current::after { content:''; position:absolute; bottom:-1px; left:0; right:0; height:2px; background:var(--accent); }
+  .step.todo .tick { border:1px solid var(--line); color:var(--ink-dim); }
+  .step.todo .sname { color:var(--ink-dim); }
+
+  /* layout */
+  .grid { display:grid; grid-template-columns:1.45fr 1fr; gap:24px; align-items:start; }
+
+  .panel { border:1px solid var(--line); background:var(--bg-elev); }
+  .panel-h { padding:16px 22px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .panel-h .pt { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-mute); letter-spacing:0.14em; text-transform:uppercase; }
+
+  /* doc preview */
+  .doc-tabs { display:flex; gap:2px; }
+  .doc-tabs button { background:transparent; border:none; color:var(--ink-dim); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:6px 12px; cursor:pointer; border:1px solid transparent; }
+  .doc-tabs button.on { color:var(--accent); border-color:var(--line); background:var(--bg-elev-2); }
+  .preview { padding:26px 22px; }
+  .pages { display:flex; gap:14px; margin-bottom:24px; }
+  .pg { flex:1; aspect-ratio:3/4; background:var(--bg-elev-2); border:1px solid var(--line); padding:14px; display:flex; flex-direction:column; gap:6px; }
+  .pg .pl { height:5px; background:var(--line); }
+  .pg .pl.s { width:60%; } .pg .pl.m { width:85%; } .pg .pl.t { background:var(--accent); width:45%; height:7px; margin-bottom:4px; }
+  .pg.flag { border-color:var(--accent); }
+  .pg .pnum { margin-top:auto; font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-dim); }
+
+
+  /* right column cards */
+  .rcard { border:1px solid var(--line); background:var(--bg-elev); margin-bottom:24px; }
+  .rcard-h { padding:14px 20px; border-bottom:1px solid var(--line); font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-mute); letter-spacing:0.14em; text-transform:uppercase; }
+  .rcard-b { padding:20px; }
+
+  .meta-row { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line-soft); font-size:13px; }
+  .meta-row:last-child { border-bottom:none; }
+  .meta-row .mk { color:var(--ink-dim); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; }
+  .meta-row .mv { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink); }
+  .meta-row .mv.hl { color:var(--accent-soft); }
+
+  /* checklist */
+  .check { display:flex; gap:11px; padding:11px 0; border-bottom:1px solid var(--line-soft); cursor:pointer; }
+  .check:last-child { border-bottom:none; }
+  .check .box { width:18px; height:18px; border:1px solid var(--line); flex-shrink:0; display:grid; place-items:center; transition:all .15s; margin-top:1px; }
+  .check.on .box { background:var(--green); border-color:var(--green); }
+  .check .box svg { opacity:0; }
+  .check.on .box svg { opacity:1; }
+  .check .ctext { font-size:13px; line-height:1.45; color:var(--ink-mute); }
+  .check.on .ctext { color:var(--ink); }
+
+  /* distribution */
+  .dist { background:var(--bg-elev-2); border:1px solid var(--line); padding:16px 18px; }
+  .dist .dnum { font-family:'Instrument Serif',serif; font-size:36px; color:var(--accent); line-height:1; }
+  .dist .dlabel { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px; }
+  .dist .dprofiles { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+  .dchip { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--ink-mute); border:1px solid var(--line); padding:3px 8px; }
+  .dist .supersede { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent-soft); line-height:1.6; padding-top:12px; border-top:1px dashed var(--line); margin-top:6px; }
+
+  /* decision */
+  .decision { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
+  .opt { display:flex; gap:11px; align-items:center; padding:12px 14px; border:1px solid var(--line); cursor:pointer; transition:all .15s; }
+  .opt:hover { border-color:var(--ink-dim); }
+  .opt.sel { border-color:var(--accent); background:rgba(217,122,58,0.06); }
+  .opt .radio { width:15px; height:15px; border-radius:50%; border:1px solid var(--line); flex-shrink:0; display:grid; place-items:center; }
+  .opt.sel .radio { border-color:var(--accent); }
+  .opt.sel .radio::after { content:''; width:7px; height:7px; border-radius:50%; background:var(--accent); }
+  .opt .ot { font-size:13px; font-weight:500; }
+  .opt .od { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:2px; }
+
+  textarea { width:100%; background:var(--bg-elev-2); border:1px solid var(--line); color:var(--ink); font-family:'Geist',sans-serif; font-size:13px; padding:11px 13px; resize:vertical; min-height:72px; }
+  textarea::placeholder { color:var(--ink-dim); }
+  textarea:focus { outline:none; border-color:var(--accent); }
+  .field-l { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); letter-spacing:0.1em; text-transform:uppercase; margin:16px 0 8px; }
+  input[type=date] { background:var(--bg-elev-2); border:1px solid var(--line); color:var(--ink); font-family:'JetBrains Mono',monospace; font-size:12px; padding:9px 12px; width:100%; color-scheme:dark; }
+
+  .signoff { background:var(--bg-elev-2); border:1px solid var(--line); padding:16px; margin:18px 0; }
+  .signoff .stext { font-size:12px; line-height:1.6; color:var(--ink-mute); font-style:italic; }
+  .signoff .stext b { color:var(--ink); font-style:normal; }
+  .sign-check { display:flex; gap:11px; align-items:flex-start; margin-top:14px; cursor:pointer; }
+  .sign-check .box { width:18px; height:18px; border:1px solid var(--line); flex-shrink:0; display:grid; place-items:center; }
+  .sign-check.on .box { background:var(--accent); border-color:var(--accent); }
+  .sign-check .box svg { opacity:0; }
+  .sign-check.on .box svg { opacity:1; }
+  .sign-check span { font-size:12px; color:var(--ink-mute); line-height:1.4; }
+  .sign-check.on span { color:var(--ink); }
+
+  .actions { display:flex; gap:10px; }
+  .btn { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; padding:14px 16px; border:1px solid var(--line); background:transparent; color:var(--ink-mute); cursor:pointer; transition:all .2s; }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  .btn.primary { flex:1; background:var(--accent); border-color:var(--accent); color:#0e1116; font-weight:600; }
+  .btn.primary:hover { background:var(--accent-soft); }
+  .btn.primary:disabled { background:var(--bg-elev-2); border-color:var(--line); color:var(--ink-dim); cursor:not-allowed; }
+  .gate-note { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); margin-top:12px; line-height:1.6; text-align:center; }
+  .gate-note.ready { color:var(--green); }
+
+  @media (max-width:980px) {
+    .grid { grid-template-columns:1fr; }
+    .stepper { flex-direction:column; }
+    .step { border-right:none; border-bottom:1px solid var(--line); }
+    .page-head { flex-direction:column; align-items:flex-start; gap:16px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">DM</div>
+      <div class="brand-text">
+        <h1>Document Management &amp; Distribution</h1>
+        <span>DMDS · v2.4 · ISO 9001 Compliant</span>
+      </div>
+    </div>
+    <div class="role-tag">Manual Holder · Flight Ops</div>
+  </div>
+</header>
+
+<main>
+  <div class="crumb">
+    <a href="#">LIBRARY</a><span class="sep">/</span>
+    <a href="#">APPROVALS QUEUE</a><span class="sep">/</span>
+    <span class="here">FOM/V1 · ED 8 REV 3</span>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <div class="label">Revision Approval</div>
+      <h2>Flight Operations Manual — <em>Vol. 1</em><br>Edition 8, Revision 3</h2>
+    </div>
+    <div class="await-badge"><span class="pd"></span>Awaiting your approval</div>
+  </div>
+
+  <!-- WORKFLOW STEPPER -->
+  <div class="stepper">
+    <div class="step done">
+      <div class="sn"><span class="tick">✓</span>STAGE 01</div>
+      <div class="sname">Draft Prepared</div>
+      <div class="smeta">A. Mwangi · 28 APR 26</div>
+    </div>
+    <div class="step done">
+      <div class="sn"><span class="tick">✓</span>STAGE 02</div>
+      <div class="sname">Under Review</div>
+      <div class="smeta">Tech Review Cmte · 06 MAY 26</div>
+    </div>
+    <div class="step current">
+      <div class="sn"><span class="tick">3</span>STAGE 03</div>
+      <div class="sname">Manual Holder Approval</div>
+      <div class="smeta">Pending — assigned to you</div>
+    </div>
+    <div class="step todo">
+      <div class="sn"><span class="tick">4</span>STAGE 04</div>
+      <div class="sname">Published &amp; Distributed</div>
+      <div class="smeta">Auto on approval</div>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- LEFT: document + changes -->
+    <div>
+      <div class="panel" style="margin-bottom:24px;">
+        <div class="panel-h">
+          <span class="pt">Document Preview</span>
+          <div class="doc-tabs">
+            <button class="on">Pages</button>
+            <button>Full PDF</button>
+          </div>
+        </div>
+        <div class="preview">
+          <div class="pages">
+            <div class="pg"><div class="pl t"></div><div class="pl m"></div><div class="pl s"></div><div class="pl m"></div><div class="pl s"></div><div class="pnum">P. 4–1</div></div>
+            <div class="pg flag"><div class="pl t"></div><div class="pl m"></div><div class="pl m"></div><div class="pl s"></div><div class="pl m"></div><div class="pnum" style="color:var(--accent)">P. 4–7 ▸ CHANGED</div></div>
+            <div class="pg flag"><div class="pl t"></div><div class="pl s"></div><div class="pl m"></div><div class="pl m"></div><div class="pl s"></div><div class="pnum" style="color:var(--accent)">P. 4–9 ▸ CHANGED</div></div>
+            <div class="pg"><div class="pl t"></div><div class="pl m"></div><div class="pl s"></div><div class="pl m"></div><div class="pl m"></div><div class="pnum">P. 5–1</div></div>
+          </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: approval panel -->
+    <div>
+      <!-- revision details -->
+      <div class="rcard">
+        <div class="rcard-h">Revision Details</div>
+        <div class="rcard-b">
+          <div class="meta-row"><span class="mk">Document</span><span class="mv">FOM / V1</span></div>
+          <div class="meta-row"><span class="mk">New Revision</span><span class="mv hl">Ed 8 · Rev 3</span></div>
+          <div class="meta-row"><span class="mk">Supersedes</span><span class="mv">Ed 8 · Rev 2</span></div>
+          <div class="meta-row"><span class="mk">Submitted by</span><span class="mv">A. Mwangi</span></div>
+          <div class="meta-row"><span class="mk">Review closed</span><span class="mv">06 MAY 2026</span></div>
+          <div class="meta-row"><span class="mk">File integrity</span><span class="mv" style="color:var(--green)">✓ HASH OK</span></div>
+        </div>
+      </div>
+
+      <!-- checklist -->
+      <div class="rcard">
+        <div class="rcard-h">Approval Checklist</div>
+        <div class="rcard-b">
+          <div class="check" onclick="tick(this)">
+            <div class="box"><svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4 L4 7 L9 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+            <div class="ctext">Content of the revision has been reviewed and verified as accurate.</div>
+          </div>
+          <div class="check" onclick="tick(this)">
+            <div class="box"><svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4 L4 7 L9 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+            <div class="ctext">Regulatory references (AIC 04/2026) confirmed current and correctly cited.</div>
+          </div>
+          <div class="check" onclick="tick(this)">
+            <div class="box"><svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4 L4 7 L9 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+            <div class="ctext">Change summary accurately reflects the amendments made.</div>
+          </div>
+          <div class="check" onclick="tick(this)">
+            <div class="box"><svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4 L4 7 L9 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+            <div class="ctext">Effective date and distribution list confirmed correct.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- distribution impact -->
+      <div class="rcard">
+        <div class="rcard-h">Distribution Impact — on publish</div>
+        <div class="rcard-b">
+          <div class="dist">
+            <div class="dlabel">Recipients requiring acknowledgment</div>
+            <div class="dnum">142</div>
+            <div class="dprofiles">
+              <span class="dchip">FLT-OPS-CAPT-B737</span>
+              <span class="dchip">FLT-OPS-FO-B737</span>
+              <span class="dchip">OPS-DISPATCH</span>
+            </div>
+            <div class="supersede">▸ ED 8 · REV 2 WILL BE SUPERSEDED, REMOVED FROM THE LIBRARY, AND MOVED TO THE AUDIT ARCHIVE. OPEN ACKNOWLEDGMENT TASKS WILL BE RAISED FOR ALL 142 RECIPIENTS.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- decision -->
+      <div class="rcard">
+        <div class="rcard-h">Your Decision</div>
+        <div class="rcard-b">
+          <div class="decision">
+            <div class="opt sel" onclick="pick(this)">
+              <div class="radio"></div>
+              <div><div class="ot">Approve &amp; Publish</div><div class="od">Releases the revision and starts distribution</div></div>
+            </div>
+            <div class="opt" onclick="pick(this)">
+              <div class="radio"></div>
+              <div><div class="ot">Return for Revision</div><div class="od">Sends back to author with comments</div></div>
+            </div>
+            <div class="opt" onclick="pick(this)">
+              <div class="radio"></div>
+              <div><div class="ot">Reject</div><div class="od">Closes this revision without release</div></div>
+            </div>
+          </div>
+
+          <div class="field-l">Effective Date</div>
+          <input type="date" value="2026-05-20">
+
+          <div class="field-l">Comments (optional)</div>
+          <textarea placeholder="Notes recorded against this approval decision…"></textarea>
+
+          <div class="signoff">
+            <div class="stext">"I, <b>Capt. J. Mwende</b>, the appointed Manual Holder for the <b>Flight Operations Manual Vol. 1</b>, have verified this revision and approve it for distribution to all authorised recipients."</div>
+            <div class="sign-check" onclick="signToggle(this)">
+              <div class="box"><svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4 L4 7 L9 1" stroke="#0e1116" stroke-width="2" fill="none"/></svg></div>
+              <span>I confirm the statement above and apply my electronic signature.</span>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="btn primary" id="approveBtn" disabled>Approve &amp; Publish</button>
+            <button class="btn">Save</button>
+          </div>
+          <div class="gate-note" id="gate">Complete all 4 checklist items and sign off to enable publication.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+  function tick(el){ el.classList.toggle('on'); evaluate(); }
+  function pick(el){ document.querySelectorAll('.opt').forEach(o=>o.classList.remove('sel')); el.classList.add('sel'); }
+  function signToggle(el){ el.classList.toggle('on'); evaluate(); }
+  function evaluate(){
+    const checks = document.querySelectorAll('.check').length;
+    const done = document.querySelectorAll('.check.on').length;
+    const signed = document.querySelector('.sign-check').classList.contains('on');
+    const btn = document.getElementById('approveBtn');
+    const gate = document.getElementById('gate');
+    if(done===checks && signed){
+      btn.disabled = false;
+      gate.textContent = '✓ Ready — publication will distribute to 142 recipients.';
+      gate.classList.add('ready');
+    } else {
+      btn.disabled = true;
+      gate.textContent = (checks-done) + ' checklist item(s) remaining' + (signed?'':' · sign-off required');
+      gate.classList.remove('ready');
+    }
+  }
+  document.getElementById('approveBtn').addEventListener('click',function(){
+    if(this.disabled) return;
+    this.textContent = '✓ Approved · Distributing…';
+    this.style.background = 'var(--green)';
+    this.style.borderColor = 'var(--green)';
+  });
+</script>
+</body>
+</html>

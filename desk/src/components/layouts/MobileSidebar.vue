@@ -50,7 +50,7 @@
           </div>
 
           <!-- WhatsApp lines section -->
-          <div v-if="!isCustomerPortal && evolutionLines.length" class="px-2 mb-3">
+          <div v-if="!isCustomerPortal && waLines.length" class="px-2 mb-3">
             <div
               class="flex cursor-pointer items-center gap-1.5 px-1 mt-1 mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-gray-5 select-none"
               @click="waExpanded = !waExpanded"
@@ -71,7 +71,7 @@
             </div>
             <nav v-if="waExpanded" class="flex flex-col ml-2">
               <SidebarLink
-                v-for="line in evolutionLines"
+                v-for="line in waLines"
                 :key="line.name"
                 :icon="WhatsAppIcon"
                 :label="line.display_label"
@@ -180,7 +180,7 @@ import {
 } from "./layoutSettings";
 import { useTelephonyStore } from "@/stores/telephony";
 import { storeToRefs } from "pinia";
-import { useEvolutionLinesStore } from "@/stores/evolutionLines";
+import { useWaLinesStore } from "@/stores/waLines";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import { FeatherIcon, Badge } from "frappe-ui";
 const { pinnedViews, publicViews } = useView();
@@ -191,8 +191,8 @@ const router = useRouter();
 const authStore = useAuthStore();
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
-const evolutionLinesStore = useEvolutionLinesStore();
-const { lines: evolutionLines, totalUnread: waUnread } = storeToRefs(evolutionLinesStore);
+const waLinesStore = useWaLinesStore();
+const { lines: waLines, totalUnread: waUnread } = storeToRefs(waLinesStore);
 const waExpanded = ref(true);
 
 const allViews = computed(() => {

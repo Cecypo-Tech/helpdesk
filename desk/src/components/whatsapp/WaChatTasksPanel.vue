@@ -226,7 +226,7 @@ const selectedTaskId = ref<string>("");
 // ── Task list ────────────────────────────────────────────────────────────────
 
 const tasksResource = createResource({
-  url: "helpdesk.integrations.evolution.get_tasks_for_jid",
+  url: "helpdesk.integrations.wa.get_tasks_for_jid",
   auto: false,
 });
 
@@ -235,7 +235,7 @@ const tasks = computed<any[]>(() => tasksResource.data || []);
 // ── Ticket list ───────────────────────────────────────────────────────────────
 
 const ticketsResource = createResource({
-  url: "helpdesk.integrations.evolution.get_tickets_for_jid",
+  url: "helpdesk.integrations.wa.get_tickets_for_jid",
   auto: false,
 });
 
@@ -308,7 +308,7 @@ async function createTask() {
   if (!newTaskTitle.value.trim() || !props.jid) return;
   creatingTask.value = true;
   try {
-    const taskName = await call("helpdesk.integrations.evolution.create_task_from_chat", {
+    const taskName = await call("helpdesk.integrations.wa.create_task_from_chat", {
       jid: props.jid,
       line: props.line || "",
       title: newTaskTitle.value.trim(),
@@ -344,7 +344,7 @@ async function createTicket() {
   if (!newTicketSubject.value.trim() || !props.jid) return;
   creatingTicket.value = true;
   try {
-    await call("helpdesk.integrations.evolution.create_ticket_from_chat", {
+    await call("helpdesk.integrations.wa.create_ticket_from_chat", {
       jid: props.jid,
       line: props.line || "",
       subject: newTicketSubject.value.trim(),
