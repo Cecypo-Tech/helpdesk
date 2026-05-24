@@ -23,7 +23,9 @@
   "status",
   "line",
   "is_read",
-  "profile_name"
+  "profile_name",
+  "is_edited",
+  "edit_history"
  ],
  "fields": [
   {
@@ -137,6 +139,20 @@
    "fieldname": "profile_name",
    "fieldtype": "Data",
    "label": "Profile Name"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_edited",
+   "fieldtype": "Check",
+   "label": "Is Edited",
+   "read_only": 1
+  },
+  {
+   "fieldname": "edit_history",
+   "fieldtype": "Table",
+   "label": "Edit History",
+   "options": "Baileys Message Edit History",
+   "read_only": 1
   }
  ],
  "links": [],
