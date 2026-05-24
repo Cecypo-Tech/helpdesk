@@ -136,3 +136,67 @@ class TestExtractEdit(unittest.TestCase):
         text, is_edit = _extract_edit({})
         self.assertFalse(is_edit)
         self.assertEqual(text, "")
+
+
+class TestApplyEdit(unittest.TestCase):
+    def setUp(self):
+        frappe.set_user("Administrator")
+        if not frappe.db.exists("Evolution Line", {"instance_name": "_test-evo"}):
+            frappe.get_doc({
+                "doctype": "Evolution Line",
+                "label": "Test",
+                "instance_name": "_test-evo",
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+    def tearDown(self):
+        frappe.db.rollback()
+
+    def test_apply_edit_updates_message_and_history(self):
+        from helpdesk.integrations.evolution import _apply_edit, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Incoming",
+            "jid": "254799000001@s.whatsapp.net",
+            "message": "original text",
+            "content_type": "text",
+            "message_id": "_test-apply-edit-001",
+            "status": "Pending",
+            "line": line.name,
+            "is_read": 0,
+        }).insert(ignore_permissions=True)
+
+        _apply_edit(msg.name, "edited text", "incoming", msg.jid, line)
+
+        updated = frappe.get_doc("Baileys Message", msg.name)
+        self.assertEqual(updated.message, "edited text")
+        self.assertEqual(updated.is_edited, 1)
+        self.assertEqual(len(updated.edit_history), 1)
+        self.assertEqual(updated.edit_history[0].old_message, "original text")
+        self.assertEqual(updated.edit_history[0].edited_by, "incoming")
+
+    def test_apply_edit_appends_on_second_edit(self):
+        from helpdesk.integrations.evolution import _apply_edit, _line
+        line = _line("_test-evo")
+        msg = frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Incoming",
+            "jid": "254799000002@s.whatsapp.net",
+            "message": "v1",
+            "content_type": "text",
+            "message_id": "_test-apply-edit-002",
+            "status": "Pending",
+            "line": line.name,
+            "is_read": 0,
+        }).insert(ignore_permissions=True)
+
+        _apply_edit(msg.name, "v2", "incoming", msg.jid, line)
+        _apply_edit(msg.name, "v3", "incoming", msg.jid, line)
+
+        updated = frappe.get_doc("Baileys Message", msg.name)
+        self.assertEqual(updated.message, "v3")
+        self.assertEqual(len(updated.edit_history), 2)
+        messages_in_history = [r.old_message for r in updated.edit_history]
+        self.assertIn("v1", messages_in_history)
+        self.assertIn("v2", messages_in_history)

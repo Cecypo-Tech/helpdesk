@@ -74,6 +74,31 @@ def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
     return "", False
 
 
+def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) -> None:
+    """Append old text to history, update message, publish realtime edit event."""
+    doc = frappe.get_doc("Baileys Message", msg_name)
+    doc.append("edit_history", {
+        "old_message": doc.message or "",
+        "edited_at": frappe.utils.now(),
+        "edited_by": edited_by,
+    })
+    doc.message = new_text
+    doc.is_edited = 1
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    frappe.publish_realtime(
+        "helpdesk:whatsapp-message-edit",
+        message={
+            "message_id": doc.message_id,
+            "new_text": new_text,
+            "name": msg_name,
+            "jid": jid,
+            "line": line.name,
+        },
+        after_commit=True,
+    )
+
+
 def _set_ticket_status(ticket_name: str, status_name: str) -> None:
     if not status_name or not frappe.db.exists("HD Ticket Status", status_name):
         return
