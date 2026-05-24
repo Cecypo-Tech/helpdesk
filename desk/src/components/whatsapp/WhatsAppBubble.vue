@@ -35,6 +35,18 @@
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
+        <!-- Edit button (outgoing text only) -->
+        <button
+          v-if="isOutgoing && message.content_type === 'text' && message.message_id"
+          class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
+          title="Edit message"
+          @click.stop="startEdit"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </button>
         <!-- React button -->
         <button
           class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
@@ -248,12 +260,55 @@
           <span>{{ message.message || "Poll" }}</span>
         </div>
 
-        <!-- Message text -->
-        <div v-if="message.message" class="whitespace-pre-wrap break-words" v-html="formattedMessage" />
+        <!-- Message text / inline editor -->
+        <template v-if="editing">
+          <textarea
+            ref="editTextareaRef"
+            v-model="editText"
+            class="w-full resize-none rounded border border-outline-gray-3 bg-surface-white px-2 py-1 text-sm text-ink-gray-9 focus:outline-none dark:bg-surface-gray-1 dark:text-ink-gray-9"
+            rows="3"
+            @keydown.ctrl.enter="saveEdit"
+            @keydown.esc="cancelEdit"
+          />
+          <div class="mt-1 flex justify-end gap-1.5">
+            <button
+              class="text-xs text-ink-gray-5 hover:text-ink-gray-8"
+              @click.stop="cancelEdit"
+            >Cancel</button>
+            <button
+              class="text-xs font-medium text-blue-600 hover:underline"
+              @click.stop="saveEdit"
+            >Save</button>
+          </div>
+        </template>
+        <div v-else-if="message.message" class="whitespace-pre-wrap break-words" v-html="formattedMessage" />
 
         <!-- Footer: time + status -->
         <div class="mt-1 flex items-center justify-end gap-1">
           <span class="text-[10px] text-ink-gray-5">{{ formattedTime }}</span>
+          <!-- Edited badge + history tooltip -->
+          <span
+            v-if="message.is_edited"
+            class="relative text-[10px] italic text-ink-gray-4 cursor-default select-none"
+            @mouseenter="showEditHistory = true"
+            @mouseleave="showEditHistory = false"
+          >
+            · edited
+            <div
+              v-if="showEditHistory && editHistoryList.length"
+              class="absolute bottom-full right-0 mb-1 z-30 w-56 rounded border border-outline-gray-2 bg-surface-white shadow-md overflow-y-auto"
+              style="max-height: 140px;"
+            >
+              <div
+                v-for="h in editHistoryList"
+                :key="h.edited_at"
+                class="border-b border-outline-gray-1 px-2 py-1.5 last:border-0 text-[11px] text-ink-gray-7"
+              >
+                <div class="mb-0.5 text-ink-gray-4 font-medium">{{ formatEditTime(h.edited_at) }} · {{ h.edited_by }}</div>
+                <div class="whitespace-pre-wrap break-words">{{ h.old_message || '(empty)' }}</div>
+              </div>
+            </div>
+          </span>
           <span v-if="isOutgoing" class="text-[10px]">
             <span v-if="message.status === 'read'" class="text-blue-500">✓✓</span>
             <span v-else-if="message.status === 'delivered'" class="text-ink-gray-5">✓✓</span>
@@ -434,6 +489,7 @@ const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
   (e: "react", emoji: string, targetMessageId: string): void;
   (e: "scrollToReply", messageId: string): void;
+  (e: "edit", messageName: string, newText: string): void;
 }>();
 
 const isOutgoing = computed(() => props.message.type === "Outgoing");
@@ -447,6 +503,10 @@ const senderColor = computed(() => {
 });
 
 const showEmojiPicker = ref(false);
+const editing = ref(false);
+const editText = ref("");
+const editTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const showEditHistory = ref(false);
 const emojiPickerRef = ref<HTMLElement | null>(null);
 
 function onDocumentClick(e: MouseEvent) {
@@ -516,6 +576,19 @@ const formattedTime = computed(() => {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 });
 
+const editHistoryList = computed(() => {
+  const history = props.message.edit_history || [];
+  return [...history].sort((a: any, b: any) =>
+    new Date(b.edited_at).getTime() - new Date(a.edited_at).getTime()
+  );
+});
+
+function formatEditTime(ts: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 const tooltip = reactive({ visible: false, text: "", x: 0, y: 0 });
 
 function showTooltip(e: MouseEvent, senders: string[]) {
@@ -540,6 +613,23 @@ function copyText() {
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied.value = false; }, 1500);
   });
+}
+
+function startEdit() {
+  editText.value = props.message.message || "";
+  editing.value = true;
+  nextTick(() => editTextareaRef.value?.focus());
+}
+
+function saveEdit() {
+  if (!editText.value.trim()) return;
+  emit("edit", props.message.name, editText.value.trim());
+  editing.value = false;
+}
+
+function cancelEdit() {
+  editing.value = false;
+  editText.value = "";
 }
 
 const phoneCopied = ref(false);
