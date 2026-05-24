@@ -34,6 +34,7 @@
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
+            @edit="applyEdit"
           />
         </template>
       </div>
@@ -106,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, LoadingIndicator, toast } from "frappe-ui";
+import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -298,6 +299,27 @@ function handleStatusUpdate(data: { ticket: string; message_name: string; status
   if (msg) msg.status = data.status;
 }
 
+function handleMessageEdit(data: { message_id: string; new_text: string; name: string }) {
+  const list = messages.data
+  if (!list) return
+  const msg = list.find((m: any) => m.message_id === data.message_id)
+  if (msg) {
+    msg.message = data.new_text
+    msg.is_edited = 1
+  }
+}
+
+async function applyEdit(messageName: string, newText: string) {
+  try {
+    await call("helpdesk.integrations.evolution.edit_evolution_message", {
+      message_name: messageName,
+      new_text: newText,
+    })
+  } catch (e: any) {
+    toast.error(e?.messages?.[0] || "Could not save edit")
+  }
+}
+
 watch(messageList, () => {
   scrollToBottom();
 });
@@ -305,6 +327,7 @@ watch(messageList, () => {
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
   $socket.on("helpdesk:whatsapp-status-update", handleStatusUpdate);
+  $socket.on("helpdesk:whatsapp-message-edit", handleMessageEdit);
   scrollToBottom();
   markAsRead();
 });
@@ -312,5 +335,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
   $socket.off("helpdesk:whatsapp-status-update", handleStatusUpdate);
+  $socket.off("helpdesk:whatsapp-message-edit", handleMessageEdit);
 });
 </script>
