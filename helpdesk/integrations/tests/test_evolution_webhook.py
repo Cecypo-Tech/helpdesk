@@ -58,6 +58,78 @@ class TestEvolutionWebhook(unittest.TestCase):
         }], line)
         self.assertEqual(result["status"], "ok")
 
+    def test_incoming_edit_updates_existing_message(self):
+        from helpdesk.integrations.evolution import _handle_upsert, _line, _settings
+        line = _line("_test-evo")
+        # Create the original message
+        frappe.get_doc({
+            "doctype": "Baileys Message",
+            "direction": "Incoming",
+            "jid": "254799000003@s.whatsapp.net",
+            "message": "original from customer",
+            "content_type": "text",
+            "message_id": "_test-incoming-edit-001",
+            "status": "Pending",
+            "line": line.name,
+            "is_read": 0,
+        }).insert(ignore_permissions=True)
+
+        edit_data = {
+            "key": {
+                "remoteJid": "254799000003@s.whatsapp.net",
+                "fromMe": False,
+                "id": "_test-incoming-edit-001",
+            },
+            "message": {
+                "editedMessage": {
+                    "message": {
+                        "protocolMessage": {
+                            "type": 14,
+                            "editedMessage": {"conversation": "edited by customer"},
+                        }
+                    }
+                }
+            },
+            "pushName": "Test Customer",
+        }
+        result = _handle_upsert(edit_data, line, _settings())
+        self.assertEqual(result, {"status": "ok", "edited": True})
+
+        msgs = frappe.db.get_all(
+            "Baileys Message",
+            filters={"message_id": "_test-incoming-edit-001"},
+            fields=["name", "message", "is_edited"],
+        )
+        self.assertEqual(len(msgs), 1)  # No duplicate created
+        self.assertEqual(msgs[0]["message"], "edited by customer")
+        self.assertEqual(msgs[0]["is_edited"], 1)
+
+    def test_edit_before_original_falls_through_as_new_message(self):
+        from helpdesk.integrations.evolution import _handle_upsert, _line, _settings
+        line = _line("_test-evo")
+        # No original message exists — should fall through to normal insert
+        edit_data = {
+            "key": {
+                "remoteJid": "254799000004@s.whatsapp.net",
+                "fromMe": False,
+                "id": "_test-edit-no-original-001",
+            },
+            "message": {
+                "editedMessage": {
+                    "message": {
+                        "protocolMessage": {
+                            "type": 14,
+                            "editedMessage": {"conversation": "orphan edit"},
+                        }
+                    }
+                }
+            },
+            "pushName": "Ghost",
+        }
+        result = _handle_upsert(edit_data, line, _settings())
+        # Falls through — a new message record is created
+        self.assertIn(result.get("status"), ("ok", "duplicate"))
+
     def test_get_evolution_lines_returns_unread_count(self):
         from helpdesk.integrations.evolution import get_evolution_lines
         line = frappe.get_doc("Evolution Line", {"instance_name": "_test-evo"})

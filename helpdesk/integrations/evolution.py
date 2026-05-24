@@ -458,6 +458,16 @@ def _handle_upsert(data: dict, line, settings) -> dict:
             frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
             media_url = ""
 
+    # Detect and handle incoming edit before dedup check
+    new_text, is_edit = _extract_edit(raw_msg)
+    if is_edit and message_id:
+        existing = frappe.db.get_value("Baileys Message", {"message_id": message_id}, "name")
+        if existing:
+            frappe.set_user("Administrator")
+            _apply_edit(existing, new_text, edited_by="incoming", jid=jid, line=line)
+            return {"status": "ok", "edited": True}
+        # Fall through — original not yet stored (edge case: creates new record below)
+
     # Deduplicate
     if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):
         return {"status": "duplicate"}
