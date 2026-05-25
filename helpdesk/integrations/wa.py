@@ -891,16 +891,23 @@ def send_wa_media(
 @frappe.whitelist()
 def get_wa_lines() -> list[dict]:
     """Return all WA Lines with unread counts — used by the sidebar."""
+    if not frappe.db.exists("DocType", "WA Line"):
+        return []
     lines = frappe.get_all(
         "WA Line",
         fields=["name", "label", "instance_name"],
         order_by="label asc",
     )
+    wa_msg_exists = frappe.db.exists("DocType", "WA Message")
     for line in lines:
         line["display_label"] = line["label"] or line["instance_name"]
-        line["unread"] = frappe.db.count(
-            "WA Message",
-            {"line": line["name"], "direction": "Incoming", "is_read": 0},
+        line["unread"] = (
+            frappe.db.count(
+                "WA Message",
+                {"line": line["name"], "direction": "Incoming", "is_read": 0},
+            )
+            if wa_msg_exists
+            else 0
         )
     return lines
 
