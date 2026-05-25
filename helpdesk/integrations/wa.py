@@ -1331,7 +1331,7 @@ def configure_wa_webhook(line: str) -> dict:
 		frappe.throw(_("WA API not configured or disabled"))
 	line_doc = frappe.get_doc("WA Line", line)
 	site_url = frappe.utils.get_url().rstrip("/")
-	webhook_url = f"{site_url}/api/method/helpdesk.integrations.evolution.webhook"
+	webhook_url = f"{site_url}/api/method/helpdesk.integrations.wa.webhook"
 	payload = {
 		"webhook": {
 			"enabled": True,
@@ -1350,7 +1350,7 @@ def configure_wa_webhook(line: str) -> dict:
 			timeout=10,
 		)
 		resp.raise_for_status()
-		return {"status": "ok", "webhook_url": webhook_url, "data": resp.json()}
+		return {"status": "ok", "webhook_url": webhook_url, "data": resp.json() if resp.content else {}}
 	except Exception as e:
 		frappe.throw(_("Failed to configure webhook: {0}").format(str(e)))
 
