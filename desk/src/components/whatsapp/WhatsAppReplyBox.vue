@@ -220,7 +220,7 @@ function onPaste(e: ClipboardEvent) {
 }
 
 const sendReply = createResource({
-  url: "helpdesk.integrations.whatsapp.send_whatsapp_reply",
+  url: "helpdesk.integrations.wa.send_wa_reply",
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send message");
   },
@@ -250,7 +250,7 @@ async function send() {
     emit("sent");
 
     // Fire upload in background
-    fetch("/api/method/helpdesk.integrations.whatsapp.send_whatsapp_media", {
+    fetch("/api/method/helpdesk.integrations.wa.send_wa_media", {
       method: "POST",
       headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
       body: formData,

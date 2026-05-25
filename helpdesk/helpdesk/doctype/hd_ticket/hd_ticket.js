@@ -8,7 +8,7 @@ frappe.ui.form.on("HD Ticket", {
   },
   refresh(frm) {
     frappe.call({
-      method: "helpdesk.integrations.whatsapp.get_product_options",
+      method: "helpdesk.integrations.wa.get_product_options",
       callback(r) {
         if (!r.message || !r.message.length) return;
         const options = ["", ...r.message];

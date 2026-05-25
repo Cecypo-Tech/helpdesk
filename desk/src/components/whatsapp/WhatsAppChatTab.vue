@@ -126,28 +126,28 @@ const sendingTemplate = ref(false);
 const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
-  url: "helpdesk.integrations.whatsapp.get_whatsapp_messages",
+  url: "helpdesk.integrations.wa.get_whatsapp_messages",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const ticketInfo = createResource({
-  url: "helpdesk.integrations.whatsapp.get_ticket_whatsapp_info",
+  url: "helpdesk.integrations.wa.get_whatsapp_ticket_info",
   params: { ticket: props.ticketId },
   auto: true,
 });
 
 const markReadResource = createResource({
-  url: "helpdesk.integrations.whatsapp.mark_messages_read",
+  url: "helpdesk.integrations.wa.mark_wa_messages_read",
 });
 
 const templates = createResource({
-  url: "helpdesk.integrations.whatsapp.get_outgoing_templates",
+  url: "helpdesk.integrations.wa.get_outgoing_templates",
   auto: true,
 });
 
 const sendTemplateResource = createResource({
-  url: "helpdesk.integrations.whatsapp.send_template_to_ticket",
+  url: "helpdesk.integrations.wa.send_template_to_ticket",
   onSuccess() {
     sendingTemplate.value = false;
     selectedTemplate.value = "";
@@ -163,7 +163,7 @@ const sendTemplateResource = createResource({
 });
 
 const sendReactionResource = createResource({
-  url: "helpdesk.integrations.whatsapp.send_whatsapp_reaction",
+  url: "helpdesk.integrations.wa.send_wa_reaction",
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send reaction");
   },
@@ -174,7 +174,7 @@ function markAsRead() {
 }
 
 const pickUpResource = createResource({
-  url: "helpdesk.integrations.whatsapp.pickup_ticket",
+  url: "helpdesk.integrations.wa.pickup_whatsapp_ticket",
   onSuccess() {
     pickingUp.value = false;
     ticketInfo.reload();

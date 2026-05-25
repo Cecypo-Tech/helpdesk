@@ -1752,6 +1752,24 @@ def sync_wa_contacts() -> dict:
 
 
 @frappe.whitelist()
+def get_outgoing_templates() -> list[dict]:
+	"""Placeholder — template-outside-window feature not yet implemented for WA API."""
+	return []
+
+
+@frappe.whitelist()
+def send_template_to_ticket(ticket: str, template_name: str) -> dict:
+	"""Placeholder — template-outside-window feature not yet implemented for WA API."""
+	frappe.throw(_("Template sending outside the 24-hour window is not yet supported."))
+
+
+@frappe.whitelist()
+def get_product_options() -> list[str]:
+	"""Placeholder — product options feature not yet implemented for WA API."""
+	return []
+
+
+@frappe.whitelist()
 def sync_wa_groups() -> dict:
 	"""Fetch groups from all WA Lines and upsert group subjects into WA Contact."""
 	settings = _settings()
@@ -1760,6 +1778,7 @@ def sync_wa_groups() -> dict:
 
 	lines = frappe.get_all("WA Line", fields=["name", "instance_name", "instance_token"])
 	created = updated = 0
+
 
 	for line_row in lines:
 		line_doc = frappe._dict(line_row)
