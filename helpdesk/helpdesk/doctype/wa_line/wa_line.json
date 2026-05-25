@@ -23,7 +23,7 @@
    "label": "Label"
   },
   {
-   "description": "Must exactly match the instance name configured in Evolution API.",
+   "description": "Must exactly match the instance name configured in the WA API server.",
    "fieldname": "instance_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -32,7 +32,7 @@
    "unique": 1
   },
   {
-   "description": "Per-instance API token from Evolution API. Overrides the global API key when set.",
+   "description": "Per-instance API token. Overrides the global API key when set.",
    "fieldname": "instance_token",
    "fieldtype": "Data",
    "label": "Instance Token"

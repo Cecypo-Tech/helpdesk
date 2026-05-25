@@ -174,7 +174,7 @@ class TestWaWebhook(unittest.TestCase):
         self.assertEqual(len(updated.edit_history), 1)
         self.assertEqual(updated.edit_history[0].old_message, "original agent text")
 
-        # Verify correct Evolution API endpoint was called
+        # Verify correct WA API endpoint was called
         call_args = mock_req.put.call_args
         self.assertIn("updateMessage", call_args[0][0])
         payload = call_args[1]["json"]

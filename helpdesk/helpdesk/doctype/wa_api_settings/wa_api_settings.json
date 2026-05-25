@@ -44,7 +44,6 @@
    "label": "Enabled"
   },
   {
-   "description": "Evolution API v2 base URL, e.g. https://evolution.example.com",
    "fieldname": "server_url",
    "fieldtype": "Data",
    "label": "Server URL"
@@ -54,7 +53,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Evolution API global key \u2014 sent as apikey header.",
    "fieldname": "global_api_key",
    "fieldtype": "Data",
    "label": "Global API Key"
@@ -140,7 +138,7 @@
   },
   {
    "default": "1",
-   "description": "When enabled, appends ^XX (agent initials) to every outgoing Evolution API message.",
+   "description": "When enabled, appends ^XX (agent initials) to every outgoing WA message.",
    "fieldname": "append_agent_initials",
    "fieldtype": "Check",
    "label": "Append Agent Initials to Outgoing Messages"
