@@ -30,7 +30,7 @@ class TestWaWebhook(unittest.TestCase):
             "_test-media-reject-001",
             "_test-empty-reject-001",
         ]:
-            frappe.db.delete("Baileys Message", {"message_id": test_msg_id})
+            frappe.db.delete("WA Message", {"message_id": test_msg_id})
         frappe.db.commit()
 
     def tearDown(self):
@@ -41,7 +41,7 @@ class TestWaWebhook(unittest.TestCase):
         line = _line("_test-evo")
         # Create a test outgoing message
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Outgoing",
             "jid": "254712345678@s.whatsapp.net",
             "message": "test",
@@ -58,7 +58,7 @@ class TestWaWebhook(unittest.TestCase):
             "update": {"status": 3},   # DELIVERY_ACK → Delivered
         }], line)
 
-        updated_status = frappe.db.get_value("Baileys Message", msg.name, "status")
+        updated_status = frappe.db.get_value("WA Message", msg.name, "status")
         self.assertEqual(updated_status, "Delivered")
 
     def test_unknown_status_code_is_ignored(self):
@@ -76,7 +76,7 @@ class TestWaWebhook(unittest.TestCase):
         line = _line("_test-evo")
         # Create the original message
         frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Incoming",
             "jid": "254799000003@s.whatsapp.net",
             "message": "original from customer",
@@ -109,7 +109,7 @@ class TestWaWebhook(unittest.TestCase):
         self.assertEqual(result, {"status": "ok", "edited": True})
 
         msgs = frappe.db.get_all(
-            "Baileys Message",
+            "WA Message",
             filters={"message_id": "_test-incoming-edit-001"},
             fields=["name", "message", "is_edited"],
         )
@@ -148,7 +148,7 @@ class TestWaWebhook(unittest.TestCase):
         from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Outgoing",
             "jid": "254799000005@s.whatsapp.net",
             "message": "original agent text",
@@ -168,7 +168,7 @@ class TestWaWebhook(unittest.TestCase):
             result = edit_wa_message(msg.name, "updated agent text")
 
         self.assertEqual(result["status"], "ok")
-        updated = frappe.get_doc("Baileys Message", msg.name)
+        updated = frappe.get_doc("WA Message", msg.name)
         self.assertEqual(updated.message, "updated agent text")
         self.assertEqual(updated.is_edited, 1)
         self.assertEqual(len(updated.edit_history), 1)
@@ -186,7 +186,7 @@ class TestWaWebhook(unittest.TestCase):
         from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Incoming",
             "jid": "254799000006@s.whatsapp.net",
             "message": "customer text",
@@ -204,7 +204,7 @@ class TestWaWebhook(unittest.TestCase):
         from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Outgoing",
             "jid": "254799000007@s.whatsapp.net",
             "message": "",
@@ -222,7 +222,7 @@ class TestWaWebhook(unittest.TestCase):
         from helpdesk.integrations.wa import edit_wa_message, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Outgoing",
             "jid": "254799000008@s.whatsapp.net",
             "message": "some text",
@@ -242,7 +242,7 @@ class TestWaWebhook(unittest.TestCase):
         # Create 2 unread incoming messages
         for i in range(2):
             frappe.get_doc({
-                "doctype": "Baileys Message",
+                "doctype": "WA Message",
                 "direction": "Incoming",
                 "jid": f"2547{i}@s.whatsapp.net",
                 "message": f"msg {i}",
@@ -334,7 +334,7 @@ class TestApplyEdit(unittest.TestCase):
         from helpdesk.integrations.wa import _apply_edit, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Incoming",
             "jid": "254799000001@s.whatsapp.net",
             "message": "original text",
@@ -347,7 +347,7 @@ class TestApplyEdit(unittest.TestCase):
 
         _apply_edit(msg.name, "edited text", "incoming", msg.jid, line)
 
-        updated = frappe.get_doc("Baileys Message", msg.name)
+        updated = frappe.get_doc("WA Message", msg.name)
         self.assertEqual(updated.message, "edited text")
         self.assertEqual(updated.is_edited, 1)
         self.assertEqual(len(updated.edit_history), 1)
@@ -358,7 +358,7 @@ class TestApplyEdit(unittest.TestCase):
         from helpdesk.integrations.wa import _apply_edit, _line
         line = _line("_test-evo")
         msg = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Incoming",
             "jid": "254799000002@s.whatsapp.net",
             "message": "v1",
@@ -372,7 +372,7 @@ class TestApplyEdit(unittest.TestCase):
         _apply_edit(msg.name, "v2", "incoming", msg.jid, line)
         _apply_edit(msg.name, "v3", "incoming", msg.jid, line)
 
-        updated = frappe.get_doc("Baileys Message", msg.name)
+        updated = frappe.get_doc("WA Message", msg.name)
         self.assertEqual(updated.message, "v3")
         self.assertEqual(len(updated.edit_history), 2)
         messages_in_history = [r.old_message for r in updated.edit_history]

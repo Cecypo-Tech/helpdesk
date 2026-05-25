@@ -18,7 +18,7 @@
   "dt": "HD Ticket",
   "fieldname": "baileys_line",
   "fieldtype": "Link",
-  "options": "Evolution Line",
+  "options": "WA Line",
   "label": "WhatsApp Line",
   "insert_after": "baileys_jid",
   "read_only": 1,

@@ -151,7 +151,7 @@
    "fieldname": "edit_history",
    "fieldtype": "Table",
    "label": "Edit History",
-   "options": "Baileys Message Edit History",
+   "options": "WA Message Edit History",
    "read_only": 1
   }
  ],
@@ -159,7 +159,7 @@
  "modified": "2026-05-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
- "name": "Baileys Message",
+ "name": "WA Message",
  "owner": "Administrator",
  "permissions": [
   {

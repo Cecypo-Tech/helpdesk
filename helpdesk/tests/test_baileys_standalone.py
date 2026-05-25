@@ -20,7 +20,7 @@ class TestBaileysStandalone(FrappeTestCase):
 
 	def _make_message(self, jid="120363test@g.us", direction="Incoming", message="hello", content_type="text", msg_id=None):
 		doc = frappe.get_doc({
-			"doctype": "Baileys Message",
+			"doctype": "WA Message",
 			"jid": jid,
 			"direction": direction,
 			"message": message,
@@ -31,7 +31,7 @@ class TestBaileysStandalone(FrappeTestCase):
 			"status": "Delivered",
 		})
 		doc.insert(ignore_permissions=True)
-		self.addCleanup(frappe.delete_doc, "Baileys Message", doc.name, ignore_permissions=True, force=True)
+		self.addCleanup(frappe.delete_doc, "WA Message", doc.name, ignore_permissions=True, force=True)
 		return doc
 
 	def test_get_baileys_conversations_returns_one_per_jid(self):
@@ -108,9 +108,9 @@ class TestBaileysStandalone(FrappeTestCase):
 						pass
 
 		self.assertEqual(result.get("status"), "ok")
-		saved = frappe.db.get_value("Baileys Message", {"message_id": msg_id}, ["jid", "message"], as_dict=True)
+		saved = frappe.db.get_value("WA Message", {"message_id": msg_id}, ["jid", "message"], as_dict=True)
 		self.assertIsNotNone(saved)
 		self.assertEqual(saved.jid, jid)
 		tickets = frappe.get_all("HD Ticket", filters={"baileys_jid": jid})
 		self.assertEqual(len(tickets), 0)
-		frappe.db.delete("Baileys Message", {"message_id": msg_id})
+		frappe.db.delete("WA Message", {"message_id": msg_id})

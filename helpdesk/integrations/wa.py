@@ -76,7 +76,7 @@ def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
 
 def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) -> None:
     """Append old text to history, update message, publish realtime edit event."""
-    doc = frappe.get_doc("Baileys Message", msg_name)
+    doc = frappe.get_doc("WA Message", msg_name)
     if doc.message == new_text:
         return
     doc.append("edit_history", {
@@ -231,7 +231,7 @@ def _download_media_via_wa(line, full_data: dict) -> str:
 @frappe.whitelist()
 def refetch_media_for_message(message_name: str) -> str:
     """Re-download media for an existing Baileys Message via WA API. Returns new local URL."""
-    doc = frappe.get_doc("Baileys Message", message_name)
+    doc = frappe.get_doc("WA Message", message_name)
 
     if not doc.line or not doc.message_id:
         return ""
@@ -250,7 +250,7 @@ def refetch_media_for_message(message_name: str) -> str:
     }
     new_url = _download_media_via_wa(line, full_data)
     if new_url:
-        frappe.db.set_value("Baileys Message", message_name, "media_url", new_url)
+        frappe.db.set_value("WA Message", message_name, "media_url", new_url)
         frappe.db.commit()
         return new_url
     return ""
@@ -309,7 +309,7 @@ def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings
     quiet_minutes = int(settings.notification_quiet_minutes or 0)
     if quiet_minutes:
         recent_outgoing = frappe.db.count(
-            "Baileys Message",
+            "WA Message",
             filters={
                 "jid": jid,
                 "direction": "Outgoing",
@@ -463,7 +463,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
     # Detect and handle incoming edit before dedup check
     new_text, is_edit = _extract_edit(raw_msg)
     if is_edit and message_id:
-        existing = frappe.db.get_value("Baileys Message", {"message_id": message_id}, "name")
+        existing = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
         if existing:
             frappe.set_user("Administrator")
             _apply_edit(existing, new_text, edited_by="incoming", jid=jid, line=line)
@@ -471,7 +471,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
         # Fall through — original not yet stored (edge case: creates new record below)
 
     # Deduplicate
-    if message_id and frappe.db.exists("Baileys Message", {"message_id": message_id}):
+    if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
         return {"status": "duplicate"}
 
     frappe.set_user("Administrator")
@@ -481,7 +481,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
         if not frappe.db.exists("User", owner):
             owner = "Administrator"
         doc = frappe.get_doc({
-            "doctype": "Baileys Message",
+            "doctype": "WA Message",
             "direction": "Outgoing",
             "jid": jid,
             "sender_jid": "",
@@ -498,13 +498,13 @@ def _handle_upsert(data: dict, line, settings) -> dict:
             "line": line.name,
             "is_read": 1,
         }).insert(ignore_permissions=True)
-        frappe.db.set_value("Baileys Message", doc.name, "owner", owner, update_modified=False)
+        frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
         _publish_wa_event(jid, is_incoming=False, line=line.name)
         return {"status": "ok", "mirrored": True}
 
     # Incoming message
     frappe.get_doc({
-        "doctype": "Baileys Message",
+        "doctype": "WA Message",
         "direction": "Incoming",
         "jid": jid,
         "sender_jid": sender,
@@ -560,10 +560,10 @@ def _handle_update(updates: list, line) -> dict:
         status = _STATUS_MAP.get(raw_status) if raw_status is not None else None
         if not message_id or not status:
             continue
-        msg_name = frappe.db.get_value("Baileys Message", {"message_id": message_id}, "name")
+        msg_name = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
         if not msg_name:
             continue
-        frappe.db.set_value("Baileys Message", msg_name, "status", status, update_modified=False)
+        frappe.db.set_value("WA Message", msg_name, "status", status, update_modified=False)
         frappe.db.commit()
         frappe.publish_realtime(
             "helpdesk:baileys-status-update",
@@ -605,7 +605,7 @@ def send_wa_reply(
     if not line_name:
         # Fallback: find most recent message for this JID
         line_name = frappe.db.get_value(
-            "Baileys Message",
+            "WA Message",
             {"jid": jid, "line": ["is", "set"]},
             "line",
             order_by="creation desc",
@@ -627,7 +627,7 @@ def send_wa_reply(
     quoted_key: dict | None = None
     if reply_to_message_id:
         target = frappe.db.get_value(
-            "Baileys Message",
+            "WA Message",
             {"message_id": reply_to_message_id},
             ["message_id", "direction", "sender_jid"],
             as_dict=True,
@@ -690,7 +690,7 @@ def send_wa_reply(
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     msg_doc = frappe.get_doc({
-        "doctype": "Baileys Message",
+        "doctype": "WA Message",
         "direction": "Outgoing",
         "jid": jid,
         "sender_jid": "",
@@ -742,7 +742,7 @@ def send_wa_reaction(
 
     line_name = (
         frappe.db.get_value("HD Ticket", ticket, "baileys_line") if ticket
-        else frappe.db.get_value("Baileys Message",
+        else frappe.db.get_value("WA Message",
                                   {"jid": jid, "line": ["is", "set"]},
                                   "line", order_by="creation desc")
     )
@@ -751,7 +751,7 @@ def send_wa_reaction(
     line = frappe.get_doc("WA Line", line_name)
 
     target_msg = frappe.db.get_value(
-        "Baileys Message",
+        "WA Message",
         {"message_id": target_message_id},
         ["message_id", "jid", "direction"],
         as_dict=True,
@@ -780,7 +780,7 @@ def send_wa_reaction(
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     frappe.get_doc({
-        "doctype": "Baileys Message",
+        "doctype": "WA Message",
         "direction": "Outgoing",
         "jid": jid,
         "sender_name": sender_name,
@@ -804,7 +804,7 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
     if not settings.enabled:
         frappe.throw(_("WA API is not enabled."))
 
-    doc = frappe.get_doc("Baileys Message", message_name)
+    doc = frappe.get_doc("WA Message", message_name)
 
     if doc.direction != "Outgoing":
         frappe.throw(_("Only outgoing messages can be edited."))
@@ -899,7 +899,7 @@ def get_wa_lines() -> list[dict]:
     for line in lines:
         line["display_label"] = line["label"] or line["instance_name"]
         line["unread"] = frappe.db.count(
-            "Baileys Message",
+            "WA Message",
             {"line": line["name"], "direction": "Incoming", "is_read": 0},
         )
     return lines
@@ -911,7 +911,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
     from frappe.query_builder import DocType
     from frappe.query_builder.functions import Max
 
-    BM = DocType("Baileys Message")
+    BM = DocType("WA Message")
 
     q = (
         frappe.qb.from_(BM)
@@ -923,7 +923,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
 
     latest = q.groupby(BM.jid)
 
-    BM2 = DocType("Baileys Message")
+    BM2 = DocType("WA Message")
     rows = (
         frappe.qb.from_(BM2)
         .join(latest).on(
@@ -1014,9 +1014,9 @@ def mark_wa_messages_read(jid: str = "", ticket: str = "") -> int:
         return 0
 
     filters: dict = {"jid": jid, "direction": "Incoming", "is_read": 0}
-    unread = frappe.get_all("Baileys Message", filters=filters, fields=["name"])
+    unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
     for row in unread:
-        frappe.db.set_value("Baileys Message", row.name, "is_read", 1, update_modified=False)
+        frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
 
     if unread:
         frappe.db.commit()
@@ -1030,9 +1030,9 @@ def mark_all_wa_messages_read(line: str) -> int:
     if not line:
         return 0
     filters: dict = {"line": line, "direction": "Incoming", "is_read": 0}
-    unread = frappe.get_all("Baileys Message", filters=filters, fields=["name"])
+    unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
     for row in unread:
-        frappe.db.set_value("Baileys Message", row.name, "is_read", 1, update_modified=False)
+        frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
     if unread:
         frappe.db.commit()
     return len(unread)
@@ -1118,7 +1118,7 @@ def get_contact_info_for_jid(jid: str) -> dict:
     display_name = contact.get("custom_name") or ""
     if not display_name:
         display_name = frappe.db.get_value(
-            "Baileys Message",
+            "WA Message",
             {"jid": jid, "direction": "Incoming"},
             "profile_name",
             order_by="creation desc",
@@ -1275,7 +1275,7 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 	if not jid:
 		return []
 
-	BM = DocType("Baileys Message")
+	BM = DocType("WA Message")
 	User = DocType("User")
 	BC = DocType("WA Contact")
 
@@ -1307,7 +1307,7 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 	edited_names = [m["name"] for m in rows if m.get("is_edited")]
 	if edited_names:
 		history_rows = frappe.db.get_all(
-			"Baileys Message Edit History",
+			"WA Message Edit History",
 			filters={"parent": ["in", edited_names]},
 			fields=["parent", "old_message", "edited_at", "edited_by"],
 			order_by="edited_at asc",
@@ -1526,7 +1526,7 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 			SUM(direction = 'Incoming') as incoming,
 			SUM(direction = 'Outgoing') as outgoing,
 			COUNT(DISTINCT jid) as conversations
-		FROM `tabBaileys Message`
+		FROM `tabWA Message`
 		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
 		  {line_filter}
@@ -1542,7 +1542,7 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 			COUNT(*) as total,
 			SUM(direction = 'Incoming') as incoming,
 			SUM(direction = 'Outgoing') as outgoing
-		FROM `tabBaileys Message`
+		FROM `tabWA Message`
 		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
 		  {line_filter}
@@ -1556,7 +1556,7 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 	hourly = frappe.db.sql(
 		f"""
 		SELECT HOUR(creation) as hour, COUNT(*) as total
-		FROM `tabBaileys Message`
+		FROM `tabWA Message`
 		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND content_type != 'reaction'
 		  {line_filter}
@@ -1577,7 +1577,7 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 			SUM(direction = 'Incoming') as incoming,
 			SUM(direction = 'Outgoing') as outgoing,
 			MAX(sender_name) as sender_name
-		FROM `tabBaileys Message`
+		FROM `tabWA Message`
 		WHERE creation BETWEEN %(from_dt)s AND %(to_dt)s
 		  AND jid NOT LIKE '%%@broadcast'
 		  AND content_type != 'reaction'
@@ -1632,14 +1632,14 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 			bm_out.owner AS agent_user,
 			bm_out.sender_name AS agent_name,
 			TIMESTAMPDIFF(MINUTE, bm_in.creation, bm_out.creation) AS response_minutes
-		FROM `tabBaileys Message` bm_out
-		INNER JOIN `tabBaileys Message` bm_in ON (
+		FROM `tabWA Message` bm_out
+		INNER JOIN `tabWA Message` bm_in ON (
 			bm_in.jid = bm_out.jid
 			AND bm_in.direction = 'Incoming'
 			AND bm_in.content_type != 'reaction'
 			AND bm_in.creation = (
 				SELECT MAX(b2.creation)
-				FROM `tabBaileys Message` b2
+				FROM `tabWA Message` b2
 				WHERE b2.jid = bm_out.jid
 				  AND b2.direction = 'Incoming'
 				  AND b2.content_type != 'reaction'

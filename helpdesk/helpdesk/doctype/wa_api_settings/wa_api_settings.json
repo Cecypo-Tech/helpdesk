@@ -177,7 +177,7 @@
  "modified": "2026-05-22 22:52:38.483752",
  "modified_by": "Administrator",
  "module": "Helpdesk",
- "name": "Evolution API Settings",
+ "name": "WA API Settings",
  "owner": "Administrator",
  "permissions": [
   {

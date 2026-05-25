@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class BaileysMessage(Document):
+class WaMessage(Document):
 	pass
