@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class EvolutionAPISettings(Document):
+class WaApiSettings(Document):
 	pass
