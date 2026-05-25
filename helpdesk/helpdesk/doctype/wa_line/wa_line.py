@@ -2,7 +2,7 @@ import frappe
 from frappe.model.document import Document
 
 
-class WaLine(Document):
+class WALine(Document):
 	def after_insert(self):
 		self._configure_webhook()
 

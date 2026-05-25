@@ -1,5 +1,5 @@
 from frappe.model.document import Document
 
 
-class WaApiSettings(Document):
+class WAAPISettings(Document):
 	pass
