@@ -119,6 +119,99 @@ def _agent_initials() -> str:
     return parts[0][0].upper() if parts else frappe.session.user[:2].upper()
 
 
+def _fw_settings():
+    """Return WhatsApp Helpdesk Settings (frappe_whatsapp integration config), or None."""
+    if not frappe.db.exists("DocType", "WhatsApp Helpdesk Settings"):
+        return None
+    try:
+        return frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+    except Exception:
+        return None
+
+
+def _fw_allow_template_outside_window() -> bool:
+    s = _fw_settings()
+    return bool(s and s.allow_template_outside_window) if s else False
+
+
+def match_phone_to_contact(phone: str) -> str | None:
+    """Match a raw phone number to a Frappe Contact name."""
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return None
+    contacts = frappe.get_all(
+        "Contact",
+        fields=["name", "phone", "mobile_no"],
+        or_filters={"phone": ("is", "set"), "mobile_no": ("is", "set")},
+    )
+    for c in contacts:
+        if _normalize_phone(c.phone) == normalized or _normalize_phone(c.mobile_no) == normalized:
+            return c.name
+    for row in frappe.get_all("Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}):
+        if _normalize_phone(row.phone) == normalized:
+            return row.parent
+    return None
+
+
+def get_contact_phone(ticket: str) -> str | None:
+    """Resolve a phone number for the contact linked to an HD Ticket."""
+    contact_name = frappe.db.get_value("HD Ticket", ticket, "contact")
+    if contact_name:
+        phone = frappe.db.get_value("Contact", contact_name, "mobile_no") or frappe.db.get_value("Contact", contact_name, "phone")
+        if phone:
+            return phone
+    from frappe.query_builder import DocType as _DocType
+    WM = _DocType("WhatsApp Message")
+    result = (
+        frappe.qb.from_(WM)
+        .select(WM["from"])
+        .where(WM.reference_doctype == "HD Ticket")
+        .where(WM.reference_name == ticket)
+        .where(WM.type == "Incoming")
+        .orderby(WM.creation, order=frappe.qb.desc)
+        .limit(1)
+        .run()
+    )
+    return result[0][0] if result else None
+
+
+def _publish_fw_message(ticket_name: str, is_incoming: bool) -> None:
+    """Publish realtime event for a frappe_whatsapp message linked to a ticket."""
+    frappe.db.commit()
+    frappe.publish_realtime(
+        "helpdesk:whatsapp-message",
+        message={"ticket": str(ticket_name), "is_incoming": is_incoming},
+    )
+
+
+def _notify_fw_agents(ticket_name: str, message: str | None, profile_name: str) -> None:
+    """Create HD Notification for agents assigned to a frappe_whatsapp ticket."""
+    assign_json = frappe.db.get_value("HD Ticket", ticket_name, "_assign") or "[]"
+    assignees = frappe.parse_json(assign_json) or []
+    if not assignees:
+        return
+    preview = (message or "")[:80] or "sent a WhatsApp message"
+    existing = frappe.get_all(
+        "HD Notification",
+        filters={"reference_ticket": ticket_name, "notification_type": "WhatsApp", "read": 0},
+        pluck="user_to",
+    )
+    for agent in assignees:
+        if agent in existing:
+            continue
+        try:
+            frappe.get_doc({
+                "doctype": "HD Notification",
+                "user_from": "Administrator",
+                "user_to": agent,
+                "notification_type": "WhatsApp",
+                "reference_ticket": ticket_name,
+                "message": f"{profile_name}: {preview}",
+            }).insert(ignore_permissions=True)
+        except Exception:
+            pass
+
+
 def _is_blocked(jid: str, sender: str, line) -> bool:
     blocked = line.get("blocked_jids") or []
     phone = _phone_from_jid(sender or jid)
@@ -588,7 +681,17 @@ def send_wa_reply(
     reply_to_from_me: bool = False,
     mentioned_jids: str | None = None,
 ) -> dict:
-    """Send a text reply via WA API."""
+    """Send a text reply via WA API (Baileys) or frappe_whatsapp depending on ticket type."""
+    # ── frappe_whatsapp path ─────────────────────────────────────────────────
+    if ticket and not jid:
+        try:
+            jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+        except Exception:
+            pass
+        if not jid:
+            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type)
+
+    # ── Baileys/WA path ──────────────────────────────────────────────────────
     settings = _settings()
     if not settings.enabled:
         frappe.throw(_("WA API is not enabled."))
@@ -1014,21 +1117,48 @@ def get_wa_conversations(line: str = "") -> list[dict]:
 
 @frappe.whitelist()
 def mark_wa_messages_read(jid: str = "", ticket: str = "") -> int:
-    """Mark all unread incoming Baileys Messages for a JID as read."""
+    """Mark all unread incoming messages as read (Baileys or frappe_whatsapp)."""
     if not jid and ticket:
-        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
-    if not jid:
+        try:
+            jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+        except Exception:
+            pass
+
+    if jid:
+        # Baileys path
+        filters: dict = {"jid": jid, "direction": "Incoming", "is_read": 0}
+        unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
+        for row in unread:
+            frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
+        if unread:
+            frappe.db.commit()
+        return len(unread)
+
+    if not ticket or not frappe.db.exists("DocType", "WhatsApp Message"):
         return 0
 
-    filters: dict = {"jid": jid, "direction": "Incoming", "is_read": 0}
-    unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
-    for row in unread:
-        frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
-
-    if unread:
-        frappe.db.commit()
-
-    return len(unread)
+    # frappe_whatsapp path: send read receipts
+    count = 0
+    unread_fw = frappe.get_all(
+        "WhatsApp Message",
+        filters={
+            "reference_doctype": "HD Ticket",
+            "reference_name": ticket,
+            "type": "Incoming",
+            "status": ["!=", "marked as read"],
+        },
+        fields=["name", "message_id"],
+    )
+    for row in unread_fw:
+        if not row.message_id:
+            continue
+        try:
+            msg_doc = frappe.get_doc("WhatsApp Message", row.name)
+            msg_doc.send_read_receipt()
+            count += 1
+        except Exception:
+            pass
+    return count
 
 
 @frappe.whitelist()
@@ -1274,61 +1404,259 @@ def get_wa_qr(line: str) -> dict:
 
 @frappe.whitelist()
 def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
-	"""Return messages for a conversation. Accepts jid directly or ticket name."""
+	"""Return messages for a conversation.
+
+	Baileys/WA path: looks up baileys_jid from ticket and queries WA Message.
+	frappe_whatsapp path: queries WhatsApp Message where reference_name = ticket.
+	"""
 	from frappe.query_builder import DocType
 
+	# ── Baileys/WA path ──────────────────────────────────────────────────────
 	if not jid and ticket:
-		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
-	if not jid:
+		try:
+			jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+		except Exception:
+			pass  # column may not exist on sites without the Baileys custom field
+
+	if jid:
+		BM = DocType("WA Message")
+		User = DocType("User")
+		BC = DocType("WA Contact")
+
+		rows = (
+			frappe.qb.from_(BM)
+			.left_join(User).on(User.name == BM.owner)
+			.left_join(BC).on(BC.jid == BM.sender_jid)
+			.select(
+				BM.name, BM.creation, BM.direction, BM.jid, BM.message,
+				BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
+				BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
+				User.full_name.as_("sender_full_name"),
+				BC.phone.as_("sender_phone"),
+				BM.is_edited,
+			)
+			.where(BM.jid == jid)
+			.orderby(BM.creation)
+			.run(as_dict=True)
+		)
+
+		for m in rows:
+			if m.get("creation") and not isinstance(m["creation"], str):
+				m["creation"] = str(m["creation"])
+			m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
+			m["attach"] = m.get("media_url") or ""
+			m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
+			m["edit_history"] = []
+
+		edited_names = [m["name"] for m in rows if m.get("is_edited")]
+		if edited_names:
+			history_rows = frappe.db.get_all(
+				"WA Message Edit History",
+				filters={"parent": ["in", edited_names]},
+				fields=["parent", "old_message", "edited_at", "edited_by"],
+				order_by="edited_at asc",
+			)
+			history_map: dict = {}
+			for h in history_rows:
+				if h.get("edited_at") and not isinstance(h["edited_at"], str):
+					h["edited_at"] = str(h["edited_at"])
+				history_map.setdefault(h["parent"], []).append(h)
+			for m in rows:
+				if m.get("is_edited"):
+					m["edit_history"] = history_map.get(m["name"], [])
+
+		return rows
+
+	# ── frappe_whatsapp path ─────────────────────────────────────────────────
+	if not ticket or not frappe.db.exists("DocType", "WhatsApp Message"):
 		return []
 
-	BM = DocType("WA Message")
+	WM = DocType("WhatsApp Message")
 	User = DocType("User")
-	BC = DocType("WA Contact")
 
 	rows = (
-		frappe.qb.from_(BM)
-		.left_join(User).on(User.name == BM.owner)
-		.left_join(BC).on(BC.jid == BM.sender_jid)
+		frappe.qb.from_(WM)
+		.left_join(User).on(User.name == WM.owner)
 		.select(
-			BM.name, BM.creation, BM.direction, BM.jid, BM.message,
-			BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
-			BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
+			WM.name, WM.creation, WM.type, WM.message, WM.content_type,
+			WM.attach, WM.status, WM.profile_name, WM.message_id,
+			WM.reply_to_message_id, WM.is_reply, WM.owner,
+			WM["from"], WM["to"],
 			User.full_name.as_("sender_full_name"),
-			BC.phone.as_("sender_phone"),
-			BM.is_edited,
 		)
-		.where(BM.jid == jid)
-		.orderby(BM.creation)
+		.where(WM.reference_doctype == "HD Ticket")
+		.where(WM.reference_name == ticket)
+		.orderby(WM.creation)
 		.run(as_dict=True)
 	)
 
 	for m in rows:
 		if m.get("creation") and not isinstance(m["creation"], str):
 			m["creation"] = str(m["creation"])
-		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
-		m["attach"] = m.get("media_url") or ""
-		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
+		# Normalise field names to match the Baileys shape the UI expects
+		m["direction"] = m["type"]
+		m["media_url"] = m.get("attach") or ""
 		m["edit_history"] = []
-
-	edited_names = [m["name"] for m in rows if m.get("is_edited")]
-	if edited_names:
-		history_rows = frappe.db.get_all(
-			"WA Message Edit History",
-			filters={"parent": ["in", edited_names]},
-			fields=["parent", "old_message", "edited_at", "edited_by"],
-			order_by="edited_at asc",
-		)
-		history_map: dict = {}
-		for h in history_rows:
-			if h.get("edited_at") and not isinstance(h["edited_at"], str):
-				h["edited_at"] = str(h["edited_at"])
-			history_map.setdefault(h["parent"], []).append(h)
-		for m in rows:
-			if m.get("is_edited"):
-				m["edit_history"] = history_map.get(m["name"], [])
+		m["is_edited"] = 0
 
 	return rows
+
+
+# ── frappe_whatsapp integration handlers ──────────────────────────────────────
+
+def _send_fw_reply(ticket: str, message: str, content_type: str = "text") -> dict:
+	"""Create an Outgoing WhatsApp Message via frappe_whatsapp for this ticket."""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		frappe.throw(_("frappe_whatsapp is not installed."))
+	phone = get_contact_phone(ticket)
+	if not phone:
+		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+	msg_doc = frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"message": message,
+		"content_type": content_type,
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	})
+	msg_doc.insert(ignore_permissions=True)
+	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+	if not frappe.parse_json(assign_json):
+		try:
+			frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
+		except Exception:
+			pass
+	s = _fw_settings()
+	if s and s.enabled and s.agent_reply_status:
+		_set_ticket_status(ticket, s.agent_reply_status)
+	return {"name": msg_doc.name, "status": msg_doc.status}
+
+
+def on_whatsapp_message_update(doc, method=None):
+	"""Publish status changes for frappe_whatsapp messages linked to HD Tickets."""
+	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
+		return
+	before = doc.get_doc_before_save()
+	if before and before.status == doc.status:
+		return
+	frappe.db.commit()
+	frappe.publish_realtime(
+		"helpdesk:whatsapp-status-update",
+		message={
+			"ticket": str(doc.reference_name),
+			"message_name": doc.name,
+			"status": doc.status or "",
+		},
+	)
+
+
+def on_whatsapp_message_insert(doc, method=None):
+	"""Create or link an HD Ticket when a frappe_whatsapp message arrives."""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return
+
+	s = _fw_settings()
+	if not s or not s.enabled:
+		return
+
+	# Outgoing: link to ticket and update status
+	if doc.type != "Incoming":
+		if doc.reference_doctype == "HD Ticket" and doc.reference_name:
+			if s.agent_reply_status:
+				_set_ticket_status(doc.reference_name, s.agent_reply_status)
+			_publish_fw_message(doc.reference_name, is_incoming=False)
+		return
+
+	phone = _normalize_phone(doc.get("from") or "")
+	if not phone:
+		return
+
+	contact_name = match_phone_to_contact(phone)
+	placeholder_domain = s.placeholder_email_domain or "whatsapp.placeholder.local"
+	profile_name = doc.profile_name or f"WhatsApp User {phone}"
+
+	if not contact_name:
+		action = s.unknown_contact_action or "Skip Ticket Creation"
+		if action == "Skip Ticket Creation":
+			return
+		if action == "Create Contact and Ticket":
+			original_user = frappe.session.user
+			frappe.set_user("Administrator")
+			try:
+				c = frappe.get_doc({
+					"doctype": "Contact",
+					"first_name": profile_name,
+					"phone_nos": [{"doctype": "Contact Phone", "phone": phone, "is_primary_mobile_no": 1}],
+				})
+				c.insert(ignore_permissions=True)
+				contact_name = c.name
+			finally:
+				frappe.set_user(original_user)
+
+	if contact_name:
+		email = frappe.db.get_value("Contact", contact_name, "email_id") or f"whatsapp+{phone}@{placeholder_domain}"
+	else:
+		email = f"whatsapp+{phone}@{placeholder_domain}"
+
+	# Find an existing open ticket for this phone number
+	from frappe.query_builder import DocType as _DocType
+	WM = _DocType("WhatsApp Message")
+	linked = (
+		frappe.qb.from_(WM)
+		.select(WM.reference_name, WM.creation)
+		.where(WM.reference_doctype == "HD Ticket")
+		.where(WM.type == "Incoming")
+		.where(WM["from"] == doc.get("from"))
+		.orderby(WM.creation, order=frappe.qb.desc)
+		.limit(1)
+		.run(as_dict=True)
+	)
+
+	existing_ticket = None
+	if linked and linked[0].reference_name:
+		candidate = linked[0].reference_name
+		status_category = frappe.db.get_value("HD Ticket", candidate, "status_category")
+		if status_category and status_category != "Resolved":
+			timeout = int(s.new_conversation_timeout_hours or 24)
+			if time_diff_in_hours(now_datetime(), linked[0].creation) < timeout:
+				existing_ticket = candidate
+
+	if existing_ticket:
+		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
+		doc.db_set("reference_name", existing_ticket, update_modified=False)
+		if s.customer_reply_status:
+			_set_ticket_status(existing_ticket, s.customer_reply_status)
+		_notify_fw_agents(existing_ticket, doc.message, profile_name)
+		_publish_fw_message(existing_ticket, is_incoming=True)
+	else:
+		subject = (doc.message or "")[:100] or f"WhatsApp from {profile_name}"
+		ticket_data = {
+			"doctype": "HD Ticket",
+			"subject": subject,
+			"raised_by": email,
+			"description": doc.message or "",
+			"via_customer_portal": 0,
+		}
+		if contact_name:
+			ticket_data["contact"] = contact_name
+		if s.default_ticket_type:
+			ticket_data["ticket_type"] = s.default_ticket_type
+		if s.default_team:
+			ticket_data["agent_group"] = s.default_team
+
+		original_user = frappe.session.user
+		frappe.set_user("Administrator")
+		try:
+			ticket_doc = frappe.get_doc(ticket_data)
+			ticket_doc.insert(ignore_permissions=True)
+		finally:
+			frappe.set_user(original_user)
+
+		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
+		doc.db_set("reference_name", ticket_doc.name, update_modified=False)
+		_notify_fw_agents(ticket_doc.name, doc.message, profile_name)
+		_publish_fw_message(ticket_doc.name, is_incoming=True)
 
 
 @frappe.whitelist()
@@ -1464,27 +1792,70 @@ def get_customer_notes(customer: str) -> dict:
 
 @frappe.whitelist()
 def get_whatsapp_ticket_info(ticket: str) -> dict:
-	"""Return WhatsApp metadata for the ticket activity tab."""
-	jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
-	if not jid:
+	"""Return WhatsApp metadata for the ticket activity tab.
+
+	Handles two paths:
+	  - Baileys/WA tickets: HD Ticket has baileys_jid custom field
+	  - frappe_whatsapp tickets: WhatsApp Message docs linked via reference_name
+	"""
+	# ── Baileys/WA path ──────────────────────────────────────────────────────
+	jid = None
+	try:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	except Exception:
+		pass  # column may not exist on fresh sites without Baileys custom field
+
+	if jid:
+		is_grp = _is_group(jid)
+		group_name = None
+		if is_grp:
+			group_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or jid.split("@")[0]
+		assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+		assigned_users = frappe.parse_json(assign_json) or []
+		return {
+			"has_whatsapp": True,
+			"jid": jid,
+			"is_group": is_grp,
+			"group_name": group_name,
+			"is_assigned": frappe.session.user in assigned_users,
+			"assignees": assigned_users,
+			"reply_window_open": True,
+		}
+
+	# ── frappe_whatsapp path ─────────────────────────────────────────────────
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		return {"has_whatsapp": False}
 
-	is_grp = _is_group(jid)
-	group_name = None
-	if is_grp:
-		group_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or jid.split("@")[0]
+	has_msg = frappe.db.exists("WhatsApp Message", {
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	})
+	if not has_msg:
+		return {"has_whatsapp": False}
+
+	# Determine if the 24-hour reply window is open
+	last_incoming = frappe.db.get_value(
+		"WhatsApp Message",
+		{"reference_doctype": "HD Ticket", "reference_name": ticket, "type": "Incoming"},
+		"creation",
+		order_by="creation desc",
+	)
+	window_open = True
+	if last_incoming:
+		window_open = time_diff_in_hours(now_datetime(), last_incoming) < 24
 
 	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
 	assigned_users = frappe.parse_json(assign_json) or []
 
 	return {
 		"has_whatsapp": True,
-		"jid": jid,
-		"is_group": is_grp,
-		"group_name": group_name,
+		"jid": None,
+		"is_group": False,
 		"is_assigned": frappe.session.user in assigned_users,
 		"assignees": assigned_users,
-		"reply_window_open": True,
+		"reply_window_open": window_open,
+		"allow_template_outside_window": _fw_allow_template_outside_window(),
+		"via_frappe_whatsapp": True,
 	}
 
 
