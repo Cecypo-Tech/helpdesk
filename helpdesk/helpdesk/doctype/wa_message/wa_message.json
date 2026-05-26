@@ -126,7 +126,8 @@
    "label": "WA Line",
    "options": "WA Line",
    "in_list_view": 0,
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "default": "0",
