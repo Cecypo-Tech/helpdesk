@@ -2242,15 +2242,45 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 
 
 @frappe.whitelist()
+def enqueue_wa_sync() -> dict:
+	"""Queue a background job that runs sync_wa_contacts then sync_wa_groups."""
+	frappe.enqueue(
+		"helpdesk.integrations.wa._run_wa_sync_job",
+		queue="long",
+		timeout=300,
+		now=False,
+	)
+	return {"status": "queued"}
+
+
+def _run_wa_sync_job() -> None:
+	"""Background job: sync contacts then groups, emit realtime event when done."""
+	try:
+		contact_result = sync_wa_contacts()
+		group_result = sync_wa_groups()
+		frappe.publish_realtime(
+			"helpdesk:wa-sync-complete",
+			message={
+				"contacts": contact_result.get("total", 0),
+				"groups": group_result.get("total", 0),
+			},
+		)
+	except Exception as exc:
+		frappe.log_error(str(exc), "WA Sync Job Failed")
+		frappe.publish_realtime(
+			"helpdesk:wa-sync-complete",
+			message={"error": str(exc)},
+		)
+
+
+@frappe.whitelist()
 def sync_wa_contacts() -> dict:
-	"""Upsert WA Contacts from local WA Message sender history.
-	The contacts/fetchContacts API endpoint is not available on all Evolution API versions,
-	so this extracts unique senders from stored messages instead."""
+	"""Upsert WA Contacts from local WA Message sender history using a single bulk SQL."""
 	rows = frappe.db.sql(
 		"""
 		SELECT sender_jid,
-		       MAX(sender_name) AS sender_name,
-		       MAX(profile_name) AS profile_name
+		       MAX(sender_name)   AS sender_name,
+		       MAX(profile_name)  AS profile_name
 		FROM `tabWA Message`
 		WHERE direction = 'Incoming'
 		  AND sender_jid IS NOT NULL AND sender_jid != ''
@@ -2260,33 +2290,31 @@ def sync_wa_contacts() -> dict:
 		""",
 		as_dict=True,
 	)
+	if not rows:
+		return {"created": 0, "updated": 0, "total": 0}
 
-	created = updated = 0
+	values = []
 	for row in rows:
 		jid = row.sender_jid
 		name = row.sender_name or row.profile_name or ""
 		phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
-		if frappe.db.exists("WA Contact", {"jid": jid}):
-			existing = frappe.db.get_value("WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True) or {}
-			updates = {}
-			if not existing.get("custom_name") and name:
-				updates["custom_name"] = name
-			if not existing.get("phone") and phone:
-				updates["phone"] = phone
-			if updates:
-				frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
-				updated += 1
-		else:
-			frappe.get_doc({
-				"doctype": "WA Contact",
-				"jid": jid,
-				"phone": phone,
-				"custom_name": name,
-			}).insert(ignore_permissions=True)
-			created += 1
+		doc_name = frappe.generate_hash(length=10)
+		values.append((doc_name, jid, phone, name))
 
+	placeholders = ", ".join(["(%s, %s, %s, %s, '', '')" for _ in values])
+	flat_values = tuple(item for v in values for item in v)
+	frappe.db.sql(
+		"""
+		INSERT INTO `tabWA Contact` (name, jid, phone, custom_name, company, assigned_team)
+		VALUES {placeholders}
+		ON DUPLICATE KEY UPDATE
+		    custom_name = IF(custom_name IS NULL OR custom_name = '', VALUES(custom_name), custom_name),
+		    phone       = IF(phone IS NULL OR phone = '', VALUES(phone), phone)
+		""".format(placeholders=placeholders),
+		flat_values,
+	)
 	frappe.db.commit()
-	return {"created": created, "updated": updated, "total": created + updated}
+	return {"created": len(values), "updated": 0, "total": len(values)}
 
 
 @frappe.whitelist()
