@@ -690,7 +690,7 @@ def send_wa_reply(
         except Exception:
             pass
         if not jid:
-            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type)
+            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type, media_url=media_url)
 
     # ── Baileys/WA path ──────────────────────────────────────────────────────
     settings = _settings()
@@ -1237,7 +1237,10 @@ def get_tasks_for_jid(jid: str) -> list[dict]:
     """Return HD Tasks linked (via ticket) to the WhatsApp JID."""
     if not jid:
         return []
-    tickets = frappe.get_all("HD Ticket", filters={"baileys_jid": jid}, pluck="name")
+    try:
+        tickets = frappe.get_all("HD Ticket", filters={"baileys_jid": jid}, pluck="name")
+    except Exception:
+        return []
     if not tickets:
         return []
     return frappe.get_all(
@@ -1281,12 +1284,15 @@ def get_tickets_for_jid(jid: str) -> list[dict]:
     """Return HD Tickets linked to the WhatsApp JID."""
     if not jid:
         return []
-    return frappe.get_all(
-        "HD Ticket",
-        filters={"baileys_jid": jid},
-        fields=["name", "subject", "status", "priority", "creation"],
-        order_by="creation desc",
-    )
+    try:
+        return frappe.get_all(
+            "HD Ticket",
+            filters={"baileys_jid": jid},
+            fields=["name", "subject", "status", "priority", "creation"],
+            order_by="creation desc",
+        )
+    except Exception:
+        return []
 
 
 @frappe.whitelist()
@@ -1512,7 +1518,7 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 
 # ── frappe_whatsapp integration handlers ──────────────────────────────────────
 
-def _send_fw_reply(ticket: str, message: str, content_type: str = "text") -> dict:
+def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None) -> dict:
 	"""Create an Outgoing WhatsApp Message via frappe_whatsapp for this ticket."""
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		frappe.throw(_("frappe_whatsapp is not installed."))
@@ -1525,6 +1531,7 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text") -> dic
 		"to": phone,
 		"message": message,
 		"content_type": content_type,
+		"attach": media_url or "",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
 	})
@@ -2273,12 +2280,13 @@ def sync_wa_groups() -> dict:
 				_url("group/fetchAllGroups", line_doc.instance_name),
 				params={"getParticipants": "false"},
 				headers=_headers(line_doc),
-				timeout=15,
+				timeout=90,
 			)
 			resp.raise_for_status()
 			raw = resp.json()
 			groups = raw if isinstance(raw, list) else raw.get("groups", [])
-		except Exception:
+		except Exception as e:
+			frappe.log_error(f"sync_wa_groups failed for line {line_name}: {e}", "WA Group Sync")
 			continue
 
 		# Map existing child rows by JID for quick lookup

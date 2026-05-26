@@ -13,12 +13,12 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 ## What This Fork Adds
 
 ### Backend
-- `helpdesk/integrations/whatsapp.py` — all WhatsApp API endpoints and doc_event hooks
-- `helpdesk/helpdesk/doctype/whatsapp_helpdesk_settings/` — singleton settings DocType
-- `helpdesk/hooks.py` — added `WhatsApp Message` doc_events pointing to the integration module
+- `helpdesk/integrations/wa.py` — all WhatsApp API endpoints and doc_event hooks (both WABA and WA Line paths live here)
+- `helpdesk/helpdesk/doctype/whatsapp_helpdesk_settings/` — singleton settings for the WABA path
+- `helpdesk/hooks.py` — `WhatsApp Message` doc_events pointing to `wa.py` integration handlers
 
 ### Frontend
-- `desk/src/components/whatsapp/WhatsAppChatTab.vue` — main tab component
+- `desk/src/components/whatsapp/WhatsAppChatTab.vue` — main tab component (handles both WABA and WA Line display)
 - `desk/src/components/whatsapp/WhatsAppBubble.vue` — message bubble (outgoing = green, incoming = surface-white)
 - `desk/src/components/whatsapp/WhatsAppReplyBox.vue` — reply input with file attach, paste, drag-drop
 - `desk/src/components/icons/WhatsAppIcon.vue` — SVG icon
@@ -28,7 +28,7 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 - `desk/src/stores/notification.ts` — modified: bell reload + sound on incoming WhatsApp
 
 ### Key API paths (frontend → backend)
-All WhatsApp APIs: `helpdesk.integrations.whatsapp.<function>`
+All WhatsApp APIs: `helpdesk.integrations.wa.<function>`
 
 ### Keeping in sync with upstream
 ```bash
@@ -37,6 +37,64 @@ git merge upstream/develop
 # resolve conflicts in the modified files above
 bench build --app helpdesk
 ```
+
+---
+
+## Two WhatsApp Integrations
+
+This fork supports **two completely separate WhatsApp integrations** that share the same UI tab and backend module (`wa.py`). They are distinguished by whether an HD Ticket has the custom field `baileys_jid` set.
+
+### 1. WABA — WhatsApp Business API via `frappe_whatsapp`
+
+| Item | Detail |
+|------|--------|
+| **Provider** | Meta's official WhatsApp Business API |
+| **App dependency** | `frappe_whatsapp` (must be installed) |
+| **Message DocType** | `WhatsApp Message` (from `frappe_whatsapp`) |
+| **Ticket link** | `WhatsApp Message.reference_name → HD Ticket` |
+| **Routing key** | HD Ticket has **no** `baileys_jid` value |
+| **Reply function** | `_send_fw_reply()` |
+| **Media function** | `_send_fw_reply()` with `media_url` → sets `attach` field on `WhatsApp Message` |
+| **24-hr window** | Enforced — after 24 h only templates can be sent |
+| **Settings** | `WhatsApp Helpdesk Settings` singleton |
+| **Realtime events** | `helpdesk:whatsapp-message`, `helpdesk:whatsapp-status-update` |
+
+The `frappe_whatsapp` controller (`WhatsAppMessage.before_insert → send_outgoing`) handles the actual Meta API call. When sending media, `attach` **must** be set on the `WhatsApp Message` doc — if it is empty for a non-text `content_type`, Meta rejects the request.
+
+### 2. WA Line — Evolution API / Baileys
+
+| Item | Detail |
+|------|--------|
+| **Provider** | Self-hosted Evolution API (Baileys wrapper) |
+| **App dependency** | None — uses `WA API Settings` + `WA Line` DocTypes in helpdesk |
+| **Message DocType** | `WA Message` (custom DocType in this app) |
+| **Ticket link** | `HD Ticket.baileys_jid` custom field + `WA Message.reference_name` |
+| **Routing key** | HD Ticket has a `baileys_jid` value |
+| **Reply function** | `send_wa_reply()` Baileys path |
+| **Media function** | `send_wa_media()` → `send_wa_reply()` with `media_url` → `WA Message.media_url` |
+| **24-hr window** | Not enforced (no window restriction) |
+| **Settings** | `WA API Settings` singleton + `WA Line` per-instance docs |
+| **Realtime events** | `helpdesk:baileys-message`, `helpdesk:baileys-status-update` |
+
+Custom fields on `HD Ticket` (added via fixtures):
+- `baileys_jid` — the WhatsApp JID (e.g. `2547XXXXXXXX@s.whatsapp.net`)
+- `baileys_line` — the `WA Line` name that owns this conversation
+
+**Important**: `baileys_jid` and `baileys_line` are custom fields. On sites that haven't run `bench migrate` after installing WA Line fixtures, filtering `HD Ticket` by `baileys_jid` raises an `OperationalError`. All such queries must be wrapped in `try/except`.
+
+### Routing Logic in `send_wa_reply()`
+
+```
+send_wa_reply(ticket, jid=None, ...)
+  ├── ticket + no jid → look up HD Ticket.baileys_jid
+  │     ├── has baileys_jid → Baileys/WA Line path
+  │     └── no baileys_jid  → _send_fw_reply() [WABA path]
+  └── jid provided → Baileys/WA Line path directly
+```
+
+The same ticket view/tab renders both integrations — `get_whatsapp_ticket_info()` returns `via_frappe_whatsapp: True` for WABA tickets so the frontend can show the 24-hr window UI.
+
+---
 
 ## Dark Mode
 
@@ -48,19 +106,18 @@ frappe-ui's preset already defines `[data-theme='dark']` CSS variable overrides 
 
 `EmailContent.vue` already reads `data-theme` from `document.documentElement` and propagates it to its iframe — the pattern is established.
 
-## Frappe_whatsapp Dependency
-
-The `WhatsApp Message` DocType, `send_read_receipt()`, and the webhook (status updates sent/delivered/read) all come from the `frappe_whatsapp` app. `integrations/whatsapp.py` guards against it not being installed.
-
 ## Realtime Events
 
-| Event | Direction | Purpose |
-|-------|-----------|---------|
-| `helpdesk:whatsapp-message` | server → all users | New incoming/outgoing message |
-| `helpdesk:whatsapp-status-update` | server → all users | Delivery status change (sent/delivered/read) |
-| `helpdesk:comment-reaction-update` | server → all users | Bell reload |
+| Event | Direction | Integration | Purpose |
+|-------|-----------|-------------|---------|
+| `helpdesk:whatsapp-message` | server → all | WABA | New incoming/outgoing frappe_whatsapp message |
+| `helpdesk:whatsapp-status-update` | server → all | WABA | Delivery status change (sent/delivered/read) |
+| `helpdesk:baileys-message` | server → all | WA Line | New incoming/outgoing Baileys message |
+| `helpdesk:baileys-status-update` | server → all | WA Line | WA Line delivery status change |
+| `helpdesk:whatsapp-message-edit` | server → all | WA Line | Message text edited |
+| `helpdesk:comment-reaction-update` | server → all | both | Bell reload |
 
-Both WhatsApp events are broadcast to the `"all"` room (all logged-in System Users auto-join). Room-based routing was avoided because socket.io clients lose room membership on reconnect.
+All events are broadcast to the `"all"` room. Room-based routing was avoided because socket.io clients lose room membership on reconnect.
 
 ## Contact Phone Lookup
 
