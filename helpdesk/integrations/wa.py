@@ -531,7 +531,7 @@ def upsert_contact_mapping(lid: str = "", phone: str = "", name: str = "") -> di
 	try:
 		api_key = (frappe.request.headers.get("apikey") or
 				   frappe.request.headers.get("Authorization") or "")
-	except AttributeError:
+	except Exception:
 		api_key = settings.global_api_key or ""  # in tests, skip auth
 
 	if api_key != (settings.global_api_key or ""):
@@ -615,6 +615,23 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
     if not jid or jid == "status@broadcast" or jid.endswith("@broadcast"):
         return {"status": "skipped", "reason": "broadcast or no jid"}
+
+    # Re-route LID JIDs to their canonical PN JID if already merged
+    try:
+        _canonical = frappe.db.get_value("WA Contact", {"jid": jid}, "canonical_jid")
+        if _canonical:
+            jid = _canonical
+    except Exception:
+        pass
+
+    # Re-route sender LID to PN for group messages
+    if sender and sender != jid:
+        try:
+            _sender_canonical = frappe.db.get_value("WA Contact", {"jid": sender}, "canonical_jid")
+            if _sender_canonical:
+                sender = _sender_canonical
+        except Exception:
+            pass
 
     if _is_blocked(jid, sender, line):
         return {"status": "skipped", "reason": "blocked"}
