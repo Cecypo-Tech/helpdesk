@@ -73,7 +73,13 @@
    "options": "WhatsApp Blocked JID"
   }
  ],
- "links": [],
+ "links": [
+  {
+   "group": "Messages",
+   "link_doctype": "WA Message",
+   "link_fieldname": "line"
+  }
+ ],
  "modified": "2026-05-23 00:18:46.520869",
  "modified_by": "Administrator",
  "module": "Helpdesk",

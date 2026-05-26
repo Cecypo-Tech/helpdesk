@@ -1,6 +1,18 @@
 frappe.ui.form.on("WA Line", {
 	refresh(frm) {
 		if (!frm.is_new()) {
+			frappe.db.count("WA Message", { line: frm.doc.name }).then((count) => {
+				if (count > 0) {
+					frm.set_intro(
+						__(
+							"This line has {0} WhatsApp message(s). Deleting this line will also permanently delete all linked messages.",
+							[count]
+						),
+						"orange"
+					);
+				}
+			});
+
 			frm.add_custom_button(__("Configure Webhook"), () => {
 				frappe.call({
 					method: "helpdesk.integrations.wa.configure_wa_webhook",
@@ -50,6 +62,37 @@ frappe.ui.form.on("WA Line", {
 						frappe.msgprint({ title: __("WhatsApp QR Code — {0}", [frm.doc.instance_name]), message: body, indicator: "green" });
 					},
 				});
+			}, __("WhatsApp"));
+
+			frm.add_custom_button(__("Sync Old Messages"), () => {
+				frappe.prompt(
+					{
+						fieldtype: "Int",
+						label: __("Messages per chat"),
+						fieldname: "limit",
+						default: 50,
+						description: __("How many recent messages to fetch per chat (max 500)"),
+					},
+					(values) => {
+						frappe.call({
+							method: "helpdesk.integrations.wa.sync_wa_old_messages",
+							args: { line: frm.doc.name, limit_per_chat: values.limit || 50 },
+							freeze: true,
+							freeze_message: __("Fetching message history from WhatsApp API…"),
+							callback(r) {
+								if (r.exc) return;
+								const { imported, skipped } = r.message;
+								frappe.msgprint({
+									title: __("Sync Complete"),
+									message: __("Imported {0} new messages. {1} already existed.", [imported, skipped]),
+									indicator: "green",
+								});
+							},
+						});
+					},
+					__("Sync Old Messages"),
+					__("Sync"),
+				);
 			}, __("WhatsApp"));
 		}
 	},

@@ -673,6 +673,7 @@ def _handle_update(updates: list, line) -> dict:
 def send_wa_reply(
     ticket: str = None,
     jid: str = None,
+    line: str = None,
     message: str = "",
     content_type: str = "text",
     media_url: str | None = None,
@@ -701,18 +702,22 @@ def send_wa_reply(
     if not jid:
         frappe.throw(_("No WhatsApp JID provided."))
 
-    # Resolve which line owns this ticket/JID
-    line_name = None
-    if ticket:
+    # Resolve which line owns this ticket/JID — explicit param wins, then ticket field, then message history
+    line_name = line or None
+    if not line_name and ticket:
         line_name = frappe.db.get_value("HD Ticket", ticket, "baileys_line")
     if not line_name:
-        # Fallback: find most recent message for this JID
         line_name = frappe.db.get_value(
             "WA Message",
             {"jid": jid, "line": ["is", "set"]},
             "line",
             order_by="creation desc",
         )
+    if not line_name:
+        # Last resort: use the only configured line if there is exactly one
+        all_lines = frappe.get_all("WA Line", pluck="name", limit=2)
+        if len(all_lines) == 1:
+            line_name = all_lines[0]
     if not line_name:
         frappe.throw(_("Cannot determine WhatsApp line for this conversation."))
 
@@ -833,13 +838,20 @@ def send_wa_reaction(
     target_message_id: str = "",
     emoji: str = "",
 ) -> dict:
-    """Send a reaction to a message via WA API."""
+    """Send a reaction to a message via WA API (Baileys) or frappe_whatsapp depending on ticket type."""
+    # ── frappe_whatsapp path ─────────────────────────────────────────────────
+    if ticket and not jid:
+        try:
+            jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+        except Exception:
+            pass
+        if not jid:
+            return _send_fw_reaction(ticket=ticket, target_message_id=target_message_id, emoji=emoji)
+
+    # ── Baileys/WA path ──────────────────────────────────────────────────────
     settings = _settings()
     if not settings.enabled:
         frappe.throw(_("WA API is not enabled."))
-
-    if not jid and ticket:
-        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
     if not jid or not target_message_id or not emoji:
         frappe.throw(_("jid, target_message_id and emoji are required."))
 
@@ -1018,31 +1030,27 @@ def get_wa_lines() -> list[dict]:
 @frappe.whitelist()
 def get_wa_conversations(line: str = "") -> list[dict]:
     """Return one entry per unique JID for the given line, sorted by most-recent first."""
-    from frappe.query_builder import DocType
-    from frappe.query_builder.functions import Max
-
-    BM = DocType("WA Message")
-
-    q = (
-        frappe.qb.from_(BM)
-        .select(BM.jid, Max(BM.creation).as_("latest_creation"))
-        .where(~BM.jid.like("%@broadcast"))
-    )
-    if line:
-        q = q.where(BM.line == line)
-
-    latest = q.groupby(BM.jid)
-
-    BM2 = DocType("WA Message")
-    rows = (
-        frappe.qb.from_(BM2)
-        .join(latest).on(
-            (BM2.jid == latest.jid) & (BM2.creation == latest.latest_creation)
-        )
-        .select(BM2.jid, BM2.sender_name, BM2.message,
-                BM2.content_type, BM2.direction, BM2.creation)
-        .orderby(BM2.creation, order=frappe.qb.desc)
-        .run(as_dict=True)
+    # Raw SQL — frappe.qb subquery join generates a derived table without an alias,
+    # which MySQL rejects with OperationalError 1248.
+    line_filter = "AND bm.line = %(line)s" if line else ""
+    sub_filter = "AND line = %(line)s" if line else ""
+    rows = frappe.db.sql(
+        f"""
+        SELECT bm.jid, bm.sender_name, bm.message, bm.content_type, bm.direction, bm.creation
+        FROM `tabWA Message` bm
+        INNER JOIN (
+            SELECT jid, MAX(creation) AS latest_creation
+            FROM `tabWA Message`
+            WHERE jid NOT LIKE '%%@broadcast'
+            {sub_filter}
+            GROUP BY jid
+        ) latest ON bm.jid = latest.jid AND bm.creation = latest.latest_creation
+        WHERE bm.jid NOT LIKE '%%@broadcast'
+        {line_filter}
+        ORDER BY bm.creation DESC
+        """,
+        {"line": line},
+        as_dict=True,
     )
 
     seen: set[str] = set()
@@ -1530,6 +1538,27 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text") -> dic
 	s = _fw_settings()
 	if s and s.enabled and s.agent_reply_status:
 		_set_ticket_status(ticket, s.agent_reply_status)
+	return {"name": msg_doc.name, "status": msg_doc.status}
+
+
+def _send_fw_reaction(ticket: str, target_message_id: str, emoji: str) -> dict:
+	"""Send a reaction via frappe_whatsapp for this ticket."""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		frappe.throw(_("frappe_whatsapp is not installed."))
+	phone = get_contact_phone(ticket)
+	if not phone:
+		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+	msg_doc = frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"message": emoji,
+		"content_type": "reaction",
+		"reply_to_message_id": target_message_id,
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	})
+	msg_doc.insert(ignore_permissions=True)
 	return {"name": msg_doc.name, "status": msg_doc.status}
 
 
@@ -2079,54 +2108,134 @@ def get_whatsapp_analytics(from_date: str = None, to_date: str = None, line: str
 
 @frappe.whitelist()
 def sync_wa_contacts() -> dict:
-	"""Fetch contacts from all WA Lines and upsert into WA Contact."""
+	"""Upsert WA Contacts from local WA Message sender history.
+	The contacts/fetchContacts API endpoint is not available on all Evolution API versions,
+	so this extracts unique senders from stored messages instead."""
+	rows = frappe.db.sql(
+		"""
+		SELECT sender_jid,
+		       MAX(sender_name) AS sender_name,
+		       MAX(profile_name) AS profile_name
+		FROM `tabWA Message`
+		WHERE direction = 'Incoming'
+		  AND sender_jid IS NOT NULL AND sender_jid != ''
+		  AND sender_jid NOT LIKE '%%@broadcast'
+		  AND sender_jid NOT LIKE '%%@g.us'
+		GROUP BY sender_jid
+		""",
+		as_dict=True,
+	)
+
+	created = updated = 0
+	for row in rows:
+		jid = row.sender_jid
+		name = row.sender_name or row.profile_name or ""
+		phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
+		if frappe.db.exists("WA Contact", {"jid": jid}):
+			existing = frappe.db.get_value("WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True) or {}
+			updates = {}
+			if not existing.get("custom_name") and name:
+				updates["custom_name"] = name
+			if not existing.get("phone") and phone:
+				updates["phone"] = phone
+			if updates:
+				frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
+				updated += 1
+		else:
+			frappe.get_doc({
+				"doctype": "WA Contact",
+				"jid": jid,
+				"phone": phone,
+				"custom_name": name,
+			}).insert(ignore_permissions=True)
+			created += 1
+
+	frappe.db.commit()
+	return {"created": created, "updated": updated, "total": created + updated}
+
+
+@frappe.whitelist()
+def sync_wa_old_messages(line: str, limit_per_chat: int = 50) -> dict:
+	"""Fetch and import historical messages from a WA Line via POST /chat/findMessages (paginated)."""
+	import datetime as _dt
+
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
 		frappe.throw(_("WA API not configured or disabled"))
 
-	lines = frappe.get_all("WA Line", fields=["name", "instance_name", "instance_token"])
-	created = updated = 0
+	# limit_per_chat is kept as the UI label but we fetch all pages up to total_limit records
+	total_limit = max(1, min(int(limit_per_chat or 50) * 20, 5000))
+	line_doc = frappe.get_doc("WA Line", line)
 
-	for line_row in lines:
-		line_doc = frappe._dict(line_row)
+	imported = skipped = 0
+	current_page = 1
+	total_pages = 1
+	frappe.set_user("Administrator")
+
+	while current_page <= total_pages:
 		try:
-			resp = _requests.get(
-				_url("contacts/fetchContacts", line_doc.instance_name),
+			resp = _requests.post(
+				_url("chat/findMessages", line_doc.instance_name),
+				json={"where": {}, "page": current_page},
 				headers=_headers(line_doc),
-				timeout=15,
+				timeout=30,
 			)
 			resp.raise_for_status()
-			contacts = resp.json() if isinstance(resp.json(), list) else resp.json().get("contacts", [])
-		except Exception:
-			continue
+			raw = resp.json()
+		except Exception as e:
+			frappe.throw(_("Failed to fetch messages from WA API: {0}").format(str(e)))
 
-		for c in contacts:
-			jid = c.get("id") or c.get("jid") or ""
-			if not jid or "@broadcast" in jid or jid.endswith("@g.us"):
+		msgs_envelope = raw.get("messages") or {}
+		total_pages = int(msgs_envelope.get("pages") or 1)
+		records = msgs_envelope.get("records") or []
+
+		for msg in records:
+			key = msg.get("key") or {}
+			message_id = key.get("id") or ""
+			remote_jid = key.get("remoteJid") or ""
+			if not message_id or not remote_jid or "@broadcast" in remote_jid:
 				continue
-			phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
-			name = c.get("pushName") or c.get("name") or ""
-			if frappe.db.exists("WA Contact", {"jid": jid}):
-				existing = frappe.db.get_value("WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True)
-				updates = {}
-				if not existing.phone and phone:
-					updates["phone"] = phone
-				if not existing.custom_name and name:
-					updates["custom_name"] = name
-				if updates:
-					frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
-					updated += 1
-			else:
-				frappe.get_doc({
-					"doctype": "WA Contact",
-					"jid": jid,
-					"phone": phone,
-					"custom_name": name,
-				}).insert(ignore_permissions=True)
-				created += 1
+			if frappe.db.exists("WA Message", {"message_id": message_id}):
+				skipped += 1
+				continue
 
-	frappe.db.commit()
-	return {"created": created, "updated": updated, "total": created + updated}
+			from_me = bool(key.get("fromMe"))
+			sender = key.get("participant") or (remote_jid if not from_me else "")
+			sender_name = msg.get("pushName") or ""
+			raw_msg_body = msg.get("message") or {}
+			text, content_type = _extract_text(raw_msg_body)
+
+			try:
+				doc = frappe.get_doc({
+					"doctype": "WA Message",
+					"direction": "Outgoing" if from_me else "Incoming",
+					"jid": remote_jid,
+					"sender_jid": "" if from_me else sender,
+					"sender_name": "(via phone)" if from_me else sender_name,
+					"profile_name": "(via phone)" if from_me else sender_name,
+					"message": text,
+					"content_type": content_type or "text",
+					"media_url": "",
+					"message_id": message_id,
+					"status": "Read" if from_me else "Delivered",
+					"line": line_doc.name,
+					"is_read": 1,
+				})
+				doc.insert(ignore_permissions=True)
+				ts = msg.get("messageTimestamp") or 0
+				if ts:
+					orig_creation = _dt.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+					frappe.db.set_value("WA Message", doc.name, "creation", orig_creation, update_modified=False)
+				imported += 1
+			except Exception:
+				pass
+
+		frappe.db.commit()
+		current_page += 1
+		if imported + skipped >= total_limit:
+			break
+
+	return {"imported": imported, "skipped": skipped}
 
 
 @frappe.whitelist()
@@ -2149,17 +2258,16 @@ def get_product_options() -> list[str]:
 
 @frappe.whitelist()
 def sync_wa_groups() -> dict:
-	"""Fetch groups from all WA Lines and upsert group subjects into WA Contact."""
+	"""Fetch groups from all WA Lines via the API and upsert into each line's group_jids child table."""
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
 		frappe.throw(_("WA API not configured or disabled"))
 
-	lines = frappe.get_all("WA Line", fields=["name", "instance_name", "instance_token"])
+	lines = frappe.get_all("WA Line", pluck="name")
 	created = updated = 0
 
-
-	for line_row in lines:
-		line_doc = frappe._dict(line_row)
+	for line_name in lines:
+		line_doc = frappe.get_doc("WA Line", line_name)
 		try:
 			resp = _requests.get(
 				_url("group/fetchAllGroups", line_doc.instance_name),
@@ -2168,27 +2276,35 @@ def sync_wa_groups() -> dict:
 				timeout=15,
 			)
 			resp.raise_for_status()
-			groups = resp.json() if isinstance(resp.json(), list) else resp.json().get("groups", [])
+			raw = resp.json()
+			groups = raw if isinstance(raw, list) else raw.get("groups", [])
 		except Exception:
 			continue
 
+		# Map existing child rows by JID for quick lookup
+		existing = {row.jid: row for row in (line_doc.group_jids or [])}
+		changed = False
+
 		for g in groups:
-			jid = g.get("id") or g.get("jid") or ""
-			if not jid:
+			jid = g.get("id") or ""
+			if not jid or not jid.endswith("@g.us"):
 				continue
 			subject = g.get("subject") or g.get("name") or ""
-			if frappe.db.exists("WA Contact", {"jid": jid}):
-				existing_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or ""
-				if not existing_name and subject:
-					frappe.db.set_value("WA Contact", {"jid": jid}, "custom_name", subject, update_modified=False)
+
+			if jid in existing:
+				row = existing[jid]
+				if subject and row.group_name != subject:
+					row.group_name = subject
+					changed = True
 					updated += 1
 			else:
-				frappe.get_doc({
-					"doctype": "WA Contact",
-					"jid": jid,
-					"custom_name": subject,
-				}).insert(ignore_permissions=True)
+				line_doc.append("group_jids", {"jid": jid, "group_name": subject})
+				existing[jid] = True
+				changed = True
 				created += 1
 
-	frappe.db.commit()
+		if changed:
+			line_doc.save(ignore_permissions=True)
+			frappe.db.commit()
+
 	return {"created": created, "updated": updated, "total": created + updated}

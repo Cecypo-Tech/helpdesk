@@ -172,8 +172,8 @@ const syncingContacts = ref(false);
 
 const syncContactsResource = createResource({
   url: "helpdesk.integrations.wa.sync_wa_contacts",
-  onSuccess(data: { updated: number; created: number; total: number }) {
-    syncGroupsResource.submit({});
+  onSuccess(contactData: { updated: number; created: number; total: number }) {
+    syncGroupsResource.submit({ _contactTotal: contactData.total });
   },
   onError(e: any) {
     syncingContacts.value = false;
@@ -185,7 +185,8 @@ const syncGroupsResource = createResource({
   url: "helpdesk.integrations.wa.sync_wa_groups",
   onSuccess(data: { updated: number; created: number; total: number }) {
     syncingContacts.value = false;
-    toast.success(`Synced ${data.total} contacts & groups`);
+    const contactTotal = (syncContactsResource.data as any)?.total ?? 0;
+    toast.success(`Synced ${contactTotal} contact(s) and ${data.total} group(s)`);
     conversations.reload();
   },
   onError(e: any) {

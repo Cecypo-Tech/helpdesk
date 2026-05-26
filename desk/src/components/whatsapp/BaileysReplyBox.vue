@@ -530,6 +530,7 @@ async function send() {
       // Step 2: send via WA API using the uploaded file URL
       await sendReply.submit({
         ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
+        ...(props.line ? { line: props.line } : {}),
         message: caption,
         content_type: ct,
         media_url: fileUrl,
@@ -553,6 +554,7 @@ async function send() {
     if (textareaRef.value) textareaRef.value.style.height = "auto";
     sendReply.submit({
       ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
+      ...(props.line ? { line: props.line } : {}),
       message: msgText,
       content_type: "text",
       reply_to_message_id: replyToId,
