@@ -258,6 +258,11 @@ class TestWaWebhook(unittest.TestCase):
         self.assertIsNotNone(test_line)
         self.assertGreaterEqual(test_line["unread"], 2)
 
+    def test_wa_contact_has_canonical_jid_field(self):
+        meta = frappe.get_meta("WA Contact")
+        field_names = [f.fieldname for f in meta.fields]
+        self.assertIn("canonical_jid", field_names)
+
 
 class TestExtractEdit(unittest.TestCase):
     def test_shape1_extracts_text(self):

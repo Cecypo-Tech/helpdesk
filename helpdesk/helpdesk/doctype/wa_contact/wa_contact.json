@@ -11,7 +11,8 @@
   "custom_name",
   "company",
   "section_assignment",
-  "assigned_team"
+  "assigned_team",
+  "canonical_jid"
  ],
  "fields": [
   {
@@ -58,6 +59,12 @@
    "options": "HD Team",
    "in_list_view": 1,
    "description": "Restrict this chat to members of this team. Leave blank for all agents."
+  },
+  {
+   "fieldname": "canonical_jid",
+   "fieldtype": "Data",
+   "label": "Canonical JID",
+   "description": "If set, this row is a dead LID alias. All traffic is redirected to this PN JID."
   }
  ],
  "links": [],
