@@ -2253,6 +2253,17 @@ def enqueue_wa_sync() -> dict:
 	return {"status": "queued"}
 
 
+@frappe.whitelist()
+def wipe_wa_contacts() -> dict:
+	"""Delete all WA Contact rows. Used before a clean resync to remove LID/PN duplicates."""
+	if frappe.session.user == "Guest":
+		frappe.throw("Not permitted")
+	count = frappe.db.count("WA Contact")
+	frappe.db.sql("DELETE FROM `tabWA Contact`")
+	frappe.db.commit()
+	return {"deleted": count}
+
+
 def _run_wa_sync_job() -> None:
 	"""Background job: sync contacts then groups, emit realtime event when done."""
 	try:
