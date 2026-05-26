@@ -2309,6 +2309,8 @@ def sync_wa_contacts() -> dict:
 		jid = row.sender_jid
 		name = row.sender_name or row.profile_name or ""
 		phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
+		if not phone:
+			continue  # Skip unresolved @lid contacts — the gateway will populate them on first message
 		doc_name = frappe.generate_hash(length=10)
 		values.append((doc_name, jid, phone, name))
 
