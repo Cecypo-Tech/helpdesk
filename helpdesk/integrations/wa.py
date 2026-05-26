@@ -604,133 +604,133 @@ def webhook():
 
 
 def _handle_upsert(data: dict, line, settings) -> dict:
-    key = data.get("key") or {}
-    jid = key.get("remoteJid") or ""
-    from_me = bool(key.get("fromMe"))
-    message_id = key.get("id") or ""
-    # For groups, participant is the actual sender; for DMs it's the jid itself.
-    sender = key.get("participant") or jid
-    sender_name = data.get("pushName") or ""
-    is_group = _is_group(jid)
+	key = data.get("key") or {}
+	jid = key.get("remoteJid") or ""
+	from_me = bool(key.get("fromMe"))
+	message_id = key.get("id") or ""
+	# For groups, participant is the actual sender; for DMs it's the jid itself.
+	sender = key.get("participant") or jid
+	sender_name = data.get("pushName") or ""
+	is_group = _is_group(jid)
 
-    if not jid or jid == "status@broadcast" or jid.endswith("@broadcast"):
-        return {"status": "skipped", "reason": "broadcast or no jid"}
+	if not jid or jid == "status@broadcast" or jid.endswith("@broadcast"):
+		return {"status": "skipped", "reason": "broadcast or no jid"}
 
-    # Re-route LID JIDs to their canonical PN JID if already merged
-    try:
-        _canonical = frappe.db.get_value("WA Contact", {"jid": jid}, "canonical_jid")
-        if _canonical:
-            jid = _canonical
-    except Exception:
-        pass
+	# Re-route LID JIDs to their canonical PN JID if already merged
+	try:
+		_canonical = frappe.db.get_value("WA Contact", {"jid": jid}, "canonical_jid")
+		if _canonical:
+			jid = _canonical
+	except Exception:
+		pass
 
-    # Re-route sender LID to PN for group messages
-    if sender and sender != jid:
-        try:
-            _sender_canonical = frappe.db.get_value("WA Contact", {"jid": sender}, "canonical_jid")
-            if _sender_canonical:
-                sender = _sender_canonical
-        except Exception:
-            pass
+	# Re-route sender LID to PN for group messages
+	if sender and sender != jid:
+		try:
+			_sender_canonical = frappe.db.get_value("WA Contact", {"jid": sender}, "canonical_jid")
+			if _sender_canonical:
+				sender = _sender_canonical
+		except Exception:
+			pass
 
-    if _is_blocked(jid, sender, line):
-        return {"status": "skipped", "reason": "blocked"}
+	if _is_blocked(jid, sender, line):
+		return {"status": "skipped", "reason": "blocked"}
 
-    raw_msg = data.get("message") or {}
-    text, content_type = _extract_text(raw_msg)
+	raw_msg = data.get("message") or {}
+	text, content_type = _extract_text(raw_msg)
 
-    # For reactions, capture the ID of the message being reacted to
-    reply_to_message_id = ""
-    if content_type == "reaction":
-        reply_to_message_id = ((raw_msg.get("reactionMessage") or {}).get("key") or {}).get("id") or ""
+	# For reactions, capture the ID of the message being reacted to
+	reply_to_message_id = ""
+	if content_type == "reaction":
+		reply_to_message_id = ((raw_msg.get("reactionMessage") or {}).get("key") or {}).get("id") or ""
 
-    # Extract reply-to ID from quoted context message
-    if not reply_to_message_id:
-        ctx_info = raw_msg.get("extendedTextMessage", {}).get("contextInfo") or {}
-        if not ctx_info:
-            for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
-                ctx_info = raw_msg.get(media_key, {}).get("contextInfo") or {}
-                if ctx_info:
-                    break
-        reply_to_message_id = ctx_info.get("stanzaId") or ctx_info.get("quotedMessage", {}) and ctx_info.get("stanzaId") or ""
+	# Extract reply-to ID from quoted context message
+	if not reply_to_message_id:
+		ctx_info = raw_msg.get("extendedTextMessage", {}).get("contextInfo") or {}
+		if not ctx_info:
+			for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
+				ctx_info = raw_msg.get(media_key, {}).get("contextInfo") or {}
+				if ctx_info:
+					break
+		reply_to_message_id = ctx_info.get("stanzaId") or ctx_info.get("quotedMessage", {}) and ctx_info.get("stanzaId") or ""
 
-    # Extract media URL for media messages — pass full `data` so Evolution can decrypt
-    media_url = ""
-    if content_type in ("image", "video", "audio", "document", "sticker"):
-        try:
-            media_url = _extract_media_url(raw_msg, line=line, full_webhook_data=data)
-        except Exception as exc:
-            frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
-            media_url = ""
+	# Extract media URL for media messages — pass full `data` so Evolution can decrypt
+	media_url = ""
+	if content_type in ("image", "video", "audio", "document", "sticker"):
+		try:
+			media_url = _extract_media_url(raw_msg, line=line, full_webhook_data=data)
+		except Exception as exc:
+			frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
+			media_url = ""
 
-    # Detect and handle incoming edit before dedup check
-    new_text, is_edit = _extract_edit(raw_msg)
-    if is_edit and message_id:
-        existing = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
-        if existing:
-            frappe.set_user("Administrator")
-            _apply_edit(existing, new_text, edited_by="incoming", jid=jid, line=line)
-            return {"status": "ok", "edited": True}
-        # Fall through — original not yet stored (edge case: creates new record below)
+	# Detect and handle incoming edit before dedup check
+	new_text, is_edit = _extract_edit(raw_msg)
+	if is_edit and message_id:
+		existing = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
+		if existing:
+			frappe.set_user("Administrator")
+			_apply_edit(existing, new_text, edited_by="incoming", jid=jid, line=line)
+			return {"status": "ok", "edited": True}
+		# Fall through — original not yet stored (edge case: creates new record below)
 
-    # Deduplicate
-    if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
-        return {"status": "duplicate"}
+	# Deduplicate
+	if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
+		return {"status": "duplicate"}
 
-    frappe.set_user("Administrator")
+	frappe.set_user("Administrator")
 
-    if from_me:
-        owner = line.connected_user or "Administrator"
-        if not frappe.db.exists("User", owner):
-            owner = "Administrator"
-        doc = frappe.get_doc({
-            "doctype": "WA Message",
-            "direction": "Outgoing",
-            "jid": jid,
-            "sender_jid": "",
-            "sender_name": "(via phone)",
-            "profile_name": "(via phone)",
-            "message": text,
-            "content_type": content_type or "text",
-            "media_url": media_url,
-            "message_id": message_id,
-            "reply_to_message_id": reply_to_message_id,
-            "status": "Delivered",
-            "reference_doctype": "",
-            "reference_name": "",
-            "line": line.name,
-            "is_read": 1,
-        }).insert(ignore_permissions=True)
-        frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
-        _publish_wa_event(jid, is_incoming=False, line=line.name)
-        return {"status": "ok", "mirrored": True}
+	if from_me:
+		owner = line.connected_user or "Administrator"
+		if not frappe.db.exists("User", owner):
+			owner = "Administrator"
+		doc = frappe.get_doc({
+			"doctype": "WA Message",
+			"direction": "Outgoing",
+			"jid": jid,
+			"sender_jid": "",
+			"sender_name": "(via phone)",
+			"profile_name": "(via phone)",
+			"message": text,
+			"content_type": content_type or "text",
+			"media_url": media_url,
+			"message_id": message_id,
+			"reply_to_message_id": reply_to_message_id,
+			"status": "Delivered",
+			"reference_doctype": "",
+			"reference_name": "",
+			"line": line.name,
+			"is_read": 1,
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
+		_publish_wa_event(jid, is_incoming=False, line=line.name)
+		return {"status": "ok", "mirrored": True}
 
-    # Incoming message
-    frappe.get_doc({
-        "doctype": "WA Message",
-        "direction": "Incoming",
-        "jid": jid,
-        "sender_jid": sender,
-        "sender_name": sender_name,
-        "profile_name": sender_name,
-        "message": text,
-        "content_type": content_type or "text",
-        "media_url": media_url,
-        "message_id": message_id,
-        "reply_to_message_id": reply_to_message_id,
-        "status": "Pending",
-        "reference_doctype": "",
-        "reference_name": "",
-        "line": line.name,
-        "is_read": 0,
-    }).insert(ignore_permissions=True)
+	# Incoming message
+	frappe.get_doc({
+		"doctype": "WA Message",
+		"direction": "Incoming",
+		"jid": jid,
+		"sender_jid": sender,
+		"sender_name": sender_name,
+		"profile_name": sender_name,
+		"message": text,
+		"content_type": content_type or "text",
+		"media_url": media_url,
+		"message_id": message_id,
+		"reply_to_message_id": reply_to_message_id,
+		"status": "Pending",
+		"reference_doctype": "",
+		"reference_name": "",
+		"line": line.name,
+		"is_read": 0,
+	}).insert(ignore_permissions=True)
 
-    _upsert_contact_name(jid, sender_name)
-    _publish_wa_event(jid, is_incoming=True, line=line.name)
-    if content_type != "reaction":
-        _notify_agents(jid, text, sender_name, line, settings)
+	_upsert_contact_name(jid, sender_name)
+	_publish_wa_event(jid, is_incoming=True, line=line.name)
+	if content_type != "reaction":
+		_notify_agents(jid, text, sender_name, line, settings)
 
-    return {"status": "ok"}
+	return {"status": "ok"}
 
 
 def _handle_contacts_upsert(contacts: list) -> None:
