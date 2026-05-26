@@ -258,6 +258,81 @@ class TestWaWebhook(unittest.TestCase):
         self.assertIsNotNone(test_line)
         self.assertGreaterEqual(test_line["unread"], 2)
 
+    def test_merge_lid_into_pn_rekeys_messages_and_sets_canonical(self):
+        from helpdesk.integrations.wa import _merge_lid_into_pn
+        lid_jid = "99999000001@lid"
+        pn_jid = "447900000001@s.whatsapp.net"
+
+        # Create LID contact row with metadata
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "phone": "",
+                "custom_name": "Merge Test",
+                "company": "",
+                "assigned_team": "",
+            }).insert(ignore_permissions=True)
+
+        # Create a WA Message on the LID JID
+        msg = frappe.get_doc({
+            "doctype": "WA Message",
+            "direction": "Incoming",
+            "jid": lid_jid,
+            "sender_jid": lid_jid,
+            "message": "test merge",
+            "content_type": "text",
+            "message_id": "_test-merge-lid-001",
+            "status": "Delivered",
+            "line": "_test-evo",
+            "is_read": 0,
+        }).insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        _merge_lid_into_pn(lid_jid, pn_jid)
+
+        # LID row should have canonical_jid set
+        canonical = frappe.db.get_value("WA Contact", {"jid": lid_jid}, "canonical_jid")
+        self.assertEqual(canonical, pn_jid)
+
+        # PN row should exist
+        self.assertTrue(frappe.db.exists("WA Contact", {"jid": pn_jid}))
+
+        # WA Message should now be keyed to PN JID
+        new_jid = frappe.db.get_value("WA Message", msg.name, "jid")
+        self.assertEqual(new_jid, pn_jid)
+
+        # Cleanup
+        frappe.db.delete("WA Message", {"message_id": "_test-merge-lid-001"})
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.delete("WA Contact", {"jid": pn_jid})
+        frappe.db.commit()
+
+    def test_merge_lid_into_pn_is_idempotent(self):
+        from helpdesk.integrations.wa import _merge_lid_into_pn
+        lid_jid = "99999000002@lid"
+        pn_jid = "447900000002@s.whatsapp.net"
+
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "phone": "",
+                "custom_name": "Idempotent Test",
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        _merge_lid_into_pn(lid_jid, pn_jid)
+        _merge_lid_into_pn(lid_jid, pn_jid)  # second call must not raise
+
+        canonical = frappe.db.get_value("WA Contact", {"jid": lid_jid}, "canonical_jid")
+        self.assertEqual(canonical, pn_jid)
+
+        # Cleanup
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.delete("WA Contact", {"jid": pn_jid})
+        frappe.db.commit()
+
     def test_wa_contact_has_canonical_jid_field(self):
         meta = frappe.get_meta("WA Contact")
         field_names = [f.fieldname for f in meta.fields]

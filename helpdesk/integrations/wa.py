@@ -458,6 +458,61 @@ def _upsert_contact_name(jid: str, sender_name: str) -> None:
         _upsert_contact(f"{phone}@s.whatsapp.net", phone, sender_name)
 
 
+def _merge_lid_into_pn(lid_jid: str, pn_jid: str) -> None:
+	"""Merge a @lid alias row into the canonical @s.whatsapp.net row.
+
+	- Ensures the PN row exists.
+	- Copies non-empty metadata (custom_name, company, assigned_team) to PN if PN has blanks.
+	- Re-keys WA Message.jid and HD Ticket.baileys_jid from lid_jid → pn_jid.
+	- Sets canonical_jid on the LID row so future messages are re-routed.
+	Idempotent: no-op if canonical_jid already set on the LID row.
+	"""
+	if not lid_jid or not pn_jid:
+		return
+	existing_canonical = frappe.db.get_value("WA Contact", {"jid": lid_jid}, "canonical_jid")
+	if existing_canonical:
+		return  # already merged
+
+	# Ensure PN row exists
+	phone = _phone_from_jid(pn_jid)
+	lid_row = frappe.db.get_value(
+		"WA Contact", {"jid": lid_jid},
+		["custom_name", "company", "assigned_team"], as_dict=True,
+	) or {}
+	_upsert_contact(pn_jid, phone, lid_row.get("custom_name") or "")
+
+	# Copy metadata to PN row where PN has blanks
+	pn_row = frappe.db.get_value(
+		"WA Contact", {"jid": pn_jid},
+		["custom_name", "company", "assigned_team"], as_dict=True,
+	) or {}
+	updates = {}
+	for field in ("custom_name", "company", "assigned_team"):
+		if not pn_row.get(field) and lid_row.get(field):
+			updates[field] = lid_row[field]
+	if updates:
+		frappe.db.set_value("WA Contact", {"jid": pn_jid}, updates, update_modified=False)
+
+	# Physically re-key WA Messages
+	frappe.db.sql(
+		"UPDATE `tabWA Message` SET jid = %s WHERE jid = %s",
+		(pn_jid, lid_jid),
+	)
+
+	# Physically re-key HD Ticket.baileys_jid (field may not exist on all sites)
+	try:
+		frappe.db.sql(
+			"UPDATE `tabHD Ticket` SET baileys_jid = %s WHERE baileys_jid = %s",
+			(pn_jid, lid_jid),
+		)
+	except Exception:
+		pass
+
+	# Mark LID row as dead alias
+	frappe.db.set_value("WA Contact", {"jid": lid_jid}, "canonical_jid", pn_jid, update_modified=False)
+	frappe.db.commit()
+
+
 # ── Webhook ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True)
