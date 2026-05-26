@@ -364,6 +364,73 @@ class TestWaWebhook(unittest.TestCase):
         frappe.db.delete("WA Contact", {"jid": pn_jid})
         frappe.db.commit()
 
+    def test_upsert_contact_mapping_merges_lid(self):
+        from helpdesk.integrations.wa import upsert_contact_mapping
+        lid_jid = "99999000004@lid"
+        phone = "447900000004"
+        pn_jid = f"{phone}@s.whatsapp.net"
+
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "phone": "",
+                "custom_name": "",
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        result = upsert_contact_mapping(lid=lid_jid, phone=phone, name="Gateway User")
+
+        self.assertEqual(result.get("status"), "ok")
+        canonical = frappe.db.get_value("WA Contact", {"jid": lid_jid}, "canonical_jid")
+        self.assertEqual(canonical, pn_jid)
+
+        # Cleanup
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.delete("WA Contact", {"jid": pn_jid})
+        frappe.db.commit()
+
+    def test_incoming_message_on_lid_is_rerouted_to_pn(self):
+        from helpdesk.integrations.wa import _handle_upsert, _line, _settings
+        line = _line("_test-evo")
+        settings = _settings()
+        lid_jid = "99999000005@lid"
+        pn_jid = "447900000005@s.whatsapp.net"
+
+        # Pre-create a merged LID alias row (canonical_jid already set)
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "phone": "",
+                "custom_name": "Reroute Test",
+                "canonical_jid": pn_jid,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        frappe.set_user("Administrator")
+        _handle_upsert({
+            "key": {
+                "remoteJid": lid_jid,
+                "fromMe": False,
+                "id": "_test-reroute-lid-001",
+            },
+            "pushName": "Reroute Test",
+            "message": {"conversation": "hello reroute"},
+        }, line, settings)
+
+        # Message should be stored under the PN JID, not the LID
+        msg = frappe.db.get_value(
+            "WA Message", {"message_id": "_test-reroute-lid-001"}, ["jid", "name"], as_dict=True
+        )
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["jid"], pn_jid)
+
+        # Cleanup
+        frappe.db.delete("WA Message", {"message_id": "_test-reroute-lid-001"})
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.commit()
+
 
 class TestExtractEdit(unittest.TestCase):
     def test_shape1_extracts_text(self):

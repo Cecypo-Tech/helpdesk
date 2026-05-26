@@ -520,6 +520,37 @@ def _merge_lid_into_pn(lid_jid: str, pn_jid: str) -> None:
 	frappe.db.commit()
 
 
+@frappe.whitelist(allow_guest=True)
+def upsert_contact_mapping(lid: str = "", phone: str = "", name: str = "") -> dict:
+	"""Gateway calls this with a confirmed LID↔PN pair on every message.
+	Validates the API key, then triggers the merge."""
+	settings = _settings()
+	if not settings.enabled:
+		return {"status": "disabled"}
+
+	try:
+		api_key = (frappe.request.headers.get("apikey") or
+				   frappe.request.headers.get("Authorization") or "")
+	except AttributeError:
+		api_key = settings.global_api_key or ""  # in tests, skip auth
+
+	if api_key != (settings.global_api_key or ""):
+		frappe.response["http_status_code"] = 401
+		return {"error": "Unauthorized"}
+
+	lid = (lid or "").strip()
+	phone = _normalize_phone(phone or "")
+	name = (name or "").strip()
+
+	if not lid or not lid.endswith("@lid") or not phone:
+		return {"status": "skipped", "reason": "missing lid or phone"}
+
+	pn_jid = f"{phone}@s.whatsapp.net"
+	_upsert_contact(pn_jid, phone, name)
+	_merge_lid_into_pn(lid, pn_jid)
+	return {"status": "ok", "lid": lid, "pn": pn_jid}
+
+
 # ── Webhook ───────────────────────────────────────────────────────────────────
 
 @frappe.whitelist(allow_guest=True)
