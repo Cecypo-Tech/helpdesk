@@ -153,9 +153,10 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useWaLinesStore } from "@/stores/waLines";
+import { globalStore } from "@/stores/globalStore";
 import BaileysConversationItem from "./BaileysConversationItem.vue";
 
 const props = defineProps<{ line: string; selectedJid: string | null }>();
@@ -170,37 +171,43 @@ const search = ref("");
 const lastReadMap = ref<Record<string, number>>({});
 const syncingContacts = ref(false);
 
-const syncContactsResource = createResource({
-  url: "helpdesk.integrations.wa.sync_wa_contacts",
-  onSuccess(contactData: { updated: number; created: number; total: number }) {
-    syncGroupsResource.submit({ _contactTotal: contactData.total });
+const syncResource = createResource({
+  url: "helpdesk.integrations.wa.enqueue_wa_sync",
+  auto: false,
+  onSuccess() {
+    // Job queued — spinner stays until helpdesk:wa-sync-complete fires
   },
   onError(e: any) {
     syncingContacts.value = false;
-    toast.error(e?.messages?.[0] || "Contact sync failed");
-  },
-});
-
-const syncGroupsResource = createResource({
-  url: "helpdesk.integrations.wa.sync_wa_groups",
-  onSuccess(data: { updated: number; created: number; total: number }) {
-    syncingContacts.value = false;
-    const contactTotal = (syncContactsResource.data as any)?.total ?? 0;
-    toast.success(`Synced ${contactTotal} contact(s) and ${data.total} group(s)`);
-    conversations.reload();
-  },
-  onError(e: any) {
-    syncingContacts.value = false;
-    toast.error(e?.messages?.[0] || "Group sync failed");
-    conversations.reload();
+    toast.error(e?.messages?.[0] || "Sync failed to queue");
   },
 });
 
 function syncContacts() {
   if (syncingContacts.value) return;
   syncingContacts.value = true;
-  syncContactsResource.submit({});
+  syncResource.submit({});
 }
+
+function onSyncComplete(data: { contacts?: number; groups?: number; error?: string }) {
+  syncingContacts.value = false;
+  if (data?.error) {
+    toast.error(`Sync failed: ${data.error}`);
+  } else {
+    toast.success(`Synced ${data?.contacts ?? 0} contact(s) and ${data?.groups ?? 0} group(s)`);
+  }
+  conversations.reload();
+}
+
+onMounted(() => {
+  const { $socket } = globalStore();
+  $socket.on("helpdesk:wa-sync-complete", onSyncComplete);
+});
+
+onBeforeUnmount(() => {
+  const { $socket } = globalStore();
+  $socket.off("helpdesk:wa-sync-complete", onSyncComplete);
+});
 
 watch(() => props.selectedJid, (jid) => {
   if (jid) lastReadMap.value[jid] = Date.now();
