@@ -421,32 +421,39 @@ def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings
 
 
 def _upsert_contact(jid: str, phone: str, name: str) -> None:
-    """Create-or-blank-fill a WA Contact row keyed by JID."""
-    if not jid:
-        return
-    try:
-        if frappe.db.exists("WA Contact", {"jid": jid}):
-            existing = frappe.db.get_value(
-                "WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
-            ) or {}
-            updates = {}
-            if not existing.get("custom_name") and name:
-                updates["custom_name"] = name
-            if not existing.get("phone") and phone:
-                updates["phone"] = phone
-            if updates:
-                frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
-        else:
-            frappe.get_doc({
-                "doctype": "WA Contact",
-                "jid": jid,
-                "phone": phone,
-                "custom_name": name,
-                "company": "",
-                "assigned_team": "",
-            }).insert(ignore_permissions=True)
-    except Exception:
-        pass
+	"""Create-or-blank-fill a WA Contact row keyed by JID.
+	If jid is a @lid and phone is known, triggers _merge_lid_into_pn immediately.
+	"""
+	if not jid:
+		return
+	# If this is a LID JID and we know the phone, merge into the PN row
+	if jid.endswith("@lid") and phone:
+		pn_jid = f"{_normalize_phone(phone)}@s.whatsapp.net"
+		_merge_lid_into_pn(jid, pn_jid)
+		return
+	try:
+		if frappe.db.exists("WA Contact", {"jid": jid}):
+			existing = frappe.db.get_value(
+				"WA Contact", {"jid": jid}, ["custom_name", "phone"], as_dict=True
+			) or {}
+			updates = {}
+			if not existing.get("custom_name") and name:
+				updates["custom_name"] = name
+			if not existing.get("phone") and phone:
+				updates["phone"] = phone
+			if updates:
+				frappe.db.set_value("WA Contact", {"jid": jid}, updates, update_modified=False)
+		else:
+			frappe.get_doc({
+				"doctype": "WA Contact",
+				"jid": jid,
+				"phone": phone,
+				"custom_name": name,
+				"company": "",
+				"assigned_team": "",
+			}).insert(ignore_permissions=True)
+	except Exception:
+		pass
 
 
 def _upsert_contact_name(jid: str, sender_name: str) -> None:
@@ -679,12 +686,21 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
 
 def _handle_contacts_upsert(contacts: list) -> None:
-    for c in contacts:
-        jid = c.get("id") or ""
-        name = c.get("pushName") or c.get("name") or c.get("notify") or ""
-        if jid and name:
-            phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
-            _upsert_contact(jid, phone, name)
+	for c in contacts:
+		jid = c.get("id") or ""
+		name = c.get("notify") or c.get("verifiedName") or c.get("name") or ""
+		if not jid or not name:
+			continue
+		# For @lid JIDs, attempt to resolve phone from the payload fields
+		if jid.endswith("@lid"):
+			phone = _normalize_phone(c.get("phone") or "")
+			if phone:
+				_merge_lid_into_pn(jid, f"{phone}@s.whatsapp.net")
+				continue
+			# No phone in payload — create the LID row as-is; merge will happen
+			# when upsert_contact_mapping delivers the confirmed LID↔PN pair
+		phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
+		_upsert_contact(jid, phone, name)
 
 
 # WA API v2 message status integer codes

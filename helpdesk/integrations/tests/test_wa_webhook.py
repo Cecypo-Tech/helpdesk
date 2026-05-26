@@ -338,6 +338,32 @@ class TestWaWebhook(unittest.TestCase):
         field_names = [f.fieldname for f in meta.fields]
         self.assertIn("canonical_jid", field_names)
 
+    def test_upsert_contact_triggers_merge_for_lid_with_phone(self):
+        from helpdesk.integrations.wa import _upsert_contact
+        lid_jid = "99999000003@lid"
+        phone = "447900000003"
+        pn_jid = f"{phone}@s.whatsapp.net"
+
+        # Pre-create LID row
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "phone": "",
+                "custom_name": "Trigger Test",
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        _upsert_contact(lid_jid, phone, "Trigger Test")
+
+        canonical = frappe.db.get_value("WA Contact", {"jid": lid_jid}, "canonical_jid")
+        self.assertEqual(canonical, pn_jid)
+
+        # Cleanup
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.delete("WA Contact", {"jid": pn_jid})
+        frappe.db.commit()
+
 
 class TestExtractEdit(unittest.TestCase):
     def test_shape1_extracts_text(self):
