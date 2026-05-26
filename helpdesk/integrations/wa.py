@@ -1822,6 +1822,11 @@ def save_whatsapp_contact(jid: str, custom_name: str = "", company: str = "", as
 	assigned_team = (assigned_team or "").strip()
 	phone = _normalize_phone(phone or "")
 
+	# Redirect writes on dead LID alias rows to the canonical PN row
+	canonical = frappe.db.get_value("WA Contact", {"jid": jid}, "canonical_jid")
+	if canonical:
+		jid = canonical
+
 	if frappe.db.exists("WA Contact", {"jid": jid}):
 		doc = frappe.get_doc("WA Contact", {"jid": jid})
 		doc.custom_name = custom_name
@@ -1855,6 +1860,7 @@ def search_whatsapp_contacts(query: str = "") -> list[dict]:
 			SELECT jid, custom_name, phone, company
 			FROM `tabWA Contact`
 			WHERE jid NOT LIKE '%%@broadcast'
+			  AND (canonical_jid IS NULL OR canonical_jid = '')
 			  AND (custom_name LIKE %s OR phone LIKE %s OR company LIKE %s)
 			ORDER BY custom_name ASC
 			LIMIT 30
@@ -1865,7 +1871,10 @@ def search_whatsapp_contacts(query: str = "") -> list[dict]:
 	else:
 		wa_rows = frappe.get_all(
 			"WA Contact",
-			filters=[["jid", "not like", "%@broadcast"]],
+			filters=[
+				["jid", "not like", "%@broadcast"],
+				["canonical_jid", "in", ["", None]],
+			],
 			fields=["jid", "custom_name", "phone", "company"],
 			order_by="custom_name asc",
 			limit=30,

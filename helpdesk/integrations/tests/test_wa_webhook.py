@@ -551,3 +551,53 @@ class TestApplyEdit(unittest.TestCase):
         messages_in_history = [r.old_message for r in updated.edit_history]
         self.assertIn("v1", messages_in_history)
         self.assertIn("v2", messages_in_history)
+
+    def test_search_contacts_excludes_lid_aliases(self):
+        from helpdesk.integrations.wa import search_whatsapp_contacts
+        lid_jid = "99999000006@lid"
+        pn_jid = "447900000006@s.whatsapp.net"
+
+        # Create a dead LID alias
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "custom_name": "Alias Search Test",
+                "canonical_jid": pn_jid,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        results = search_whatsapp_contacts(query="Alias Search Test")
+        jids = [r["jid"] for r in results]
+        self.assertNotIn(lid_jid, jids)
+
+        # Cleanup
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.commit()
+
+    def test_save_contact_on_lid_alias_redirects_to_pn(self):
+        from helpdesk.integrations.wa import save_whatsapp_contact
+        lid_jid = "99999000007@lid"
+        pn_jid = "447900000007@s.whatsapp.net"
+
+        if not frappe.db.exists("WA Contact", {"jid": lid_jid}):
+            frappe.get_doc({
+                "doctype": "WA Contact",
+                "jid": lid_jid,
+                "custom_name": "",
+                "canonical_jid": pn_jid,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        result = save_whatsapp_contact(jid=lid_jid, custom_name="Redirected Name")
+
+        # Result should report the PN JID, not the LID
+        self.assertEqual(result["jid"], pn_jid)
+        # PN row should have the name
+        pn_name = frappe.db.get_value("WA Contact", {"jid": pn_jid}, "custom_name")
+        self.assertEqual(pn_name, "Redirected Name")
+
+        # Cleanup
+        frappe.db.delete("WA Contact", {"jid": lid_jid})
+        frappe.db.delete("WA Contact", {"jid": pn_jid})
+        frappe.db.commit()
