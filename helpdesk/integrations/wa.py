@@ -506,6 +506,12 @@ def _merge_lid_into_pn(lid_jid: str, pn_jid: str) -> None:
 		(pn_jid, lid_jid),
 	)
 
+	# Also re-key sender_jid for group messages
+	frappe.db.sql(
+		"UPDATE `tabWA Message` SET sender_jid = %s WHERE sender_jid = %s",
+		(pn_jid, lid_jid),
+	)
+
 	# Physically re-key HD Ticket.baileys_jid (field may not exist on all sites)
 	try:
 		frappe.db.sql(
@@ -528,13 +534,14 @@ def upsert_contact_mapping(lid: str = "", phone: str = "", name: str = "") -> di
 	if not settings.enabled:
 		return {"status": "disabled"}
 
+	stored_key = settings.global_api_key or ""
 	try:
-		api_key = (frappe.request.headers.get("apikey") or
-				   frappe.request.headers.get("Authorization") or "")
+		incoming_key = (frappe.request.headers.get("apikey") or
+				frappe.request.headers.get("Authorization") or "")
 	except Exception:
-		api_key = settings.global_api_key or ""  # in tests, skip auth
+		incoming_key = stored_key  # in tests, skip auth
 
-	if api_key != (settings.global_api_key or ""):
+	if stored_key and incoming_key != stored_key:
 		frappe.response["http_status_code"] = 401
 		return {"error": "Unauthorized"}
 
@@ -2256,8 +2263,8 @@ def enqueue_wa_sync() -> dict:
 @frappe.whitelist()
 def wipe_wa_contacts() -> dict:
 	"""Delete all WA Contact rows. Used before a clean resync to remove LID/PN duplicates."""
-	if frappe.session.user == "Guest":
-		frappe.throw("Not permitted")
+	if "System Manager" not in frappe.get_roles():
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	count = frappe.db.count("WA Contact")
 	frappe.db.sql("DELETE FROM `tabWA Contact`")
 	frappe.db.commit()

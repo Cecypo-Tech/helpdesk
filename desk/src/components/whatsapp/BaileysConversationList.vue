@@ -187,6 +187,12 @@ function syncContacts() {
   if (syncingContacts.value) return;
   syncingContacts.value = true;
   syncResource.submit({});
+  setTimeout(() => {
+    if (syncingContacts.value) {
+      syncingContacts.value = false;
+      toast.error("Sync timed out — check server logs");
+    }
+  }, 120_000);
 }
 
 function onSyncComplete(data: { contacts?: number; groups?: number; error?: string }) {
