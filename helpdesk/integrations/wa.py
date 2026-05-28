@@ -13,6 +13,11 @@ def _settings():
     return frappe.get_cached_doc("WA API Settings")
 
 
+def _shared_settings():
+    """Shared WA settings for both integrations (WhatsApp Helpdesk Settings)."""
+    return frappe.get_cached_doc("WhatsApp Helpdesk Settings")
+
+
 def _line(instance_name: str):
     """Return the WA Line doc for the given instance_name, or throw."""
     names = frappe.get_all(
@@ -399,7 +404,7 @@ def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "") 
 
 
 def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings) -> None:
-    quiet_minutes = int(settings.notification_quiet_minutes or 0)
+    quiet_minutes = int(_shared_settings().notification_quiet_minutes or 0)
     if quiet_minutes:
         recent_outgoing = frappe.db.count(
             "WA Message",
@@ -852,7 +857,7 @@ def send_wa_reply(
 
     line = frappe.get_doc("WA Line", line_name)
 
-    if settings.append_agent_initials:
+    if _shared_settings().append_agent_initials:
         suffix = f"\n^{_agent_initials()}"
         full_message = f"{message}{suffix}" if message else suffix.strip()
     else:
@@ -953,8 +958,9 @@ def send_wa_reply(
                 frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
             except Exception:
                 pass
-        if settings.agent_reply_status:
-            _set_ticket_status(ticket, settings.agent_reply_status)
+        shared = _shared_settings()
+        if shared.agent_reply_status:
+            _set_ticket_status(ticket, shared.agent_reply_status)
 
     _publish_wa_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
     return {"name": msg_doc.name, "message_id": sent_id, "status": "Sent"}
@@ -1194,8 +1200,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
     if line_doc:
         group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
 
-    settings = frappe.get_cached_doc("WA API Settings")
-    restrict = settings.get("restrict_chats_by_team")
+    restrict = _shared_settings().restrict_chats_by_team
     user_teams: set[str] = set()
     user_has_any_team = False
     if restrict:

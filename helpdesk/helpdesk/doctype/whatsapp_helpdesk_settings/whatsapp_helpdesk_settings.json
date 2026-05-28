@@ -18,15 +18,20 @@
   "customer_reply_status",
   "col_break_status",
   "agent_reply_status",
+  "append_agent_initials",
   "section_template_window",
-  "allow_template_outside_window"
+  "allow_template_outside_window",
+  "section_access",
+  "restrict_chats_by_team",
+  "section_notifications",
+  "notification_quiet_minutes"
  ],
  "fields": [
   {
    "default": "0",
    "fieldname": "enabled",
    "fieldtype": "Check",
-   "label": "Enable Ticket Auto-Creation"
+   "label": "Enable WABA Ticket Auto-Creation"
   },
   {
    "default": "Skip Ticket Creation",
@@ -90,6 +95,13 @@
    "options": "HD Ticket Status"
   },
   {
+   "default": "1",
+   "description": "When enabled, appends ^XX (agent initials) to every outgoing WA message.",
+   "fieldname": "append_agent_initials",
+   "fieldtype": "Check",
+   "label": "Append Agent Initials to Outgoing Messages"
+  },
+  {
    "fieldname": "section_template_window",
    "fieldtype": "Section Break",
    "label": "Template Messages After 24h Window"
@@ -99,12 +111,36 @@
    "fieldname": "allow_template_outside_window",
    "fieldtype": "Check",
    "label": "Allow Template Messages After 24h Window"
+  },
+  {
+   "fieldname": "section_access",
+   "fieldtype": "Section Break",
+   "label": "Chat Access Control"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, agents only see chats assigned to their team. Unassigned chats are visible to all. Agents with no team see everything.",
+   "fieldname": "restrict_chats_by_team",
+   "fieldtype": "Check",
+   "label": "Restrict Chats by Team Assignment"
+  },
+  {
+   "fieldname": "section_notifications",
+   "fieldtype": "Section Break",
+   "label": "Notifications"
+  },
+  {
+   "default": "10",
+   "description": "Skip the bell notification if an agent already replied within this many minutes. 0 = always notify.",
+   "fieldname": "notification_quiet_minutes",
+   "fieldtype": "Int",
+   "label": "Notification Quiet Period (Minutes)"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-25 00:00:00.000000",
+ "modified": "2026-05-28 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "WhatsApp Helpdesk Settings",
