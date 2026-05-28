@@ -18,9 +18,11 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 - `helpdesk/hooks.py` — `WhatsApp Message` doc_events pointing to `wa.py` integration handlers
 
 ### Frontend
-- `desk/src/components/whatsapp/WhatsAppChatTab.vue` — main tab component (handles both WABA and WA Line display)
-- `desk/src/components/whatsapp/WhatsAppBubble.vue` — message bubble (outgoing = green, incoming = surface-white)
-- `desk/src/components/whatsapp/WhatsAppReplyBox.vue` — reply input with file attach, paste, drag-drop
+- `desk/src/components/whatsapp/WhatsAppChatTab.vue` — WABA tab component (rendered when the ticket has **no** `baileys_jid`)
+- `desk/src/components/whatsapp/BaileysGroupChatTab.vue` — Evolution API (WA Line) tab component (rendered when the ticket **has** a `baileys_jid`); handles both 1:1 and group chats despite the name
+- `desk/src/components/whatsapp/WhatsAppBubble.vue` — message bubble shared by **both** tabs (outgoing = green, incoming = surface-white)
+- `desk/src/components/whatsapp/WhatsAppReplyBox.vue` — WABA reply input (file attach, paste, drag-drop)
+- `desk/src/components/whatsapp/BaileysReplyBox.vue` — Evolution API reply input (file attach, paste, drag-drop, @mentions, saved replies)
 - `desk/src/components/icons/WhatsAppIcon.vue` — SVG icon
 - `desk/src/components/ticket-agent/TicketActivityPanel.vue` — modified: adds WhatsApp tab
 - `desk/src/components/ticket-agent/TicketContactTab.vue` — modified: shows company, designation, mobile
@@ -42,7 +44,7 @@ bench build --app helpdesk
 
 ## Two WhatsApp Integrations
 
-This fork supports **two completely separate WhatsApp integrations** that share the same UI tab and backend module (`wa.py`). They are distinguished by whether an HD Ticket has the custom field `baileys_jid` set.
+This fork supports **two completely separate WhatsApp integrations** that share the same message bubble and backend module (`wa.py`) but render in **separate tabs**. They are distinguished by whether an HD Ticket has the custom field `baileys_jid` set.
 
 ### 1. WABA — WhatsApp Business API via `frappe_whatsapp`
 
@@ -61,16 +63,21 @@ This fork supports **two completely separate WhatsApp integrations** that share 
 
 The `frappe_whatsapp` controller (`WhatsAppMessage.before_insert → send_outgoing`) handles the actual Meta API call. When sending media, `attach` **must** be set on the `WhatsApp Message` doc — if it is empty for a non-text `content_type`, Meta rejects the request.
 
-### 2. WA Line — Evolution API / Baileys
+### 2. WA Line — Evolution API
+
+> Naming: the **provider/integration is Evolution API**. "Baileys" is only the underlying
+> protocol/library Evolution wraps — keep it out of prose, but **do not rename** the code
+> identifiers that bake it in (`baileys_jid`, `baileys_line`, the `helpdesk:baileys-*`
+> realtime events, `BaileysGroupChatTab.vue`, `BaileysReplyBox.vue`).
 
 | Item | Detail |
 |------|--------|
-| **Provider** | Self-hosted Evolution API (Baileys wrapper) |
+| **Provider** | Self-hosted Evolution API (wraps the Baileys protocol) |
 | **App dependency** | None — uses `WA API Settings` + `WA Line` DocTypes in helpdesk |
 | **Message DocType** | `WA Message` (custom DocType in this app) |
 | **Ticket link** | `HD Ticket.baileys_jid` custom field + `WA Message.reference_name` |
 | **Routing key** | HD Ticket has a `baileys_jid` value |
-| **Reply function** | `send_wa_reply()` Baileys path |
+| **Reply function** | `send_wa_reply()` Evolution API path |
 | **Media function** | `send_wa_media()` → `send_wa_reply()` with `media_url` → `WA Message.media_url` |
 | **24-hr window** | Not enforced (no window restriction) |
 | **Settings** | `WA API Settings` singleton + `WA Line` per-instance docs |
@@ -87,12 +94,12 @@ Custom fields on `HD Ticket` (added via fixtures):
 ```
 send_wa_reply(ticket, jid=None, ...)
   ├── ticket + no jid → look up HD Ticket.baileys_jid
-  │     ├── has baileys_jid → Baileys/WA Line path
+  │     ├── has baileys_jid → Evolution API (WA Line) path
   │     └── no baileys_jid  → _send_fw_reply() [WABA path]
-  └── jid provided → Baileys/WA Line path directly
+  └── jid provided → Evolution API (WA Line) path directly
 ```
 
-The same ticket view/tab renders both integrations — `get_whatsapp_ticket_info()` returns `via_frappe_whatsapp: True` for WABA tickets so the frontend can show the 24-hr window UI.
+Both integrations share the `WhatsAppBubble` component and the `get_whatsapp_ticket_info()` API (which returns `via_frappe_whatsapp: True` for WABA tickets so the frontend can show the 24-hr window UI), but they render in **different tabs** — see the component list above.
 
 ---
 
@@ -112,7 +119,7 @@ frappe-ui's preset already defines `[data-theme='dark']` CSS variable overrides 
 |-------|-----------|-------------|---------|
 | `helpdesk:whatsapp-message` | server → all | WABA | New incoming/outgoing frappe_whatsapp message |
 | `helpdesk:whatsapp-status-update` | server → all | WABA | Delivery status change (sent/delivered/read) |
-| `helpdesk:baileys-message` | server → all | WA Line | New incoming/outgoing Baileys message |
+| `helpdesk:baileys-message` | server → all | WA Line | New incoming/outgoing Evolution API (WA Line) message |
 | `helpdesk:baileys-status-update` | server → all | WA Line | WA Line delivery status change |
 | `helpdesk:whatsapp-message-edit` | server → all | WA Line | Message text edited |
 | `helpdesk:comment-reaction-update` | server → all | both | Bell reload |
