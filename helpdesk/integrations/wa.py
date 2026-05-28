@@ -1735,6 +1735,10 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_
 	phone = get_contact_phone(ticket)
 	if not phone:
 		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+	shared = _shared_settings()
+	if shared.append_agent_initials and content_type == "text":
+		suffix = f"\n^{_agent_initials()}"
+		message = f"{message}{suffix}"
 	msg_doc = frappe.get_doc({
 		"doctype": "WhatsApp Message",
 		"type": "Outgoing",
