@@ -281,8 +281,29 @@ async function send() {
   }
 }
 
+function htmlToWa(html: string): string {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  function walk(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const el = node as Element;
+    const tag = el.tagName.toLowerCase();
+    const inner = Array.from(el.childNodes).map(walk).join("");
+    if (tag === "strong" || tag === "b") return inner ? `*${inner}*` : "";
+    if (tag === "em" || tag === "i") return inner ? `_${inner}_` : "";
+    if (tag === "s" || tag === "strike" || tag === "del") return inner ? `~${inner}~` : "";
+    if (tag === "code") return inner ? `\`${inner}\`` : "";
+    if (tag === "br") return "\n";
+    if (tag === "p" || tag === "div") return inner ? `${inner}\n` : "";
+    if (tag === "li") return `• ${inner}\n`;
+    return inner;
+  }
+  return walk(div).replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function applySavedReply(content: string) {
-  text.value = content;
+  text.value = htmlToWa(content);
   showSavedReplies.value = false;
   nextTick(() => autoResize());
 }
