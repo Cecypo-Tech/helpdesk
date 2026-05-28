@@ -10,6 +10,11 @@
   "instance_token",
   "col_break_1",
   "connected_user",
+  "section_ticket_defaults",
+  "default_ticket_type",
+  "col_break_ticket",
+  "default_team",
+  "placeholder_email_domain",
   "section_groups",
   "group_jids",
   "section_blocklist",
@@ -47,6 +52,36 @@
    "fieldtype": "Link",
    "label": "Connected User",
    "options": "User"
+  },
+  {
+   "fieldname": "section_ticket_defaults",
+   "fieldtype": "Section Break",
+   "label": "Ticket Defaults"
+  },
+  {
+   "description": "Ticket type assigned to new tickets created from this line. Overrides the global default.",
+   "fieldname": "default_ticket_type",
+   "fieldtype": "Link",
+   "label": "Default Ticket Type",
+   "options": "HD Ticket Type"
+  },
+  {
+   "fieldname": "col_break_ticket",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Team assigned to new tickets created from this line. Overrides the global default.",
+   "fieldname": "default_team",
+   "fieldtype": "Link",
+   "label": "Default Team",
+   "options": "HD Team"
+  },
+  {
+   "default": "whatsapp.placeholder.local",
+   "description": "Domain for synthetic emails when the contact has no email address.",
+   "fieldname": "placeholder_email_domain",
+   "fieldtype": "Data",
+   "label": "Placeholder Email Domain"
   },
   {
    "fieldname": "section_groups",

@@ -1498,14 +1498,20 @@ def create_task_from_chat(jid: str, line: str, title: str) -> str:
     """Create an HD Task linked to the WA conversation, creating a ticket if none exists."""
     ticket_name = frappe.db.get_value("HD Ticket", {"baileys_jid": jid}, "name")
     if not ticket_name:
-        ticket = frappe.get_doc({
+        line_doc = frappe.get_doc("WA Line", line) if line else None
+        ticket_data = {
             "doctype": "HD Ticket",
             "subject": title,
             "description": title,
             "ticket_channel": "WhatsApp",
             "baileys_jid": jid,
             "baileys_line": line,
-        })
+        }
+        if line_doc and line_doc.default_ticket_type:
+            ticket_data["ticket_type"] = line_doc.default_ticket_type
+        if line_doc and line_doc.default_team:
+            ticket_data["agent_group"] = line_doc.default_team
+        ticket = frappe.get_doc(ticket_data)
         ticket.insert(ignore_permissions=True)
         ticket_name = ticket.name
     task = frappe.get_doc({
@@ -1522,14 +1528,20 @@ def create_task_from_chat(jid: str, line: str, title: str) -> str:
 @frappe.whitelist()
 def create_ticket_from_chat(jid: str, line: str, subject: str, description: str = "") -> str:
     """Create an HD Ticket linked to the WA conversation."""
-    ticket = frappe.get_doc({
+    line_doc = frappe.get_doc("WA Line", line) if line else None
+    ticket_data = {
         "doctype": "HD Ticket",
         "subject": subject,
         "description": description or subject,
         "ticket_channel": "WhatsApp",
         "baileys_jid": jid,
         "baileys_line": line,
-    })
+    }
+    if line_doc and line_doc.default_ticket_type:
+        ticket_data["ticket_type"] = line_doc.default_ticket_type
+    if line_doc and line_doc.default_team:
+        ticket_data["agent_group"] = line_doc.default_team
+    ticket = frappe.get_doc(ticket_data)
     ticket.insert(ignore_permissions=True)
     frappe.db.commit()
     return ticket.name
