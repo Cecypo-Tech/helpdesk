@@ -1,17 +1,28 @@
 frappe.ui.form.on("WA Line", {
 	refresh(frm) {
 		if (!frm.is_new()) {
-			frappe.db.count("WA Message", { line: frm.doc.name }).then((count) => {
+			frm.add_custom_button(__("Delete Line"), async () => {
+				const count = await frappe.db.count("WA Message", { line: frm.doc.name });
+				let msg = __("Are you sure you want to permanently delete this line?");
 				if (count > 0) {
-					frm.set_intro(
+					msg +=
+						"<br><br><span style='color:var(--orange-600)'>" +
 						__(
-							"This line has {0} WhatsApp message(s). Deleting this line will also permanently delete all linked messages.",
+							"This line has {0} WhatsApp message(s). All linked messages will also be permanently deleted.",
 							[count]
-						),
-						"orange"
-					);
+						) +
+						"</span>";
 				}
-			});
+				frappe.confirm(msg, () => {
+					frappe.call({
+						method: "frappe.client.delete",
+						args: { doctype: "WA Line", name: frm.doc.name },
+						callback() {
+							frappe.set_route("List", "WA Line");
+						},
+					});
+				});
+			}, __("WhatsApp"));
 
 			frm.add_custom_button(__("Configure Webhook"), () => {
 				frappe.call({
