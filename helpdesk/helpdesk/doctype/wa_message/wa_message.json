@@ -50,7 +50,8 @@
   {
    "fieldname": "sender_jid",
    "fieldtype": "Data",
-   "label": "Sender JID"
+   "label": "Sender JID",
+   "search_index": 1
   },
   {
    "fieldname": "sender_name",

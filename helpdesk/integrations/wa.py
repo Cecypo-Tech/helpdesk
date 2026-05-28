@@ -604,7 +604,10 @@ def webhook():
     if event == "messages.update":
         return _handle_update(payload.get("data") or [], line)
     if event == "contacts.upsert":
-        _handle_contacts_upsert(payload.get("data") or [])
+        data = payload.get("data") or []
+        if isinstance(data, dict):
+            data = [data]
+        _handle_contacts_upsert(data)
         return {"status": "ok"}
 
     return {"status": "ignored", "event": event}
@@ -1327,6 +1330,11 @@ def get_wa_group_participants(jid: str, line: str) -> list[dict]:
         )
         resp.raise_for_status()
         participants = resp.json().get("participants", [])
+    except _requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return []  # group no longer exists on WhatsApp
+        frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
+        return []
     except Exception as e:
         frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
         return []
@@ -2461,14 +2469,24 @@ def sync_wa_groups() -> dict:
 			resp.raise_for_status()
 			raw = resp.json()
 			groups = raw if isinstance(raw, list) else raw.get("groups", [])
+		except _requests.exceptions.HTTPError as e:
+			if e.response is not None and e.response.status_code == 404:
+				continue  # instance not registered on Evolution API — skip silently
+			frappe.log_error(f"sync_wa_groups failed for line {line_name}: {e}", "WA Group Sync")
+			continue
 		except Exception as e:
 			frappe.log_error(f"sync_wa_groups failed for line {line_name}: {e}", "WA Group Sync")
 			continue
 
-		# Map existing child rows by JID for quick lookup
-		existing = {row.jid: row for row in (line_doc.group_jids or [])}
-		changed = False
+		# Existing JIDs for this line in the child table
+		existing_rows = frappe.db.get_all(
+			"WhatsApp Group JID",
+			filters={"parent": line_name, "parenttype": "WA Line"},
+			fields=["name", "jid", "group_name"],
+		)
+		existing = {r.jid: r for r in existing_rows}
 
+		insert_rows = []
 		for g in groups:
 			jid = g.get("id") or ""
 			if not jid or not jid.endswith("@g.us"):
@@ -2476,19 +2494,31 @@ def sync_wa_groups() -> dict:
 			subject = g.get("subject") or g.get("name") or ""
 
 			if jid in existing:
-				row = existing[jid]
-				if subject and row.group_name != subject:
-					row.group_name = subject
-					changed = True
+				if subject and existing[jid].group_name != subject:
+					frappe.db.set_value(
+						"WhatsApp Group JID", existing[jid].name, "group_name", subject, update_modified=False
+					)
 					updated += 1
 			else:
-				line_doc.append("group_jids", {"jid": jid, "group_name": subject})
-				existing[jid] = True
-				changed = True
+				insert_rows.append((
+					frappe.generate_hash(length=10),
+					line_name, "WA Line", "group_jids",
+					len(existing) + len(insert_rows) + 1,
+					jid, subject or "",
+				))
 				created += 1
 
-		if changed:
-			line_doc.save(ignore_permissions=True)
+		if insert_rows:
+			frappe.db.sql(
+				"""
+				INSERT INTO `tabWhatsApp Group JID`
+				    (name, parent, parenttype, parentfield, idx, jid, group_name)
+				VALUES {placeholders}
+				""".format(placeholders=", ".join(["(%s,%s,%s,%s,%s,%s,%s)"] * len(insert_rows))),
+				[v for row in insert_rows for v in row],
+			)
+			frappe.db.commit()
+		elif updated:
 			frappe.db.commit()
 
 	return {"created": created, "updated": updated, "total": created + updated}
