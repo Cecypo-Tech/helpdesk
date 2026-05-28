@@ -688,57 +688,66 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			return {"status": "ok", "edited": True}
 		# Fall through — original not yet stored (edge case: creates new record below)
 
-	# Deduplicate
+	# Deduplicate (soft check — catches most cases before the DB round-trip)
 	if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
 		return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
 
+	# Use None for empty message_id so the UNIQUE index allows multiple NULLs
+	stored_msg_id = message_id or None
+
 	if from_me:
 		owner = line.connected_user or "Administrator"
 		if not frappe.db.exists("User", owner):
 			owner = "Administrator"
-		doc = frappe.get_doc({
-			"doctype": "WA Message",
-			"direction": "Outgoing",
-			"jid": jid,
-			"sender_jid": "",
-			"sender_name": "(via phone)",
-			"profile_name": "(via phone)",
-			"message": text,
-			"content_type": content_type or "text",
-			"media_url": media_url,
-			"message_id": message_id,
-			"reply_to_message_id": reply_to_message_id,
-			"status": "Delivered",
-			"reference_doctype": "",
-			"reference_name": "",
-			"line": line.name,
-			"is_read": 1,
-		}).insert(ignore_permissions=True)
+		try:
+			doc = frappe.get_doc({
+				"doctype": "WA Message",
+				"direction": "Outgoing",
+				"jid": jid,
+				"sender_jid": "",
+				"sender_name": "(via phone)",
+				"profile_name": "(via phone)",
+				"message": text,
+				"content_type": content_type or "text",
+				"media_url": media_url,
+				"message_id": stored_msg_id,
+				"reply_to_message_id": reply_to_message_id,
+				"status": "Delivered",
+				"reference_doctype": "",
+				"reference_name": "",
+				"line": line.name,
+				"is_read": 1,
+			}).insert(ignore_permissions=True)
+		except frappe.exceptions.DuplicateEntryError:
+			return {"status": "duplicate"}
 		frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
 		_publish_wa_event(jid, is_incoming=False, line=line.name)
 		return {"status": "ok", "mirrored": True}
 
 	# Incoming message
-	frappe.get_doc({
-		"doctype": "WA Message",
-		"direction": "Incoming",
-		"jid": jid,
-		"sender_jid": sender,
-		"sender_name": sender_name,
-		"profile_name": sender_name,
-		"message": text,
-		"content_type": content_type or "text",
-		"media_url": media_url,
-		"message_id": message_id,
-		"reply_to_message_id": reply_to_message_id,
-		"status": "Pending",
-		"reference_doctype": "",
-		"reference_name": "",
-		"line": line.name,
-		"is_read": 0,
-	}).insert(ignore_permissions=True)
+	try:
+		frappe.get_doc({
+			"doctype": "WA Message",
+			"direction": "Incoming",
+			"jid": jid,
+			"sender_jid": sender,
+			"sender_name": sender_name,
+			"profile_name": sender_name,
+			"message": text,
+			"content_type": content_type or "text",
+			"media_url": media_url,
+			"message_id": stored_msg_id,
+			"reply_to_message_id": reply_to_message_id,
+			"status": "Pending",
+			"reference_doctype": "",
+			"reference_name": "",
+			"line": line.name,
+			"is_read": 0,
+		}).insert(ignore_permissions=True)
+	except frappe.exceptions.DuplicateEntryError:
+		return {"status": "duplicate"}
 
 	_upsert_contact_name(jid, sender_name)
 	_publish_wa_event(jid, is_incoming=True, line=line.name)
