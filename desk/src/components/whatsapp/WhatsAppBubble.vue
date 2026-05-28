@@ -483,7 +483,8 @@ const props = withDefaults(defineProps<{
   reactions?: Array<{ emoji: string; type: string; sender: string }>;
   replyToMessage?: Record<string, any> | null;
   isGroup?: boolean;
-}>(), { isGroup: false });
+  mentionMap?: Record<string, string>;
+}>(), { isGroup: false, mentionMap: () => ({}) });
 
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
@@ -654,6 +655,15 @@ const formattedMessage = computed(() => {
   text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
   // Escape HTML first
   text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Resolve @mention digits → @Name using the participant map
+  if (props.mentionMap && Object.keys(props.mentionMap).length) {
+    text = text.replace(/@(\d{7,20})/g, (_match, digits) => {
+      const name = props.mentionMap![digits];
+      return name
+        ? `<span class="font-medium text-blue-600 dark:text-blue-400">@${name}</span>`
+        : `@${digits}`;
+    });
+  }
   // WhatsApp formatting: *bold*, _italic_, ~strikethrough~, ```monospace```
   text = text.replace(/```([\s\S]*?)```/g, "<code class=\"rounded bg-surface-gray-2 px-1 font-mono text-[0.85em]\">$1</code>");
   text = text.replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>");

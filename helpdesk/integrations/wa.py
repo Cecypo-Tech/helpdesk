@@ -1991,11 +1991,17 @@ def get_whatsapp_ticket_info(ticket: str) -> dict:
 			group_name = frappe.db.get_value("WA Contact", {"jid": jid}, "custom_name") or jid.split("@")[0]
 		assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
 		assigned_users = frappe.parse_json(assign_json) or []
+		baileys_line = None
+		try:
+			baileys_line = frappe.db.get_value("HD Ticket", ticket, "baileys_line")
+		except Exception:
+			pass
 		return {
 			"has_whatsapp": True,
 			"jid": jid,
 			"is_group": is_grp,
 			"group_name": group_name,
+			"baileys_line": baileys_line,
 			"is_assigned": frappe.session.user in assigned_users,
 			"assignees": assigned_users,
 			"reply_window_open": True,

@@ -31,6 +31,8 @@
             :message="msg"
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
+            :isGroup="ticketInfo.data?.is_group ?? false"
+            :mentionMap="mentionMap"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
@@ -139,6 +141,20 @@ const ticketInfo = createResource({
 
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
+});
+
+const participantsResource = createResource({
+  url: "helpdesk.integrations.wa.get_wa_group_participants",
+  auto: false,
+});
+
+const mentionMap = computed<Record<string, string>>(() => {
+  const participants: Array<{ jid: string; phone: string; name: string }> = participantsResource.data || [];
+  const map: Record<string, string> = {};
+  for (const p of participants) {
+    if (p.phone && p.name) map[p.phone] = p.name;
+  }
+  return map;
 });
 
 const templates = createResource({
@@ -322,6 +338,12 @@ async function applyEdit(messageName: string, newText: string) {
 
 watch(messageList, () => {
   scrollToBottom();
+});
+
+watch(() => ticketInfo.data, (info) => {
+  if (info?.is_group && info?.jid && info?.baileys_line && !participantsResource.data) {
+    participantsResource.submit({ jid: info.jid, line: info.baileys_line });
+  }
 });
 
 onMounted(() => {
