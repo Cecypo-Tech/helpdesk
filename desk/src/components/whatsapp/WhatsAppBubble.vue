@@ -309,11 +309,24 @@
               </div>
             </div>
           </span>
-          <span v-if="isOutgoing" class="text-[10px]">
-            <span v-if="message.status === 'read'" class="text-blue-500">✓✓</span>
-            <span v-else-if="message.status === 'delivered'" class="text-ink-gray-5">✓✓</span>
-            <span v-else-if="message.status === 'sent' || message.status === 'Success'" class="text-ink-gray-5">✓</span>
-            <span v-else-if="message.status === 'Failed'" class="text-red-500">!</span>
+          <span v-if="isOutgoing" class="flex items-center gap-1 text-[10px] leading-none">
+            <!-- pending: clock -->
+            <svg v-if="statusKind === 'pending'" class="text-ink-gray-4" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>Sending…</title><circle cx="12" cy="12" r="9"/><polyline points="12 7.5 12 12 15 13.5"/></svg>
+            <!-- sent: single grey tick -->
+            <span v-else-if="statusKind === 'sent'" class="text-ink-gray-5" title="Sent">✓</span>
+            <!-- delivered: double grey tick -->
+            <span v-else-if="statusKind === 'delivered'" class="text-ink-gray-5" title="Delivered">✓✓</span>
+            <!-- read: double blue tick -->
+            <span v-else-if="statusKind === 'read'" class="text-blue-500" title="Read">✓✓</span>
+            <!-- failed: red warning + optional one-tap retry -->
+            <template v-else-if="statusKind === 'failed'">
+              <span class="font-bold text-red-500" title="Not delivered">!</span>
+              <button
+                v-if="allowRetry"
+                class="font-medium text-red-500 hover:underline"
+                @click.stop="$emit('retry', message.name)"
+              >Retry</button>
+            </template>
           </span>
         </div>
       </div>
@@ -484,16 +497,31 @@ const props = withDefaults(defineProps<{
   replyToMessage?: Record<string, any> | null;
   isGroup?: boolean;
   mentionMap?: Record<string, string>;
-}>(), { isGroup: false, mentionMap: () => ({}) });
+  allowRetry?: boolean;
+}>(), { isGroup: false, mentionMap: () => ({}), allowRetry: false });
 
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
   (e: "react", emoji: string, targetMessageId: string): void;
   (e: "scrollToReply", messageId: string): void;
   (e: "edit", messageName: string, newText: string): void;
+  (e: "retry", messageName: string): void;
 }>();
 
 const isOutgoing = computed(() => props.message.type === "Outgoing");
+
+// Normalise the delivery status across both integrations (WA Line uses capitalised
+// Pending/Sent/Delivered/Read/Failed; frappe_whatsapp uses lowercase + "Success").
+// Returns one of: "pending" | "sent" | "delivered" | "read" | "failed" | "".
+const statusKind = computed(() => {
+  const s = String(props.message.status || "").toLowerCase();
+  if (s === "read" || s === "played") return "read";
+  if (s === "delivered") return "delivered";
+  if (s === "sent" || s === "success" || s === "server_ack") return "sent";
+  if (s === "failed" || s === "error") return "failed";
+  if (s === "pending" || s === "queued") return "pending";
+  return "";
+});
 
 const SENDER_COLORS = ["#e53935","#8e24aa","#1e88e5","#00897b","#f4511e","#6d4c41","#546e7a","#d81b60"];
 const senderColor = computed(() => {

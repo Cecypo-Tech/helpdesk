@@ -51,6 +51,21 @@ const sendReactionResource = createResource({
   },
 });
 
+const retryResource = createResource({
+  url: "helpdesk.integrations.wa.retry_wa_message",
+  onSuccess() {
+    messages.reload();
+    toast.success("Message sent");
+  },
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Retry failed");
+  },
+});
+
+function retryMessage(messageName: string) {
+  retryResource.submit({ message_name: messageName });
+}
+
 const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
 
 const messageList = computed(() =>
@@ -130,8 +145,12 @@ function markAsRead() {
   markReadResource.submit({ ticket: props.ticketId });
 }
 
-function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
-  if (String(data.ticket) === String(props.ticketId)) {
+function handleRealtimeMessage(data: { ticket?: string; jid?: string; is_incoming?: boolean }) {
+  // WA Line broadcasts on helpdesk:baileys-message. Outgoing events carry `ticket`;
+  // incoming events only carry `jid`, so match on either.
+  const sameTicket = data.ticket && String(data.ticket) === String(props.ticketId);
+  const sameJid = data.jid && tabInfo.data?.jid && data.jid === tabInfo.data.jid;
+  if (sameTicket || sameJid) {
     messages.reload();
     tabInfo.reload();
     scrollToBottom();
@@ -148,14 +167,14 @@ function handleStatusUpdate(data: { message_id: string; status: string }) {
 watch(messageList, () => { scrollToBottom(); });
 
 onMounted(() => {
-  $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
+  $socket.on("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.on("helpdesk:baileys-status-update", handleStatusUpdate);
   scrollToBottom();
   markAsRead();
 });
 
 onBeforeUnmount(() => {
-  $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
+  $socket.off("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.off("helpdesk:baileys-status-update", handleStatusUpdate);
 });
 </script>
@@ -191,9 +210,11 @@ onBeforeUnmount(() => {
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="true"
+            :allowRetry="true"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
+            @retry="retryMessage"
           />
         </template>
       </div>

@@ -804,7 +804,7 @@ def _handle_contacts_upsert(contacts: list) -> None:
 
 # WA API v2 message status integer codes
 _STATUS_MAP = {
-    0: None,         # ERROR — ignore
+    0: "Failed",     # ERROR — message could not be delivered (surface it, don't drop it)
     1: "Sent",       # PENDING
     2: "Sent",       # SERVER_ACK
     3: "Delivered",  # DELIVERY_ACK
@@ -859,6 +859,75 @@ def _handle_delete(data: dict, line) -> dict:
 
 
 # ── Agent send ────────────────────────────────────────────────────────────────
+
+_MIME_MAP = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/ogg", "document": "application/octet-stream"}
+
+
+def _evo_send_message(
+    line,
+    jid: str,
+    full_message: str,
+    content_type: str = "text",
+    media_url: str | None = None,
+    reply_to_message_id: str | None = None,
+    mentioned_jids=None,
+) -> str:
+    """POST a single message to the Evolution API and return the sent message id.
+
+    Raises on any failure (timeout, non-2xx, connection error). Callers are responsible
+    for deciding what a failure means (persist as Failed, throw to the user, etc.).
+    `full_message` is sent verbatim — agent-initials suffixing happens in the caller.
+    """
+    # Build quoted context for WhatsApp reply threading
+    quoted_key: dict | None = None
+    if reply_to_message_id:
+        target = frappe.db.get_value(
+            "WA Message",
+            {"message_id": reply_to_message_id},
+            ["message_id", "direction", "sender_jid"],
+            as_dict=True,
+        )
+        if target:
+            is_from_me = target.direction == "Outgoing"
+            participant = "" if not _is_group(jid) else (
+                target.sender_jid if not is_from_me else ""
+            )
+            quoted_key = {"remoteJid": jid, "fromMe": is_from_me, "id": reply_to_message_id}
+            if participant:
+                quoted_key["participant"] = participant
+
+    if isinstance(mentioned_jids, str):
+        mentioned_jids = frappe.parse_json(mentioned_jids) if mentioned_jids.strip() else None
+
+    if media_url and content_type in ("image", "video", "audio", "document"):
+        abs_url = media_url if media_url.startswith("http") else frappe.utils.get_url(media_url)
+        payload: dict = {
+            "number": jid,
+            "mediatype": content_type,
+            "mimetype": _MIME_MAP.get(content_type, "application/octet-stream"),
+            "media": abs_url,
+            "caption": full_message,
+        }
+        endpoint, timeout = "message/sendMedia", 30
+    else:
+        payload = {"number": jid, "text": full_message}
+        endpoint, timeout = "message/sendText", 15
+
+    if quoted_key:
+        payload["quoted"] = {"key": quoted_key}
+    if mentioned_jids:
+        payload["mentionsEveryOne"] = False
+        payload["mentioned"] = mentioned_jids
+
+    resp = _evo_session.post(
+        _url(endpoint, line.instance_name),
+        json=payload,
+        headers=_headers(line),
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
+
 
 @frappe.whitelist()
 def send_wa_reply(
@@ -920,72 +989,26 @@ def send_wa_reply(
     else:
         full_message = message or ""
 
-    _MIME_MAP = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/ogg", "document": "application/octet-stream"}
-
-    # Build quoted context for WhatsApp reply threading
-    quoted_key: dict | None = None
-    if reply_to_message_id:
-        target = frappe.db.get_value(
-            "WA Message",
-            {"message_id": reply_to_message_id},
-            ["message_id", "direction", "sender_jid"],
-            as_dict=True,
-        )
-        if target:
-            is_from_me = target.direction == "Outgoing"
-            participant = "" if not _is_group(jid) else (
-                target.sender_jid if not is_from_me else ""
-            )
-            quoted_key = {
-                "remoteJid": jid,
-                "fromMe": is_from_me,
-                "id": reply_to_message_id,
-            }
-            if participant:
-                quoted_key["participant"] = participant
-
+    # Attempt the send. Pre-send failures (bad jid / line / disabled settings) have
+    # already raised above; a failure HERE means Evolution rejected or timed out, so we
+    # persist a Failed message the agent can see (and retry) instead of dropping it silently.
     try:
-        if media_url and content_type in ("image", "video", "audio", "document"):
-            abs_url = media_url if media_url.startswith("http") else frappe.utils.get_url(media_url)
-            media_payload: dict = {
-                "number": jid,
-                "mediatype": content_type,
-                "mimetype": _MIME_MAP.get(content_type, "application/octet-stream"),
-                "media": abs_url,
-                "caption": full_message,
-            }
-            if quoted_key:
-                media_payload["quoted"] = {"key": quoted_key}
-            if mentioned_jids:
-                jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
-                if jids_list:
-                    media_payload["mentionsEveryOne"] = False
-                    media_payload["mentioned"] = jids_list
-            resp = _evo_session.post(
-                _url("message/sendMedia", line.instance_name),
-                json=media_payload,
-                headers=_headers(line),
-                timeout=30,
-            )
-        else:
-            payload: dict = {"number": jid, "text": full_message}
-            if quoted_key:
-                payload["quoted"] = {"key": quoted_key}
-            if mentioned_jids:
-                jids_list = frappe.parse_json(mentioned_jids) if isinstance(mentioned_jids, str) else mentioned_jids
-                if jids_list:
-                    payload["mentionsEveryOne"] = False
-                    payload["mentioned"] = jids_list
-            resp = _evo_session.post(
-                _url("message/sendText", line.instance_name),
-                json=payload,
-                headers=_headers(line),
-                timeout=15,
-            )
-        resp.raise_for_status()
-        sent_id = resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
+        sent_id = _evo_send_message(
+            line,
+            jid,
+            full_message,
+            content_type=content_type,
+            media_url=media_url,
+            reply_to_message_id=reply_to_message_id,
+            mentioned_jids=mentioned_jids,
+        )
+        status = "Sent"
+        send_error = None
     except Exception as e:
-        frappe.throw(_("WA API send failed: {0}").format(str(e)))
+        sent_id = ""
+        status = "Failed"
+        send_error = str(e)
+        frappe.log_error(f"WA send failed for {jid}: {e}", "WA Send")
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     msg_doc = frappe.get_doc({
@@ -1000,7 +1023,7 @@ def send_wa_reply(
         "media_url": media_url or "",
         "message_id": sent_id,
         "reply_to_message_id": reply_to_message_id or "",
-        "status": "Sent",
+        "status": status,
         "reference_doctype": "HD Ticket" if ticket else "",
         "reference_name": ticket or "",
         "line": line.name,
@@ -1015,12 +1038,17 @@ def send_wa_reply(
                 frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
             except Exception:
                 pass
-        shared = _shared_settings()
-        if shared.agent_reply_status:
-            _set_ticket_status(ticket, shared.agent_reply_status)
+        # Only advance the ticket to the "agent replied" status when the reply actually went out.
+        if status == "Sent":
+            shared = _shared_settings()
+            if shared.agent_reply_status:
+                _set_ticket_status(ticket, shared.agent_reply_status)
 
     _publish_wa_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
-    return {"name": msg_doc.name, "message_id": sent_id, "status": "Sent"}
+    result = {"name": msg_doc.name, "message_id": sent_id, "status": status}
+    if send_error:
+        result["error"] = send_error
+    return result
 
 
 @frappe.whitelist()
@@ -1193,6 +1221,49 @@ def send_wa_media(
         content_type=content_type,
         media_url=relative_url,
     )
+
+
+@frappe.whitelist()
+def retry_wa_message(message_name: str) -> dict:
+    """Re-send a previously Failed outgoing WA Message in place (Evolution / WA Line path).
+
+    Reuses the stored content/jid/line so the agent can recover from a transient send
+    failure without re-typing or re-attaching. Throws on failure so the explicit retry
+    action gives immediate feedback; the bubble stays Failed until a retry succeeds.
+    """
+    if not _settings().enabled:
+        frappe.throw(_("WA API is not enabled."))
+
+    doc = frappe.get_doc("WA Message", message_name)
+    if doc.direction != "Outgoing":
+        frappe.throw(_("Only outgoing messages can be retried."))
+    if doc.content_type == "reaction":
+        frappe.throw(_("Reactions cannot be retried."))
+    if doc.owner != frappe.session.user and "System Manager" not in frappe.get_roles():
+        frappe.throw(_("You can only retry your own messages."))
+    if not doc.line:
+        frappe.throw(_("Cannot determine the WhatsApp line for this message."))
+
+    line = frappe.get_doc("WA Line", doc.line)
+    try:
+        # doc.message already includes any agent-initials suffix — send verbatim.
+        sent_id = _evo_send_message(
+            line,
+            doc.jid,
+            doc.message or "",
+            content_type=doc.content_type,
+            media_url=doc.media_url or None,
+            reply_to_message_id=doc.reply_to_message_id or None,
+        )
+    except Exception as e:
+        frappe.log_error(f"WA retry failed for {message_name}: {e}", "WA Retry")
+        frappe.throw(_("Retry failed: {0}").format(str(e)))
+
+    doc.db_set("message_id", sent_id, update_modified=False)
+    doc.db_set("status", "Sent", update_modified=False)
+    frappe.db.commit()
+    _publish_wa_event(doc.jid, is_incoming=False, line=line.name, ticket=doc.reference_name or "")
+    return {"name": doc.name, "message_id": sent_id, "status": "Sent"}
 
 
 # ── Utility APIs ──────────────────────────────────────────────────────────────

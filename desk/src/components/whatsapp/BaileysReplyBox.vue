@@ -6,6 +6,23 @@
     @drop.prevent="onDrop"
     :class="{ '!bg-blue-50 ring-2 ring-inset ring-blue-400': dragging }"
   >
+    <!-- Pre-send error banner (no phone, line down, upload failed, …) -->
+    <div
+      v-if="bannerError"
+      class="mb-2 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 dark:border-red-800 dark:bg-red-900/30"
+    >
+      <svg class="mt-0.5 shrink-0 text-red-500" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <p class="min-w-0 flex-1 text-xs text-red-700 dark:text-red-300">{{ bannerError }}</p>
+      <button class="shrink-0 text-red-400 hover:text-red-600" title="Dismiss" @click="bannerError = ''">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
     <!-- Attachment preview -->
     <div v-if="attachment" class="mb-2 flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-3 py-2">
       <img
@@ -189,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { createListResource, createResource, toast } from "frappe-ui";
+import { createListResource, createResource } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 
 interface Participant {
@@ -213,6 +230,7 @@ const emit = defineEmits<{
 
 const text = ref("");
 const sending = ref(false);
+const bannerError = ref("");
 const dragging = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -506,32 +524,40 @@ function onTextKeydown(e: KeyboardEvent) {
 // ── Send ──────────────────────────────────────────────────────────────────────
 const sendReply = createResource({
   url: "helpdesk.integrations.wa.send_wa_reply",
-  onSuccess() {
-    emit("sent");
-  },
-  onError(e: any) {
-    toast.error(e?.messages?.[0] || "Failed to send message");
-  },
 });
 
 async function send() {
   if ((!text.value.trim() && !attachment.value) || sending.value) return;
+  bannerError.value = "";
 
-  if (attachment.value) {
-    sending.value = true;
-    const caption = text.value.trim();
-    const replyToId = props.replyTo?.message_id || "";
-    const replyToFromMe = props.replyTo?.direction === "Outgoing";
-    const ct = contentType.value;
-    const file = attachment.value;
+  const caption = text.value.trim();
+  const replyToId = props.replyTo?.message_id || "";
+  const replyToText = props.replyTo?.message || "";
+  const replyToFromMe = props.replyTo?.direction === "Outgoing";
+  const file = attachment.value;
+  const ct = contentType.value;
+  const jidsToMention = [...mentionedJids.value];
 
-    text.value = "";
-    clearAttachment();
-    mentionedJids.value = [];
-    if (textareaRef.value) textareaRef.value.style.height = "auto";
+  // Restore the composer exactly as it was — used only when a *pre-send* hard error
+  // (upload failed, line down, API disabled) means the message never left.
+  const restore = () => {
+    text.value = caption;
+    if (file) setFile(file);
+    mentionedJids.value = jidsToMention;
+    autoResize();
+  };
 
-    try {
-      // Step 1: upload file to Frappe
+  // Optimistic clear (textarea is disabled while sending, so nothing is typed mid-send).
+  text.value = "";
+  clearAttachment();
+  mentionedJids.value = [];
+  if (textareaRef.value) textareaRef.value.style.height = "auto";
+  sending.value = true;
+
+  try {
+    let fileUrl = "";
+    if (file) {
+      // Step 1: upload the attachment to Frappe storage
       const uploadData = new FormData();
       uploadData.append("file", file, file.name);
       uploadData.append("is_private", "0");
@@ -543,47 +569,36 @@ async function send() {
       });
       if (!uploadResp.ok) {
         const errData = await uploadResp.json().catch(() => ({}));
-        throw new Error(errData?.exc_type || "Upload failed");
+        throw new Error(errData?.exc_type || "File upload failed");
       }
-      const uploadJson = await uploadResp.json();
-      const fileUrl: string = uploadJson?.message?.file_url || "";
-      if (!fileUrl) throw new Error("No file URL returned");
-
-      // Step 2: send via WA API using the uploaded file URL
-      await sendReply.submit({
-        ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
-        ...(props.line ? { line: props.line } : {}),
-        message: caption,
-        content_type: ct,
-        media_url: fileUrl,
-        reply_to_message_id: replyToId,
-        reply_to_from_me: replyToFromMe,
-      });
-    } catch (err: any) {
-      toast.error(err?.message || "Media send failed");
-    } finally {
-      sending.value = false;
-      emit("sent");
+      fileUrl = (await uploadResp.json())?.message?.file_url || "";
+      if (!fileUrl) throw new Error("File upload returned no URL");
     }
-  } else {
-    const msgText = text.value.trim();
-    const replyToId = props.replyTo?.message_id || "";
-    const replyToText = props.replyTo?.message || "";
-    const replyToFromMe = props.replyTo?.direction === "Outgoing";
-    const jidsToMention = [...mentionedJids.value];
-    text.value = "";
-    mentionedJids.value = [];
-    if (textareaRef.value) textareaRef.value.style.height = "auto";
-    sendReply.submit({
+
+    // Step 2: hand off to the WA API. A *send* failure (vs. pre-send) comes back as a
+    // saved message with status "Failed" — the chat then shows a red ! bubble with a
+    // Retry button, so we deliberately do NOT raise a banner for that case.
+    await sendReply.submit({
       ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
       ...(props.line ? { line: props.line } : {}),
-      message: msgText,
-      content_type: "text",
+      message: caption,
+      content_type: file ? ct : "text",
+      ...(fileUrl ? { media_url: fileUrl } : {}),
       reply_to_message_id: replyToId,
       reply_to_text: replyToText,
       reply_to_from_me: replyToFromMe,
       ...(jidsToMention.length ? { mentioned_jids: JSON.stringify(jidsToMention) } : {}),
     });
+    emit("sent");
+  } catch (err: any) {
+    // Pre-send hard failure: put the message back and tell the agent why.
+    restore();
+    bannerError.value =
+      err?.messages?.[0] ||
+      err?.message ||
+      "Message couldn't be sent. Check the WhatsApp connection and try again.";
+  } finally {
+    sending.value = false;
   }
 }
 
