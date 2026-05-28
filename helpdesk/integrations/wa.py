@@ -1321,6 +1321,7 @@ def get_wa_group_participants(jid: str, line: str) -> list[dict]:
     if not settings.enabled or not settings.server_url:
         return []
     line_doc = frappe.get_doc("WA Line", line)
+    api_participants = None
     try:
         resp = _requests.get(
             _url("group/findParticipants", line_doc.instance_name),
@@ -1329,37 +1330,86 @@ def get_wa_group_participants(jid: str, line: str) -> list[dict]:
             timeout=10,
         )
         resp.raise_for_status()
-        participants = resp.json().get("participants", [])
+        api_participants = resp.json().get("participants", [])
     except _requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
-            return []  # group no longer exists on WhatsApp
-        frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
-        return []
+            api_participants = None  # group deleted — fall back to local history
+        else:
+            frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
+            api_participants = None
     except Exception as e:
         frappe.log_error(f"get_wa_group_participants failed for {jid}: {e}")
-        return []
+        api_participants = None
 
-    normalised = []
-    for p in participants:
-        p_id = p.get("id") or ""
-        phone = _phone_from_jid(p_id) if p_id.endswith("@s.whatsapp.net") else ""
-        normalised.append({
-            "jid": p_id,
-            "phone": phone,
-            "name": "",
-            "isAdmin": p.get("admin") in ("admin", "superadmin"),
-        })
+    if api_participants is not None:
+        normalised = []
+        for p in api_participants:
+            p_id = p.get("id") or ""
+            phone = _phone_from_jid(p_id) if p_id.endswith("@s.whatsapp.net") else ""
+            normalised.append({
+                "jid": p_id,
+                "phone": phone,
+                "name": "",
+                "isAdmin": p.get("admin") in ("admin", "superadmin"),
+            })
+    else:
+        # Fall back to senders seen in WA Message history for this group JID
+        rows = frappe.db.sql(
+            """
+            SELECT sender_jid,
+                   MAX(sender_name)  AS sender_name,
+                   MAX(profile_name) AS profile_name
+            FROM `tabWA Message`
+            WHERE jid = %s
+              AND direction = 'Incoming'
+              AND sender_jid IS NOT NULL AND sender_jid != ''
+            GROUP BY sender_jid
+            """,
+            jid,
+            as_dict=True,
+        )
+        normalised = []
+        for row in rows:
+            p_id = row.sender_jid
+            phone = _phone_from_jid(p_id) if p_id.endswith("@s.whatsapp.net") else ""
+            normalised.append({
+                "jid": p_id,
+                "phone": phone,
+                "name": row.sender_name or row.profile_name or "",
+                "isAdmin": False,
+            })
 
+    # Enrich names from WA Contact (custom_name), then fall back to WA Message profile_name
     for p in normalised:
         if p.get("name"):
             continue
-        for lj in [p["jid"], f"{p['phone']}@s.whatsapp.net" if p["phone"] else ""]:
+        lookup_jids = [p["jid"]]
+        if p["phone"]:
+            lookup_jids.append(f"{p['phone']}@s.whatsapp.net")
+        for lj in lookup_jids:
             if not lj:
                 continue
-            name = frappe.db.get_value("WA Contact", {"jid": lj}, "custom_name")
-            if name:
-                p["name"] = name
-                break
+            row = frappe.db.get_value(
+                "WA Contact", {"jid": lj}, ["custom_name", "canonical_jid"], as_dict=True
+            )
+            if row:
+                if row.get("custom_name"):
+                    p["name"] = row["custom_name"]
+                    break
+                # LID row with a resolved canonical — try the PN row
+                if row.get("canonical_jid"):
+                    canon_name = frappe.db.get_value("WA Contact", {"jid": row["canonical_jid"]}, "custom_name")
+                    if canon_name:
+                        p["name"] = canon_name
+                        break
+        if not p.get("name") and p.get("phone"):
+            # Last resort: most recent profile_name from WA Message history
+            p["name"] = frappe.db.get_value(
+                "WA Message",
+                {"sender_jid": p["jid"], "profile_name": ["!=", ""]},
+                "profile_name",
+                order_by="creation desc",
+            ) or ""
 
     return normalised
 
