@@ -88,15 +88,25 @@ frappe.ui.form.on("WA Line", {
 						frappe.call({
 							method: "helpdesk.integrations.wa.sync_wa_old_messages",
 							args: { line: frm.doc.name, limit_per_chat: values.limit || 50 },
-							freeze: true,
-							freeze_message: __("Fetching message history from WhatsApp API…"),
 							callback(r) {
 								if (r.exc) return;
-								const { imported, skipped } = r.message;
-								frappe.msgprint({
-									title: __("Sync Complete"),
-									message: __("Imported {0} new messages. {1} already existed.", [imported, skipped]),
-									indicator: "green",
+								if (r.message?.status === "locked") {
+									frappe.show_alert({ message: __("A sync for this line is already in progress. Try again in a few minutes."), indicator: "orange" }, 6);
+									return;
+								}
+								frappe.show_alert({ message: __("Message sync started in the background."), indicator: "blue" }, 5);
+								frappe.realtime.on("helpdesk:wa-old-sync-complete", function handler(data) {
+									if (data.line !== frm.doc.name) return;
+									frappe.realtime.off("helpdesk:wa-old-sync-complete", handler);
+									if (data.error) {
+										frappe.msgprint({ title: __("Sync Failed"), message: data.error, indicator: "red" });
+									} else {
+										frappe.msgprint({
+											title: __("Sync Complete"),
+											message: __("Imported {0} new messages. {1} already existed.", [data.imported, data.skipped]),
+											indicator: "green",
+										});
+									}
 								});
 							},
 						});

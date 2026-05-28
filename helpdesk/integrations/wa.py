@@ -5,6 +5,31 @@ import frappe
 import requests as _requests
 from frappe import _
 from frappe.utils import now_datetime, time_diff_in_hours
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+def _build_evo_session() -> _requests.Session:
+	sess = _requests.Session()
+	# Retry only idempotent methods (not POST) to avoid duplicate sends.
+	retry = Retry(
+		total=3,
+		backoff_factor=0.5,
+		status_forcelist=[429, 500, 502, 503, 504],
+		allowed_methods=frozenset(["DELETE", "GET", "HEAD", "OPTIONS", "PUT", "TRACE"]),
+		raise_on_status=False,
+	)
+	adapter = HTTPAdapter(max_retries=retry)
+	sess.mount("http://", adapter)
+	sess.mount("https://", adapter)
+	return sess
+
+
+_evo_session: _requests.Session = _build_evo_session()
+
+# Redis lock keys for long-running sync operations.
+_LOCK_SYNC_GROUPS = "wa:sync_groups:lock"
+_LOCK_SYNC_MESSAGES_PREFIX = "wa:sync_old_messages:lock:"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -311,18 +336,18 @@ def _download_media_via_wa(line, full_data: dict) -> str:
     endpoint = _url("chat/getBase64FromMediaMessage", line.instance_name)
     payload = {"message": {"key": key}}
     try:
-        resp = _requests.post(endpoint, json=payload, headers=_headers(line), timeout=60)
+        resp = _evo_session.post(endpoint, json=payload, headers=_headers(line), timeout=60)
         if not resp.ok:
-            frappe.logger().warning(f"WA download failed {resp.status_code}: {resp.text[:200]}")
+            frappe.log_error(f"WA download failed {resp.status_code}: {resp.text[:200]}", "WA Media Download")
             return ""
         result = resp.json()
         b64 = result.get("base64") or result.get("data") or result.get("buffer") or ""
         mime = result.get("mimetype") or result.get("mediaType") or "application/octet-stream"
         if b64:
             return _save_base64_media(b64, mime)
-        frappe.logger().warning(f"WA download: no base64 in response keys={list(result.keys())}")
+        frappe.log_error(f"WA download: no base64 in response keys={list(result.keys())}", "WA Media Download")
     except Exception as e:
-        frappe.logger().warning(f"WA download exception: {e}")
+        frappe.log_error(f"WA download exception: {e}", "WA Media Download")
     return ""
 
 
@@ -608,6 +633,8 @@ def webhook():
         return _handle_upsert(payload.get("data") or {}, line, settings)
     if event == "messages.update":
         return _handle_update(payload.get("data") or [], line)
+    if event == "messages.delete":
+        return _handle_delete(payload.get("data") or {}, line)
     if event == "contacts.upsert":
         data = payload.get("data") or []
         if isinstance(data, dict):
@@ -810,6 +837,27 @@ def _handle_update(updates: list, line) -> dict:
     return {"status": "ok"}
 
 
+def _handle_delete(data: dict, line) -> dict:
+    """Mark locally-stored messages as deleted when Evolution API fires messages.delete."""
+    ids = data.get("ids") or []
+    if isinstance(ids, str):
+        ids = [ids]
+    deleted = 0
+    for message_id in ids:
+        if not message_id:
+            continue
+        msg_name = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
+        if not msg_name:
+            continue
+        try:
+            frappe.db.set_value("WA Message", msg_name, "status", "Failed", update_modified=False)
+            frappe.db.commit()
+            deleted += 1
+        except Exception as e:
+            frappe.log_error(f"Failed to mark WA Message {msg_name} as deleted: {e}", "WA Message Delete")
+    return {"status": "ok", "deleted": deleted}
+
+
 # ── Agent send ────────────────────────────────────────────────────────────────
 
 @frappe.whitelist()
@@ -913,7 +961,7 @@ def send_wa_reply(
                 if jids_list:
                     media_payload["mentionsEveryOne"] = False
                     media_payload["mentioned"] = jids_list
-            resp = _requests.post(
+            resp = _evo_session.post(
                 _url("message/sendMedia", line.instance_name),
                 json=media_payload,
                 headers=_headers(line),
@@ -928,7 +976,7 @@ def send_wa_reply(
                 if jids_list:
                     payload["mentionsEveryOne"] = False
                     payload["mentioned"] = jids_list
-            resp = _requests.post(
+            resp = _evo_session.post(
                 _url("message/sendText", line.instance_name),
                 json=payload,
                 headers=_headers(line),
@@ -1026,7 +1074,7 @@ def send_wa_reaction(
     }
 
     try:
-        resp = _requests.post(
+        resp = _evo_session.post(
             _url("message/sendReaction", line.instance_name),
             json=reaction_payload,
             headers=_headers(line),
@@ -1035,6 +1083,7 @@ def send_wa_reaction(
         resp.raise_for_status()
         sent_id = resp.json().get("key", {}).get("id") or frappe.generate_hash(length=16)
     except Exception as e:
+        frappe.log_error(f"WA reaction failed for {jid}: {e}", "WA Send Reaction")
         frappe.throw(_("WA API reaction failed: {0}").format(str(e)))
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
@@ -1077,7 +1126,7 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
     line = frappe.get_doc("WA Line", doc.line)
 
     try:
-        resp = _requests.put(
+        resp = _evo_session.put(
             _url("message/updateMessage", line.instance_name),
             json={
                 "number": doc.jid,
@@ -1093,6 +1142,7 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
         )
         resp.raise_for_status()
     except Exception as e:
+        frappe.log_error(f"WA edit failed for message {message_name}: {e}", "WA Edit Message")
         frappe.throw(_("WA API edit failed: {0}").format(str(e)))
 
     agent_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
@@ -1337,7 +1387,7 @@ def get_wa_group_participants(jid: str, line: str) -> list[dict]:
     line_doc = frappe.get_doc("WA Line", line)
     api_participants = None
     try:
-        resp = _requests.get(
+        resp = _evo_session.get(
             _url("group/findParticipants", line_doc.instance_name),
             params={"groupJid": jid},
             headers=_headers(line_doc),
@@ -1562,12 +1612,12 @@ def configure_wa_webhook(line: str) -> dict:
 			"url": webhook_url,
 			"webhook_by_events": False,
 			"webhook_base64": False,
-			"headers": {"apikey": settings.global_api_key or ""},
-			"events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONTACTS_UPSERT"],
+			"headers": {"apikey": _headers(line_doc)["apikey"]},
+			"events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONTACTS_UPSERT"],
 		}
 	}
 	try:
-		resp = _requests.post(
+		resp = _evo_session.post(
 			_url("webhook/set", line_doc.instance_name),
 			headers=_headers(line_doc),
 			json=payload,
@@ -1576,6 +1626,7 @@ def configure_wa_webhook(line: str) -> dict:
 		resp.raise_for_status()
 		return {"status": "ok", "webhook_url": webhook_url, "data": resp.json() if resp.content else {}}
 	except Exception as e:
+		frappe.log_error(f"Failed to configure webhook for line {line}: {e}", "WA Webhook Config")
 		frappe.throw(_("Failed to configure webhook: {0}").format(str(e)))
 
 
@@ -1587,7 +1638,7 @@ def get_wa_instance_status(line: str) -> dict:
         return {"connected": False, "error": "WA API not configured"}
     line_doc = frappe.get_doc("WA Line", line)
     try:
-        resp = _requests.get(
+        resp = _evo_session.get(
             _url("instance/connectionState", line_doc.instance_name),
             headers=_headers(line_doc),
             timeout=5,
@@ -1597,6 +1648,7 @@ def get_wa_instance_status(line: str) -> dict:
         state = (data.get("instance") or {}).get("state") or ""
         return {"connected": state == "open", "state": state}
     except Exception as e:
+        frappe.log_error(f"WA instance status failed for {line}: {e}", "WA Instance Status")
         return {"connected": False, "error": str(e)}
 
 
@@ -1608,7 +1660,7 @@ def get_wa_qr(line: str) -> dict:
         frappe.throw(_("WA API not configured or disabled"))
     line_doc = frappe.get_doc("WA Line", line)
     try:
-        resp = _requests.get(
+        resp = _evo_session.get(
             _url("instance/connect", line_doc.instance_name),
             headers=_headers(line_doc),
             timeout=15,
@@ -1621,6 +1673,7 @@ def get_wa_qr(line: str) -> dict:
             "code": data.get("code") or "",
         }
     except Exception as e:
+        frappe.log_error(f"Failed to fetch QR code for line {line}: {e}", "WA QR Code")
         frappe.throw(_("Failed to fetch QR code: {0}").format(str(e)))
 
 
@@ -2433,86 +2486,122 @@ def sync_wa_contacts() -> dict:
 
 @frappe.whitelist()
 def sync_wa_old_messages(line: str, limit_per_chat: int = 50) -> dict:
-	"""Fetch and import historical messages from a WA Line via POST /chat/findMessages (paginated)."""
-	import datetime as _dt
+	"""Enqueue a background job to import historical messages for a WA Line.
 
+	Returns immediately with {"status": "queued"}.  The job fires
+	helpdesk:wa-old-sync-complete when done.  A per-line Redis lock prevents
+	duplicate jobs from running within 5 minutes.
+	"""
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
 		frappe.throw(_("WA API not configured or disabled"))
 
-	# limit_per_chat is kept as the UI label but we fetch all pages up to total_limit records
-	total_limit = max(1, min(int(limit_per_chat or 50) * 20, 5000))
-	line_doc = frappe.get_doc("WA Line", line)
+	lock_key = f"{_LOCK_SYNC_MESSAGES_PREFIX}{line}"
+	if frappe.cache().get_value(lock_key):
+		return {"status": "locked"}
 
-	imported = skipped = 0
-	current_page = 1
-	total_pages = 1
-	frappe.set_user("Administrator")
+	frappe.cache().set_value(lock_key, 1, expires_in_sec=300)
+	frappe.enqueue(
+		"helpdesk.integrations.wa._run_sync_old_messages_job",
+		line=line,
+		limit_per_chat=int(limit_per_chat or 50),
+		queue="long",
+		timeout=600,
+	)
+	return {"status": "queued"}
 
-	while current_page <= total_pages:
-		try:
-			resp = _requests.post(
-				_url("chat/findMessages", line_doc.instance_name),
-				json={"where": {}, "page": current_page},
-				headers=_headers(line_doc),
-				timeout=30,
-			)
-			resp.raise_for_status()
-			raw = resp.json()
-		except Exception as e:
-			frappe.throw(_("Failed to fetch messages from WA API: {0}").format(str(e)))
 
-		msgs_envelope = raw.get("messages") or {}
-		total_pages = int(msgs_envelope.get("pages") or 1)
-		records = msgs_envelope.get("records") or []
+def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
+	"""Background job: import historical messages then emit wa-old-sync-complete."""
+	import datetime as _dt
 
-		for msg in records:
-			key = msg.get("key") or {}
-			message_id = key.get("id") or ""
-			remote_jid = key.get("remoteJid") or ""
-			if not message_id or not remote_jid or "@broadcast" in remote_jid:
-				continue
-			if frappe.db.exists("WA Message", {"message_id": message_id}):
-				skipped += 1
-				continue
+	lock_key = f"{_LOCK_SYNC_MESSAGES_PREFIX}{line}"
+	try:
+		frappe.set_user("Administrator")
+		settings = _settings()
+		total_limit = max(1, min(limit_per_chat * 20, 5000))
+		line_doc = frappe.get_doc("WA Line", line)
 
-			from_me = bool(key.get("fromMe"))
-			sender = key.get("participant") or (remote_jid if not from_me else "")
-			sender_name = msg.get("pushName") or ""
-			raw_msg_body = msg.get("message") or {}
-			text, content_type = _extract_text(raw_msg_body)
+		imported = skipped = 0
+		current_page = 1
+		total_pages = 1
 
+		while current_page <= total_pages:
 			try:
-				doc = frappe.get_doc({
-					"doctype": "WA Message",
-					"direction": "Outgoing" if from_me else "Incoming",
-					"jid": remote_jid,
-					"sender_jid": "" if from_me else sender,
-					"sender_name": "(via phone)" if from_me else sender_name,
-					"profile_name": "(via phone)" if from_me else sender_name,
-					"message": text,
-					"content_type": content_type or "text",
-					"media_url": "",
-					"message_id": message_id,
-					"status": "Read" if from_me else "Delivered",
-					"line": line_doc.name,
-					"is_read": 1,
-				})
-				doc.insert(ignore_permissions=True)
-				ts = msg.get("messageTimestamp") or 0
-				if ts:
-					orig_creation = _dt.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
-					frappe.db.set_value("WA Message", doc.name, "creation", orig_creation, update_modified=False)
-				imported += 1
-			except Exception:
-				pass
+				resp = _evo_session.post(
+					_url("chat/findMessages", line_doc.instance_name),
+					json={"where": {}, "page": current_page},
+					headers=_headers(line_doc),
+					timeout=30,
+				)
+				resp.raise_for_status()
+				raw = resp.json()
+			except Exception as e:
+				frappe.log_error(f"sync_wa_old_messages page {current_page} failed for {line}: {e}", "WA Old Message Sync")
+				break
 
-		frappe.db.commit()
-		current_page += 1
-		if imported + skipped >= total_limit:
-			break
+			msgs_envelope = raw.get("messages") or {}
+			total_pages = int(msgs_envelope.get("pages") or 1)
+			records = msgs_envelope.get("records") or []
 
-	return {"imported": imported, "skipped": skipped}
+			for msg in records:
+				key = msg.get("key") or {}
+				message_id = key.get("id") or ""
+				remote_jid = key.get("remoteJid") or ""
+				if not message_id or not remote_jid or "@broadcast" in remote_jid:
+					continue
+				if frappe.db.exists("WA Message", {"message_id": message_id}):
+					skipped += 1
+					continue
+
+				from_me = bool(key.get("fromMe"))
+				sender = key.get("participant") or (remote_jid if not from_me else "")
+				sender_name = msg.get("pushName") or ""
+				raw_msg_body = msg.get("message") or {}
+				text, content_type = _extract_text(raw_msg_body)
+
+				try:
+					doc = frappe.get_doc({
+						"doctype": "WA Message",
+						"direction": "Outgoing" if from_me else "Incoming",
+						"jid": remote_jid,
+						"sender_jid": "" if from_me else sender,
+						"sender_name": "(via phone)" if from_me else sender_name,
+						"profile_name": "(via phone)" if from_me else sender_name,
+						"message": text,
+						"content_type": content_type or "text",
+						"media_url": "",
+						"message_id": message_id,
+						"status": "Read" if from_me else "Delivered",
+						"line": line_doc.name,
+						"is_read": 1,
+					})
+					doc.insert(ignore_permissions=True)
+					ts = msg.get("messageTimestamp") or 0
+					if ts:
+						orig_creation = _dt.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+						frappe.db.set_value("WA Message", doc.name, "creation", orig_creation, update_modified=False)
+					imported += 1
+				except Exception as e:
+					frappe.log_error(f"Failed to insert WA Message (line={line}): {e}", "WA Old Message Sync")
+
+			frappe.db.commit()
+			current_page += 1
+			if imported + skipped >= total_limit:
+				break
+
+		frappe.publish_realtime(
+			"helpdesk:wa-old-sync-complete",
+			message={"line": line, "imported": imported, "skipped": skipped},
+		)
+	except Exception as exc:
+		frappe.log_error(str(exc), "WA Old Message Sync Job Failed")
+		frappe.publish_realtime(
+			"helpdesk:wa-old-sync-complete",
+			message={"line": line, "error": str(exc)},
+		)
+	finally:
+		frappe.cache().delete_key(lock_key)
 
 
 @frappe.whitelist()
@@ -2535,7 +2624,15 @@ def get_product_options() -> list[str]:
 
 @frappe.whitelist()
 def sync_wa_groups() -> dict:
-	"""Fetch groups from all WA Lines via the API and upsert into each line's group_jids child table."""
+	"""Fetch groups from all WA Lines via the API and upsert into each line's group_jids child table.
+
+	Deduplication: a Redis lock prevents concurrent or back-to-back runs within 60 seconds.
+	"""
+	if frappe.cache().get_value(_LOCK_SYNC_GROUPS):
+		return {"status": "locked", "created": 0, "updated": 0, "total": 0}
+
+	frappe.cache().set_value(_LOCK_SYNC_GROUPS, 1, expires_in_sec=60)
+
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
 		frappe.throw(_("WA API not configured or disabled"))
@@ -2546,7 +2643,7 @@ def sync_wa_groups() -> dict:
 	for line_name in lines:
 		line_doc = frappe.get_doc("WA Line", line_name)
 		try:
-			resp = _requests.get(
+			resp = _evo_session.get(
 				_url("group/fetchAllGroups", line_doc.instance_name),
 				params={"getParticipants": "false"},
 				headers=_headers(line_doc),
