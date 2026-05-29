@@ -1,5 +1,6 @@
 # helpdesk/integrations/wa.py
 import re
+from urllib.parse import quote as _urlquote
 
 import frappe
 import requests as _requests
@@ -79,8 +80,13 @@ def _is_group(jid: str) -> bool:
     return jid.endswith("@g.us")
 
 
-def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
-    """Detect an edited-message payload and return (new_text, True) or ('', False)."""
+def _extract_edit(raw_msg: dict) -> tuple[str, bool, str]:
+    """Detect an edited-message payload.
+
+    Returns (new_text, True, original_message_id) or ('', False, '').
+    The original_message_id comes from the inner protocolMessage.key.id — this is the ID
+    of the message being edited, NOT the outer data.key.id which may be a new wrapper ID.
+    """
     # Shape 1: editedMessage wrapper → message → protocolMessage → editedMessage
     proto_via_edit = (
         (raw_msg.get("editedMessage") or {})
@@ -90,18 +96,20 @@ def _extract_edit(raw_msg: dict) -> tuple[str, bool]:
     if proto_via_edit:
         inner = proto_via_edit.get("editedMessage") or {}
         text = inner.get("conversation") or (inner.get("extendedTextMessage") or {}).get("text") or ""
+        original_id = (proto_via_edit.get("key") or {}).get("id") or ""
         if text:
-            return text, True
+            return text, True, original_id
 
     # Shape 2: direct protocolMessage with type 14
     proto = raw_msg.get("protocolMessage") or {}
-    if proto.get("type") == 14:
+    if int(proto.get("type") or 0) == 14:
         inner = proto.get("editedMessage") or {}
         text = inner.get("conversation") or (inner.get("extendedTextMessage") or {}).get("text") or ""
+        original_id = (proto.get("key") or {}).get("id") or ""
         if text:
-            return text, True
+            return text, True, original_id
 
-    return "", False
+    return "", False, ""
 
 
 def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) -> None:
@@ -328,13 +336,14 @@ def _save_base64_media(b64: str, mime: str) -> str:
 
 def _download_media_via_wa(line, full_data: dict) -> str:
     """Call WA API /chat/getBase64FromMediaMessage.
-    Only needs the message key — WA decrypts the CDN-encrypted media using its Baileys session."""
+    Passes the full message object (key + message content) so Evolution can decrypt the
+    CDN-encrypted media using the embedded mediaKey / fileEncSha256 from the message itself."""
     key = full_data.get("key") or {}
     if not key.get("id"):
         return ""
-    # Evolution v2.3+ uses /chat/ prefix, only needs the message key
     endpoint = _url("chat/getBase64FromMediaMessage", line.instance_name)
-    payload = {"message": {"key": key}}
+    # Include message content so Evolution has the mediaKey needed for decryption
+    payload = {"message": {"key": key, "message": full_data.get("message") or {}}}
     try:
         resp = _evo_session.post(endpoint, json=payload, headers=_headers(line), timeout=60)
         if not resp.ok:
@@ -706,14 +715,18 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			media_url = ""
 
 	# Detect and handle incoming edit before dedup check
-	new_text, is_edit = _extract_edit(raw_msg)
-	if is_edit and message_id:
-		existing = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
+	new_text, is_edit, original_id = _extract_edit(raw_msg)
+	if is_edit:
+		# Use the inner protocolMessage key id (the original message) rather than the
+		# outer data key id which may be a new wrapper id assigned to the edit event.
+		target_id = original_id or message_id
+		existing = frappe.db.get_value("WA Message", {"message_id": target_id}, "name") if target_id else None
 		if existing:
 			frappe.set_user("Administrator")
 			_apply_edit(existing, new_text, edited_by="incoming", jid=jid, line=line)
 			return {"status": "ok", "edited": True}
-		# Fall through — original not yet stored (edge case: creates new record below)
+		frappe.logger().warning(f"Incoming WA edit: original not found target_id={target_id} wrapper_id={message_id}")
+		return {"status": "ok", "reason": "edit_original_not_found"}
 
 	# Deduplicate (soft check — catches most cases before the DB round-trip)
 	if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
@@ -869,6 +882,7 @@ def _evo_send_message(
     full_message: str,
     content_type: str = "text",
     media_url: str | None = None,
+    mime_type: str | None = None,
     reply_to_message_id: str | None = None,
     mentioned_jids=None,
 ) -> str:
@@ -900,11 +914,17 @@ def _evo_send_message(
         mentioned_jids = frappe.parse_json(mentioned_jids) if mentioned_jids.strip() else None
 
     if media_url and content_type in ("image", "video", "audio", "document"):
-        abs_url = media_url if media_url.startswith("http") else frappe.utils.get_url(media_url)
+        if media_url.startswith("http"):
+            abs_url = media_url
+        else:
+            abs_url = frappe.utils.get_url(_urlquote(media_url, safe="/:"))
+        effective_mime = mime_type or _MIME_MAP.get(content_type, "application/octet-stream")
+        file_name = abs_url.rsplit("/", 1)[-1].split("?")[0] or f"file.{effective_mime.split('/')[-1]}"
         payload: dict = {
             "number": jid,
             "mediatype": content_type,
-            "mimetype": _MIME_MAP.get(content_type, "application/octet-stream"),
+            "mimetype": effective_mime,
+            "fileName": file_name,
             "media": abs_url,
             "caption": full_message,
         }
@@ -925,6 +945,10 @@ def _evo_send_message(
         headers=_headers(line),
         timeout=timeout,
     )
+    if not resp.ok:
+        frappe.log_error(
+            f"WA send {resp.status_code} for {jid}: {resp.text[:500]}", "WA Send"
+        )
     resp.raise_for_status()
     return resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
 
@@ -937,6 +961,7 @@ def send_wa_reply(
     message: str = "",
     content_type: str = "text",
     media_url: str | None = None,
+    mime_type: str | None = None,
     reply_to_message_id: str | None = None,
     reply_to_text: str | None = None,
     reply_to_from_me: bool = False,
@@ -999,6 +1024,7 @@ def send_wa_reply(
             full_message,
             content_type=content_type,
             media_url=media_url,
+            mime_type=mime_type,
             reply_to_message_id=reply_to_message_id,
             mentioned_jids=mentioned_jids,
         )
@@ -1168,6 +1194,8 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
             headers=_headers(line),
             timeout=15,
         )
+        if not resp.ok:
+            frappe.log_error(f"WA edit {resp.status_code}: {resp.text[:500]}", "WA Edit Message")
         resp.raise_for_status()
     except Exception as e:
         frappe.log_error(f"WA edit failed for message {message_name}: {e}", "WA Edit Message")
@@ -1220,6 +1248,7 @@ def send_wa_media(
         message=message,
         content_type=content_type,
         media_url=relative_url,
+        mime_type=mime_type,
     )
 
 

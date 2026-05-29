@@ -66,6 +66,17 @@ function retryMessage(messageName: string) {
   retryResource.submit({ message_name: messageName });
 }
 
+const editResource = createResource({
+  url: "helpdesk.integrations.wa.edit_wa_message",
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to edit message");
+  },
+});
+
+function handleEdit(messageName: string, newText: string) {
+  editResource.submit({ message_name: messageName, new_text: newText });
+}
+
 const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
 
 const messageList = computed(() =>
@@ -164,11 +175,21 @@ function handleStatusUpdate(data: { message_id: string; status: string }) {
   if (msg) msg.status = data.status;
 }
 
+function handleEditUpdate(data: { message_id: string; new_text: string; name: string; jid: string }) {
+  const list: Record<string, any>[] = messages.data || [];
+  const msg = list.find((m) => m.message_id === data.message_id || m.name === data.name);
+  if (msg) {
+    msg.message = data.new_text;
+    msg.is_edited = 1;
+  }
+}
+
 watch(messageList, () => { scrollToBottom(); });
 
 onMounted(() => {
   $socket.on("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.on("helpdesk:baileys-status-update", handleStatusUpdate);
+  $socket.on("helpdesk:whatsapp-message-edit", handleEditUpdate);
   scrollToBottom();
   markAsRead();
 });
@@ -176,6 +197,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.off("helpdesk:baileys-status-update", handleStatusUpdate);
+  $socket.off("helpdesk:whatsapp-message-edit", handleEditUpdate);
 });
 </script>
 
@@ -215,6 +237,7 @@ onBeforeUnmount(() => {
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
             @retry="retryMessage"
+            @edit="handleEdit"
           />
         </template>
       </div>
