@@ -1683,7 +1683,7 @@ def configure_wa_webhook(line: str) -> dict:
 			"url": webhook_url,
 			"webhook_by_events": False,
 			"webhook_base64": False,
-			"headers": {"apikey": _headers(line_doc)["apikey"]},
+			"headers": {"apikey": settings.global_api_key or ""},
 			"events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "CONTACTS_UPSERT"],
 		}
 	}
