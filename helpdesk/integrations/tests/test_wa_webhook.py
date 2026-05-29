@@ -5,8 +5,10 @@ import unittest
 class TestWaWebhook(unittest.TestCase):
     def setUp(self):
         frappe.set_user("Administrator")
-        # Ensure settings exist
+        # Snapshot production settings so tearDown can restore them.
         s = frappe.get_single("WA API Settings")
+        self._orig_enabled = s.enabled
+        self._orig_global_api_key = s.global_api_key
         s.enabled = 1
         s.global_api_key = "testkey123"
         s.save(ignore_permissions=True)
@@ -34,6 +36,12 @@ class TestWaWebhook(unittest.TestCase):
         frappe.db.commit()
 
     def tearDown(self):
+        # Restore production WA API Settings so tests can't corrupt the live site.
+        s = frappe.get_single("WA API Settings")
+        s.enabled = self._orig_enabled
+        s.global_api_key = self._orig_global_api_key
+        s.save(ignore_permissions=True)
+        frappe.db.commit()
         frappe.db.rollback()
 
     def test_status_update_sets_correct_value(self):
