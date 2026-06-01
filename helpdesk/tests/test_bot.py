@@ -119,3 +119,53 @@ class TestGapTracking(unittest.TestCase):
 			"status",
 		)
 		self.assertEqual(status, "Pending")
+
+
+class TestEscalation(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		cls.ticket = frappe.get_doc(
+			{
+				"doctype": "HD Ticket",
+				"subject": "Bot escalation test",
+				"raised_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.delete_doc("HD Ticket", cls.ticket.name, ignore_permissions=True, force=True)
+
+	def test_escalate_sets_bot_escalated(self):
+		from unittest.mock import patch
+
+		settings = frappe.get_single("Helpdesk Bot Settings")
+		settings.escalation_message_enabled = 0
+		settings.save(ignore_permissions=True)
+
+		from helpdesk.integrations.bot import _escalate
+
+		with patch("helpdesk.integrations.bot.send_wa_reply"):
+			_escalate(self.ticket.name)
+
+		val = frappe.db.get_value("HD Ticket", self.ticket.name, "bot_escalated")
+		self.assertEqual(val, 1)
+
+	def test_escalate_sends_message_when_enabled(self):
+		from unittest.mock import patch
+
+		settings = frappe.get_single("Helpdesk Bot Settings")
+		settings.escalation_message_enabled = 1
+		settings.escalation_message = "Test escalation message"
+		settings.save(ignore_permissions=True)
+
+		# Reset bot_escalated
+		frappe.db.set_value("HD Ticket", self.ticket.name, "bot_escalated", 0)
+
+		from helpdesk.integrations.bot import _escalate
+
+		with patch("helpdesk.integrations.bot.send_wa_reply") as mock_send:
+			_escalate(self.ticket.name)
+			mock_send.assert_called_once_with(
+				ticket=self.ticket.name, message="Test escalation message"
+			)
