@@ -117,7 +117,11 @@ fixtures = [
             ["dt", "in", ["HD Ticket", "Customer"]],
             ["fieldname", "in", ["baileys_jid", "baileys_line", "helpdesk_notes"]],
         ],
-    }
+    },
+    {
+        "dt": "Custom Field",
+        "filters": [["dt", "=", "WhatsApp Account"], ["fieldname", "=", "bot_enabled"]],
+    },
 ]
 
 # WhatsApp Templates are seeded via a patch (seed_whatsapp_templates) instead of

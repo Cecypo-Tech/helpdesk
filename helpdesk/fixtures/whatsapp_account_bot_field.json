@@ -1,0 +1,13 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "WhatsApp Account-bot_enabled",
+  "dt": "WhatsApp Account",
+  "fieldname": "bot_enabled",
+  "fieldtype": "Check",
+  "label": "Enable Bot on This Account",
+  "default": "0",
+  "insert_after": "allow_auto_read_receipt",
+  "module": "Helpdesk"
+ }
+]

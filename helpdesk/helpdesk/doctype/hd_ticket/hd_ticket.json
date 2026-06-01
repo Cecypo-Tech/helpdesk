@@ -69,7 +69,10 @@
   "customer_feedback_section",
   "feedback_rating",
   "feedback",
-  "feedback_extra"
+  "feedback_extra",
+  "bot_reply_count",
+  "bot_escalated",
+  "bot_active"
  ],
  "fields": [
   {
@@ -479,6 +482,27 @@
    "label": "Ticket raised outside working hours",
    "read_only": 1,
    "set_only_once": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "bot_reply_count",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Bot Reply Count"
+  },
+  {
+   "default": "0",
+   "fieldname": "bot_escalated",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Bot Escalated"
+  },
+  {
+   "default": "0",
+   "fieldname": "bot_active",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Bot Active"
   }
  ],
  "grid_page_length": 50,
