@@ -74,9 +74,10 @@ def _get_conversation_history(ticket_name: str, channel: str) -> list[dict]:
 			"WhatsApp Message",
 			filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
 			fields=["type", "message", "creation"],
-			order_by="creation asc",
+			order_by="creation desc",
 			limit=10,
 		)
+		rows = list(reversed(rows))
 		return [
 			{"role": "user" if r.type == "Incoming" else "assistant", "content": r.message or ""}
 			for r in rows
@@ -86,9 +87,10 @@ def _get_conversation_history(ticket_name: str, channel: str) -> list[dict]:
 		"WA Message",
 		filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
 		fields=["direction", "message", "creation"],
-		order_by="creation asc",
+		order_by="creation desc",
 		limit=10,
 	)
+	rows = list(reversed(rows))
 	return [
 		{"role": "user" if r.direction == "Incoming" else "assistant", "content": r.message or ""}
 		for r in rows
@@ -130,7 +132,8 @@ def _escalate(ticket_name: str) -> None:
 	settings = _bot_settings()
 	if settings.escalation_message_enabled and settings.escalation_message:
 		try:
-			send_wa_reply(ticket=ticket_name, message=settings.escalation_message)
+			if send_wa_reply:
+				send_wa_reply(ticket=ticket_name, message=settings.escalation_message)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: escalation message failed")
 
@@ -153,6 +156,8 @@ def process_message(msg_name: str, channel: str) -> None:
 	settings = _bot_settings()
 	if not settings.is_enabled:
 		return
+
+	line_name = None
 
 	# Load message and extract fields
 	if channel == "waba":
@@ -203,7 +208,7 @@ def process_message(msg_name: str, channel: str) -> None:
 
 	# Gap tracking
 	if not articles and settings.enable_gap_tracking:
-		_handle_kb_gap(ticket_name, channel_label, text, settings, images)
+		_handle_kb_gap(ticket_name, channel_label, text, settings)
 		if settings.auto_escalate_on_no_kb:
 			_escalate(ticket_name)
 			return
@@ -233,7 +238,8 @@ def process_message(msg_name: str, channel: str) -> None:
 
 	# Send reply
 	try:
-		send_wa_reply(ticket=ticket_name, message=reply)
+		if send_wa_reply:
+			send_wa_reply(ticket=ticket_name, message=reply)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: send reply failed")
 		return
@@ -255,7 +261,6 @@ def _handle_kb_gap(
 	channel_label: str,
 	text: str,
 	settings,
-	images: list[bytes],
 ) -> None:
 	"""Ask the LLM for a gap suggestion and record it. Non-critical; swallows errors."""
 	import json
@@ -271,6 +276,7 @@ def _handle_kb_gap(
 			{"role": "user", "content": text},
 		]
 		raw = llm_chat(gap_messages)
+		raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 		gap_data = json.loads(raw)
 		suggested_title = gap_data.get("title", "")
 		suggested_category = gap_data.get("category", "")
