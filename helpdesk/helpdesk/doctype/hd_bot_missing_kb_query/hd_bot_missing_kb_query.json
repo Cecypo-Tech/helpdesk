@@ -1,0 +1,110 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "ticket",
+  "channel",
+  "col_break_1",
+  "status",
+  "created_article",
+  "query_section",
+  "query_text",
+  "suggestion_section",
+  "suggested_title",
+  "col_break_suggestion",
+  "suggested_category"
+ ],
+ "fields": [
+  {
+   "fieldname": "ticket",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ticket",
+   "options": "HD Ticket"
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Channel",
+   "options": "WA Line\nWABA"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nArticle Created\nDismissed"
+  },
+  {
+   "depends_on": "eval:doc.status=='Article Created'",
+   "fieldname": "created_article",
+   "fieldtype": "Link",
+   "label": "Created Article",
+   "options": "HD Article"
+  },
+  {
+   "fieldname": "query_section",
+   "fieldtype": "Section Break",
+   "label": "Customer Query"
+  },
+  {
+   "fieldname": "query_text",
+   "fieldtype": "Long Text",
+   "label": "Query Text"
+  },
+  {
+   "fieldname": "suggestion_section",
+   "fieldtype": "Section Break",
+   "label": "LLM Suggestions"
+  },
+  {
+   "fieldname": "suggested_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Suggested Article Title"
+  },
+  {
+   "fieldname": "col_break_suggestion",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "suggested_category",
+   "fieldtype": "Data",
+   "label": "Suggested Category"
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Bot Missing KB Query",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Agent",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "suggested_title"
+}
