@@ -285,3 +285,54 @@ def _handle_kb_gap(
 		suggested_category = ""
 
 	_record_gap(ticket_name, channel_label, text, suggested_title, suggested_category)
+
+
+# ── Doc-event handlers ────────────────────────────────────────────────────────
+
+
+def handle_whatsapp_message(doc, method=None) -> None:
+	"""after_insert handler for WhatsApp Message (WABA path)."""
+	if doc.type != "Incoming":
+		return
+	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
+		return
+
+	settings = _bot_settings()
+	if not settings.is_enabled:
+		return
+
+	if doc.whatsapp_account:
+		bot_enabled = frappe.db.get_value("WhatsApp Account", doc.whatsapp_account, "bot_enabled")
+		if not bot_enabled:
+			return
+
+	frappe.enqueue(
+		"helpdesk.integrations.bot.process_message",
+		queue="short",
+		msg_name=doc.name,
+		channel="waba",
+	)
+
+
+def handle_wa_message(doc, method=None) -> None:
+	"""after_insert handler for WA Message (Evolution API / WA Line path)."""
+	if doc.direction != "Incoming":
+		return
+	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
+		return
+
+	settings = _bot_settings()
+	if not settings.is_enabled:
+		return
+
+	if doc.line:
+		bot_enabled = frappe.db.get_value("WA Line", doc.line, "bot_enabled")
+		if not bot_enabled:
+			return
+
+	frappe.enqueue(
+		"helpdesk.integrations.bot.process_message",
+		queue="short",
+		msg_name=doc.name,
+		channel="wa_line",
+	)

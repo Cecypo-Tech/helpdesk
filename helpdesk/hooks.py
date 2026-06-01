@@ -71,8 +71,14 @@ doc_events = {
         "validate": "helpdesk.extends.assignment_rule.on_assignment_rule_validate",
     },
     "WhatsApp Message": {
-        "after_insert": "helpdesk.integrations.wa.on_whatsapp_message_insert",
+        "after_insert": [
+            "helpdesk.integrations.wa.on_whatsapp_message_insert",
+            "helpdesk.integrations.bot.handle_whatsapp_message",
+        ],
         "on_update": "helpdesk.integrations.wa.on_whatsapp_message_update",
+    },
+    "WA Message": {
+        "after_insert": "helpdesk.integrations.bot.handle_wa_message",
     },
 }
 

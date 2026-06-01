@@ -169,3 +169,54 @@ class TestEscalation(unittest.TestCase):
 			mock_send.assert_called_once_with(
 				ticket=self.ticket.name, message="Test escalation message"
 			)
+
+
+class TestDocEventHandlers(unittest.TestCase):
+	def test_handle_wa_message_skips_outgoing(self):
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import handle_wa_message
+
+		doc = frappe.new_doc("WA Message")
+		doc.direction = "Outgoing"
+		doc.reference_doctype = "HD Ticket"
+		doc.reference_name = "TEST-001"
+
+		with patch("frappe.enqueue") as mock_enqueue:
+			handle_wa_message(doc)
+			mock_enqueue.assert_not_called()
+
+	def test_handle_wa_message_skips_when_bot_disabled(self):
+		from unittest.mock import patch
+
+		frappe.db.set_single_value("Helpdesk Bot Settings", "is_enabled", 0)
+		frappe.clear_cache()
+
+		from helpdesk.integrations.bot import handle_wa_message
+
+		doc = frappe.new_doc("WA Message")
+		doc.direction = "Incoming"
+		doc.reference_doctype = "HD Ticket"
+		doc.reference_name = "TEST-001"
+		doc.line = None
+
+		with patch("frappe.enqueue") as mock_enqueue:
+			handle_wa_message(doc)
+			mock_enqueue.assert_not_called()
+
+		frappe.db.set_single_value("Helpdesk Bot Settings", "is_enabled", 1)
+		frappe.clear_cache()
+
+	def test_handle_whatsapp_message_skips_outgoing(self):
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import handle_whatsapp_message
+
+		doc = frappe.new_doc("WhatsApp Message")
+		doc.type = "Outgoing"
+		doc.reference_doctype = "HD Ticket"
+		doc.reference_name = "TEST-001"
+
+		with patch("frappe.enqueue") as mock_enqueue:
+			handle_whatsapp_message(doc)
+			mock_enqueue.assert_not_called()
