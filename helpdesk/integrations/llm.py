@@ -19,7 +19,9 @@ def chat(messages: list[dict], images: list[bytes] | None = None) -> str:
 	provider = settings.llm_provider or "Gemini Flash 2.0"
 	if provider == "Gemini Flash 2.0":
 		return _gemini(messages, images, settings)
-	return _haiku(messages, images, settings)
+	if provider == "Claude Haiku 4.5":
+		return _haiku(messages, images, settings)
+	raise ValueError(f"Unknown LLM provider: {provider!r}")
 
 
 def _gemini(messages: list[dict], images: list[bytes] | None, settings) -> str:
@@ -76,10 +78,9 @@ def _haiku(messages: list[dict], images: list[bytes] | None, settings) -> str:
 	if images:
 		for i in range(len(anthropic_messages) - 1, -1, -1):
 			if anthropic_messages[i]["role"] == "user":
-				parts = [{"type": "text", "text": anthropic_messages[i]["content"]}]
+				parts = []
 				for img_bytes in images:
-					parts.insert(
-						0,
+					parts.append(
 						{
 							"type": "image",
 							"source": {
@@ -87,8 +88,9 @@ def _haiku(messages: list[dict], images: list[bytes] | None, settings) -> str:
 								"media_type": "image/jpeg",
 								"data": base64.b64encode(img_bytes).decode(),
 							},
-						},
+						}
 					)
+				parts.append({"type": "text", "text": anthropic_messages[i]["content"]})
 				anthropic_messages[i]["content"] = parts
 				break
 
