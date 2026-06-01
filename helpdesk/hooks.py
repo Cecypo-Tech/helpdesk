@@ -119,7 +119,7 @@ fixtures = [
         ],
     },
     {
-        "dt": "Custom Field",
+        "doctype": "Custom Field",
         "filters": [["dt", "=", "WhatsApp Account"], ["fieldname", "=", "bot_enabled"]],
     },
 ]
