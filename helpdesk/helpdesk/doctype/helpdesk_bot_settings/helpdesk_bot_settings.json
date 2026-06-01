@@ -1,0 +1,167 @@
+{
+ "actions": [],
+ "creation": "2026-06-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "is_enabled",
+  "llm_section",
+  "llm_provider",
+  "gemini_api_key",
+  "col_break_api",
+  "anthropic_api_key",
+  "behavior_section",
+  "conversation_mode",
+  "max_bot_replies",
+  "col_break_behavior",
+  "min_message_words",
+  "kb_search_limit",
+  "escalation_section",
+  "escalation_message_enabled",
+  "escalation_message",
+  "col_break_escalation",
+  "auto_escalate_on_no_kb",
+  "gap_section",
+  "enable_gap_tracking",
+  "prompt_section",
+  "system_prompt"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "is_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Bot"
+  },
+  {
+   "fieldname": "llm_section",
+   "fieldtype": "Section Break",
+   "label": "LLM Provider"
+  },
+  {
+   "default": "Gemini Flash 2.0",
+   "fieldname": "llm_provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "Gemini Flash 2.0\nClaude Haiku 4.5"
+  },
+  {
+   "fieldname": "gemini_api_key",
+   "fieldtype": "Password",
+   "label": "Gemini API Key"
+  },
+  {
+   "fieldname": "col_break_api",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "anthropic_api_key",
+   "fieldtype": "Password",
+   "label": "Anthropic API Key"
+  },
+  {
+   "fieldname": "behavior_section",
+   "fieldtype": "Section Break",
+   "label": "Behavior"
+  },
+  {
+   "default": "Single Reply",
+   "fieldname": "conversation_mode",
+   "fieldtype": "Select",
+   "label": "Conversation Mode",
+   "options": "Single Reply\nMulti-turn"
+  },
+  {
+   "default": "3",
+   "depends_on": "eval:doc.conversation_mode=='Multi-turn'",
+   "fieldname": "max_bot_replies",
+   "fieldtype": "Int",
+   "label": "Max Bot Replies (Multi-turn)"
+  },
+  {
+   "fieldname": "col_break_behavior",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "3",
+   "fieldname": "min_message_words",
+   "fieldtype": "Int",
+   "label": "Min Message Words (pre-filter)"
+  },
+  {
+   "default": "3",
+   "fieldname": "kb_search_limit",
+   "fieldtype": "Int",
+   "label": "KB Articles to Fetch"
+  },
+  {
+   "fieldname": "escalation_section",
+   "fieldtype": "Section Break",
+   "label": "Escalation"
+  },
+  {
+   "default": "1",
+   "fieldname": "escalation_message_enabled",
+   "fieldtype": "Check",
+   "label": "Send Escalation Message"
+  },
+  {
+   "default": "Connecting you with a human agent, please hold on.",
+   "depends_on": "eval:doc.escalation_message_enabled",
+   "fieldname": "escalation_message",
+   "fieldtype": "Small Text",
+   "label": "Escalation Message"
+  },
+  {
+   "fieldname": "col_break_escalation",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_escalate_on_no_kb",
+   "fieldtype": "Check",
+   "label": "Escalate Immediately When No KB Article Found"
+  },
+  {
+   "fieldname": "gap_section",
+   "fieldtype": "Section Break",
+   "label": "KB Gap Tracking"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_gap_tracking",
+   "fieldtype": "Check",
+   "label": "Track Missing KB Queries"
+  },
+  {
+   "fieldname": "prompt_section",
+   "fieldtype": "Section Break",
+   "label": "System Prompt"
+  },
+  {
+   "default": "You are a helpful support assistant. Answer the customer's question clearly and concisely based on the knowledge base articles provided. Keep responses to 2-4 sentences. If no relevant article is available, give your best general answer. Never invent specific policies, pricing, or product details. If the issue is complex or the customer is frustrated, acknowledge their concern.",
+   "fieldname": "system_prompt",
+   "fieldtype": "Long Text",
+   "label": "System Prompt"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "Helpdesk Bot Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
