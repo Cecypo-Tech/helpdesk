@@ -309,6 +309,8 @@ def handle_whatsapp_message(doc, method=None) -> None:
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
 		queue="short",
+		job_id=f"bot_msg_{doc.name}",
+		enqueue_after_commit=True,
 		msg_name=doc.name,
 		channel="waba",
 	)
@@ -333,6 +335,8 @@ def handle_wa_message(doc, method=None) -> None:
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
 		queue="short",
+		job_id=f"bot_msg_{doc.name}",
+		enqueue_after_commit=True,
 		msg_name=doc.name,
 		channel="wa_line",
 	)
