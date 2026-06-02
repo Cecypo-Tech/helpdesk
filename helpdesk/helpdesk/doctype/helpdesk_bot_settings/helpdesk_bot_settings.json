@@ -39,11 +39,11 @@
    "label": "LLM Provider"
   },
   {
-   "default": "Gemini Flash 2.0",
+   "default": "gemini-3.1-flash-lite",
    "fieldname": "llm_provider",
    "fieldtype": "Select",
    "label": "Provider",
-   "options": "Gemini Flash 2.0\nClaude Haiku 4.5"
+   "options": "gemini-3.1-flash-lite\nclaude-haiku-4-5"
   },
   {
    "fieldname": "gemini_api_key",

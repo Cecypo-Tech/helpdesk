@@ -16,10 +16,10 @@ def chat(messages: list[dict], images: list[bytes] | None = None) -> str:
 		images:   Optional raw image bytes attached to the last user message.
 	"""
 	settings = _settings()
-	provider = settings.llm_provider or "Gemini Flash 2.0"
-	if provider == "Gemini Flash 2.0":
+	provider = settings.llm_provider or "gemini-3.1-flash-lite"
+	if provider == "gemini-3.1-flash-lite":
 		return _gemini(messages, images, settings)
-	if provider == "Claude Haiku 4.5":
+	if provider == "claude-haiku-4-5":
 		return _haiku(messages, images, settings)
 	raise ValueError(f"Unknown LLM provider: {provider!r}")
 
@@ -54,7 +54,7 @@ def _gemini(messages: list[dict], images: list[bytes] | None, settings) -> str:
 				break
 
 	model = genai.GenerativeModel(
-		"gemini-2.0-flash",
+		"gemini-3.1-flash-lite",
 		system_instruction=system_text or None,
 	)
 	response = model.generate_content(contents)
