@@ -224,6 +224,15 @@ class HDTicket(Document):
                             continue
                         self.notify_agent(agent.name, "Reaction")
 
+                # Reset bot state so it can engage fresh on reopen
+                if self.bot_escalated or self.bot_reply_count:
+                    frappe.db.set_value(
+                        "HD Ticket",
+                        self.name,
+                        {"bot_escalated": 0, "bot_active": 0, "bot_reply_count": 0},
+                        update_modified=False,
+                    )
+
         self.remove_assignment_if_not_in_team()
         self.publish_update()
         self.capture_update_telemetry_events()

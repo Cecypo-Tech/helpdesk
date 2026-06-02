@@ -185,6 +185,18 @@ def process_message(msg_name: str, channel: str) -> None:
 		return
 
 	if _is_short_message(text, settings.min_message_words or 3):
+		if (ticket.bot_reply_count or 0) == 0 and settings.clarification_message_enabled and settings.clarification_message:
+			try:
+				if send_wa_reply:
+					send_wa_reply(ticket=ticket_name, message=settings.clarification_message)
+				frappe.db.set_value(
+					"HD Ticket",
+					ticket_name,
+					{"bot_reply_count": 1, "bot_active": 1},
+					update_modified=False,
+				)
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: clarification message failed")
 		return
 
 	# Multi-turn reply limit
@@ -210,6 +222,23 @@ def process_message(msg_name: str, channel: str) -> None:
 	if not articles and settings.enable_gap_tracking:
 		_handle_kb_gap(ticket_name, channel_label, text, settings)
 		if settings.auto_escalate_on_no_kb:
+			if (
+				(ticket.bot_reply_count or 0) == 0
+				and settings.clarification_message_enabled
+				and settings.clarification_message
+			):
+				try:
+					if send_wa_reply:
+						send_wa_reply(ticket=ticket_name, message=settings.clarification_message)
+					frappe.db.set_value(
+						"HD Ticket",
+						ticket_name,
+						{"bot_reply_count": 1, "bot_active": 1},
+						update_modified=False,
+					)
+				except Exception:
+					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: clarification message failed")
+				return
 			_escalate(ticket_name)
 			return
 

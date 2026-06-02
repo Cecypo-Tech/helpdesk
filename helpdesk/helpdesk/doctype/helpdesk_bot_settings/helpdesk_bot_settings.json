@@ -17,6 +17,9 @@
   "min_message_words",
   "kb_search_limit",
   "escalation_section",
+  "clarification_message_enabled",
+  "clarification_message",
+  "col_break_clarification",
   "escalation_message_enabled",
   "escalation_message",
   "col_break_escalation",
@@ -98,6 +101,23 @@
    "fieldname": "escalation_section",
    "fieldtype": "Section Break",
    "label": "Escalation"
+  },
+  {
+   "default": "1",
+   "fieldname": "clarification_message_enabled",
+   "fieldtype": "Check",
+   "label": "Ask for More Details Before Escalating"
+  },
+  {
+   "default": "Please describe your issue in more detail — a screenshot or error message would help us assist you faster.",
+   "depends_on": "eval:doc.clarification_message_enabled",
+   "fieldname": "clarification_message",
+   "fieldtype": "Small Text",
+   "label": "Clarification Message"
+  },
+  {
+   "fieldname": "col_break_clarification",
+   "fieldtype": "Column Break"
   },
   {
    "default": "1",

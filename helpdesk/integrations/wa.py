@@ -2501,7 +2501,7 @@ def enqueue_wa_sync() -> dict:
 	frappe.enqueue(
 		"helpdesk.integrations.wa._run_wa_sync_job",
 		queue="long",
-		timeout=300,
+		timeout=900,
 		now=False,
 	)
 	return {"status": "queued"}
@@ -2536,6 +2536,65 @@ def _run_wa_sync_job() -> None:
 			"helpdesk:wa-sync-complete",
 			message={"error": str(exc)},
 		)
+
+
+def _enrich_wa_contacts_from_frappe_contacts() -> int:
+	"""Backfill WA Contact.custom_name from matching Frappe Contacts (by phone).
+
+	Only overwrites rows where custom_name is blank or still just a raw pushName
+	(i.e. looks like a phone number).  Returns the count of rows updated.
+	"""
+	# Pull all WA Contacts that have a phone but whose custom_name either looks
+	# like a phone number or is blank — these are candidates for enrichment.
+	wa_rows = frappe.db.sql(
+		"""
+		SELECT name, phone, custom_name
+		FROM `tabWA Contact`
+		WHERE phone IS NOT NULL AND phone != ''
+		""",
+		as_dict=True,
+	)
+	if not wa_rows:
+		return 0
+
+	# Build a normalized-phone → full_name map from Frappe Contacts.
+	# Covers mobile_no, phone, and Contact Phone child table.
+	contact_map: dict[str, str] = {}
+	for c in frappe.db.sql(
+		"SELECT full_name, mobile_no, phone FROM `tabContact` WHERE full_name IS NOT NULL AND full_name != ''",
+		as_dict=True,
+	):
+		for raw in (c.mobile_no, c.phone):
+			norm = _normalize_phone(raw or "")
+			if norm and norm not in contact_map:
+				contact_map[norm] = c.full_name
+	for row in frappe.db.sql(
+		"SELECT p.phone, c.full_name FROM `tabContact Phone` p JOIN `tabContact` c ON c.name = p.parent WHERE c.full_name != ''",
+		as_dict=True,
+	):
+		norm = _normalize_phone(row.phone or "")
+		if norm and norm not in contact_map:
+			contact_map[norm] = row.full_name
+
+	if not contact_map:
+		return 0
+
+	enriched = 0
+	for wa in wa_rows:
+		norm = _normalize_phone(wa.phone or "")
+		frappe_name = contact_map.get(norm)
+		if not frappe_name:
+			continue
+		existing = wa.custom_name or ""
+		# Skip if already has a real name (not just digits/plus/spaces)
+		if existing and not re.fullmatch(r"[\d\s\+\-\(\)]+", existing):
+			continue
+		frappe.db.set_value("WA Contact", wa.name, "custom_name", frappe_name, update_modified=False)
+		enriched += 1
+
+	if enriched:
+		frappe.db.commit()
+	return enriched
 
 
 @frappe.whitelist()
@@ -2581,7 +2640,11 @@ def sync_wa_contacts() -> dict:
 		flat_values,
 	)
 	frappe.db.commit()
-	return {"created": len(values), "updated": 0, "total": len(values)}
+
+	# Enrich custom_name from Frappe Contact where we have a phone match and custom_name is still blank/pushName
+	enriched = _enrich_wa_contacts_from_frappe_contacts()
+
+	return {"created": len(values), "updated": 0, "total": len(values), "enriched": enriched}
 
 
 @frappe.whitelist()
@@ -2731,7 +2794,7 @@ def sync_wa_groups() -> dict:
 	if frappe.cache().get_value(_LOCK_SYNC_GROUPS):
 		return {"status": "locked", "created": 0, "updated": 0, "total": 0}
 
-	frappe.cache().set_value(_LOCK_SYNC_GROUPS, 1, expires_in_sec=60)
+	frappe.cache().set_value(_LOCK_SYNC_GROUPS, 1, expires_in_sec=300)
 
 	settings = _settings()
 	if not settings.enabled or not settings.server_url:
@@ -2747,7 +2810,7 @@ def sync_wa_groups() -> dict:
 				_url("group/fetchAllGroups", line_doc.instance_name),
 				params={"getParticipants": "false"},
 				headers=_headers(line_doc),
-				timeout=90,
+				timeout=(15, 180),
 			)
 			resp.raise_for_status()
 			raw = resp.json()
