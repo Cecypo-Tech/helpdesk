@@ -51,6 +51,13 @@ export const useNotificationStore = defineStore("notification", () => {
     visible.value = !visible.value;
   }
 
+  const pushSupported =
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  const pushPermissionStatus = ref<NotificationPermission | "unsupported">(
+    pushSupported ? Notification.permission : "unsupported"
+  );
+
   watch(
     () => authStore.hasDeskAccess,
     (newVal) => {
@@ -62,12 +69,6 @@ export const useNotificationStore = defineStore("notification", () => {
       setupPushNotifications();
     },
     { immediate: true }
-  );
-  const pushSupported =
-    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-
-  const pushPermissionStatus = ref<NotificationPermission | "unsupported">(
-    pushSupported ? Notification.permission : "unsupported"
   );
 
   async function requestPushPermission() {
