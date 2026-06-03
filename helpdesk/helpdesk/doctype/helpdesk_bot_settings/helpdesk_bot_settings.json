@@ -159,7 +159,7 @@
    "label": "System Prompt"
   },
   {
-   "default": "You are a helpful support assistant. Answer the customer's question clearly and concisely based on the knowledge base articles provided. Keep responses to 2-4 sentences. If no relevant article is available, give your best general answer. Never invent specific policies, pricing, or product details. If the issue is complex or the customer is frustrated, acknowledge their concern.",
+   "default": "You are a support assistant. Answer ONLY using the knowledge base articles provided. If the customer's question is not covered by the provided articles, respond with: 'I don't have specific information about that — let me connect you with a support agent who can help.' Never use general knowledge. Never invent policies, pricing, or product details.",
    "fieldname": "system_prompt",
    "fieldtype": "Long Text",
    "label": "System Prompt"

@@ -4,8 +4,9 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 
 ## Environment
 
-- Bench root: `/home/frappeuser/bench16`
-- Site: `site16.local`
+- Bench root: `/home/kushal/frappe-bench`
+- Site (local): `dev.localhost`
+- Site (remote): `dev.cecypo.tech`
 - Web server: port 8002 · SocketIO: port 9002
 - After Python changes: restart gunicorn (`pkill -f "frappe.app" && bench serve --port 8002 &`)
 - After Vue/TS changes: `bench build --app helpdesk` then hard-refresh
