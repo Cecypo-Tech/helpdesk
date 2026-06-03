@@ -301,6 +301,39 @@ def process_message(msg_name: str, channel: str) -> None:
 		if _assign and frappe.parse_json(_assign):
 			return
 
+	if ticket_name:
+		_company_key = f"wa_bot_company:{ticket_name}"
+		if frappe.cache().get_value(_company_key):
+			# Previous bot message asked for company name — treat this reply as the answer
+			company_name = text.strip()
+			if company_name:
+				existing = frappe.db.get_value("HD Customer", {"customer_name": company_name}, "name")
+				if existing:
+					cust_name = existing
+				else:
+					cust = frappe.get_doc({"doctype": "HD Customer", "customer_name": company_name})
+					cust.insert(ignore_permissions=True)
+					frappe.db.commit()
+					cust_name = cust.name
+				frappe.db.set_value("HD Ticket", ticket_name, "customer", cust_name)
+				frappe.cache().delete_value(_company_key)
+				try:
+					state.send_reply(f"Thank you! I've noted your company as *{company_name}*. How can I help you?")
+					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
+				except Exception:
+					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company confirm message failed")
+			return
+
+		customer = frappe.db.get_value("HD Ticket", ticket_name, "customer")
+		if not customer:
+			try:
+				state.send_reply("Before we get started, could you please share your company name?")
+				frappe.cache().set_value(_company_key, 1, expires_in_sec=3600)
+				state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company name prompt failed")
+			return
+
 	if _is_short_message(text, settings.min_message_words or 3):
 		if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
 			try:
