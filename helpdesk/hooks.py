@@ -43,7 +43,8 @@ scheduler_events = {
         "helpdesk.integrations.outline.sync_outline_docs",
     ],
     "daily": [
-        "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days"
+        "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",
+        "helpdesk.integrations.wa.enqueue_wa_sync",
     ],
 }
 

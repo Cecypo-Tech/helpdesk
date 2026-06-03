@@ -2514,7 +2514,7 @@ def enqueue_wa_sync() -> dict:
 	frappe.enqueue(
 		"helpdesk.integrations.wa._run_wa_sync_job",
 		queue="long",
-		timeout=900,
+		timeout=1800,
 		now=False,
 	)
 	return {"status": "queued"}
@@ -2800,7 +2800,11 @@ def get_product_options() -> list[str]:
 
 @frappe.whitelist()
 def sync_wa_groups() -> dict:
-	"""Fetch groups from all WA Lines via the API and upsert into each line's group_jids child table.
+	"""Resolve group names for the 50 most-recently-active group JIDs (per line) that are
+	missing or have a blank name in the group_jids child table.
+
+	Uses findGroupInfos (one request per JID) instead of fetchAllGroups, which times out
+	on instances with many groups.
 
 	Deduplication: a Redis lock prevents concurrent or back-to-back runs within 60 seconds.
 	"""
@@ -2818,26 +2822,25 @@ def sync_wa_groups() -> dict:
 
 	for line_name in lines:
 		line_doc = frappe.get_doc("WA Line", line_name)
-		try:
-			resp = _evo_session.get(
-				_url("group/fetchAllGroups", line_doc.instance_name),
-				params={"getParticipants": "false"},
-				headers=_headers(line_doc),
-				timeout=(15, 180),
-			)
-			resp.raise_for_status()
-			raw = resp.json()
-			groups = raw if isinstance(raw, list) else raw.get("groups", [])
-		except _requests.exceptions.HTTPError as e:
-			if e.response is not None and e.response.status_code == 404:
-				continue  # instance not registered on Evolution API — skip silently
-			frappe.log_error(f"sync_wa_groups failed for line {line_name}: {e}", "WA Group Sync")
-			continue
-		except Exception as e:
-			frappe.log_error(f"sync_wa_groups failed for line {line_name}: {e}", "WA Group Sync")
+
+		# 50 most-recently-active distinct group JIDs seen in messages for this line
+		rows = frappe.db.sql(
+			"""
+			SELECT jid, MAX(creation) AS last_seen
+			FROM `tabWA Message`
+			WHERE line = %s AND jid LIKE '%%@g.us'
+			GROUP BY jid
+			ORDER BY last_seen DESC
+			LIMIT 50
+			""",
+			line_name,
+			as_dict=True,
+		)
+		candidate_jids = [r.jid for r in rows]
+		if not candidate_jids:
 			continue
 
-		# Existing JIDs for this line in the child table
+		# Existing rows for this line
 		existing_rows = frappe.db.get_all(
 			"WhatsApp Group JID",
 			filters={"parent": line_name, "parenttype": "WA Line"},
@@ -2845,12 +2848,35 @@ def sync_wa_groups() -> dict:
 		)
 		existing = {r.jid: r for r in existing_rows}
 
+		# Only fetch from API for JIDs with no name yet
+		need_resolve = [
+			jid for jid in candidate_jids
+			if jid not in existing or not existing[jid].group_name
+		]
+		if not need_resolve:
+			continue
+
 		insert_rows = []
-		for g in groups:
-			jid = g.get("id") or ""
-			if not jid or not jid.endswith("@g.us"):
+		for jid in need_resolve:
+			try:
+				resp = _evo_session.get(
+					_url("group/findGroupInfos", line_doc.instance_name),
+					params={"groupJid": jid},
+					headers=_headers(line_doc),
+					timeout=15,
+				)
+				resp.raise_for_status()
+				g = resp.json()
+				subject = g.get("subject") or g.get("name") or ""
+			except _requests.exceptions.HTTPError as e:
+				if e.response is not None and e.response.status_code in (404, 400):
+					subject = ""  # group gone or bad JID — store with empty name, don't retry
+				else:
+					frappe.logger().warning(f"sync_wa_groups findGroupInfos {jid}: {e}")
+					continue
+			except Exception as e:
+				frappe.logger().warning(f"sync_wa_groups findGroupInfos {jid}: {e}")
 				continue
-			subject = g.get("subject") or g.get("name") or ""
 
 			if jid in existing:
 				if subject and existing[jid].group_name != subject:
@@ -2863,7 +2889,7 @@ def sync_wa_groups() -> dict:
 					frappe.generate_hash(length=10),
 					line_name, "WA Line", "group_jids",
 					len(existing) + len(insert_rows) + 1,
-					jid, subject or "",
+					jid, subject,
 				))
 				created += 1
 
