@@ -1391,7 +1391,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         for c in frappe.get_all(
             "WA Contact",
             filters={"jid": ["in", jids]},
-            fields=["jid", "custom_name", "company", "assigned_team", "phone"],
+            fields=["jid", "custom_name", "company", "assigned_team", "phone", "canonical_jid"],
         ):
             contacts[c.jid] = c
 
@@ -1405,6 +1405,13 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
             continue
 
+        canonical = contact.get("canonical_jid") or ""
+        phone_fallback = (
+            contact.get("phone")
+            or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
+            or (_phone_from_jid(canonical) if canonical.endswith("@s.whatsapp.net") else "")
+        ) if not is_grp else ""
+
         if is_grp:
             display_name = (
                 contact.get("custom_name")
@@ -1415,6 +1422,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             display_name = (
                 contact.get("custom_name")
                 or r.get("sender_name")
+                or (f"+{phone_fallback}" if phone_fallback else "")
                 or jid.split("@")[0]
             )
         result.append({
@@ -1422,7 +1430,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             "display_name": display_name or jid,
             "company": contact.get("company") or "",
             "assigned_team": assigned_team,
-            "phone": contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""),
+            "phone": phone_fallback,
             "is_group": is_grp,
             "last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
             "last_sender_name": r.get("sender_name") or "" if is_grp else "",
