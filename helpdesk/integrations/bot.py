@@ -296,6 +296,11 @@ def process_message(msg_name: str, channel: str) -> None:
 	if state.bot_escalated:
 		return
 
+	if ticket_name:
+		_assign = frappe.db.get_value("HD Ticket", ticket_name, "_assign")
+		if _assign and frappe.parse_json(_assign):
+			return
+
 	if _is_short_message(text, settings.min_message_words or 3):
 		if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
 			try:
