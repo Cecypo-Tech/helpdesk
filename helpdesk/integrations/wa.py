@@ -919,9 +919,14 @@ def _evo_send_message(
             participant = "" if not _is_group(jid) else (
                 target.sender_jid if not is_from_me else ""
             )
-            quoted_key = {"remoteJid": jid, "fromMe": is_from_me, "id": reply_to_message_id}
-            if participant:
-                quoted_key["participant"] = participant
+            # Evolution API requires participant for non-from-me group replies.
+            # If we don't have the sender_jid, skip quoted to avoid a 400 crash.
+            if _is_group(jid) and not is_from_me and not participant:
+                quoted_key = None
+            else:
+                quoted_key = {"remoteJid": jid, "fromMe": is_from_me, "id": reply_to_message_id}
+                if participant:
+                    quoted_key["participant"] = participant
 
     if isinstance(mentioned_jids, str):
         mentioned_jids = frappe.parse_json(mentioned_jids) if mentioned_jids.strip() else None
