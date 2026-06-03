@@ -730,9 +730,15 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		frappe.logger().warning(f"Incoming WA edit: original not found target_id={target_id} wrapper_id={message_id}")
 		return {"status": "ok", "reason": "edit_original_not_found"}
 
-	# Deduplicate (soft check — catches most cases before the DB round-trip)
-	if message_id and frappe.db.exists("WA Message", {"message_id": message_id}):
-		return {"status": "duplicate"}
+	# Deduplicate via Redis atomic SET NX — prevents the race where two concurrent
+	# webhook deliveries both pass a DB-level exists() check before either inserts.
+	if message_id:
+		acquired = frappe.cache().set(f"wa_dedup:{message_id}", 1, ex=300, nx=True)
+		if not acquired:
+			return {"status": "duplicate"}
+		# Belt-and-suspenders: also check DB in case Redis lost the key (restart/flush)
+		if frappe.db.exists("WA Message", {"message_id": message_id}):
+			return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
 

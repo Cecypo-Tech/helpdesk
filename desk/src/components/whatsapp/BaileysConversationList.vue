@@ -249,7 +249,9 @@ const contactSuggestions = computed<any[]>(() => contactsResource.data || []);
 
 const phoneOption = computed<string | null>(() => {
   const raw = newChatQuery.value.trim().replace(/[\s\-()]/g, "").replace(/^\+/, "");
-  return /^\d{7,15}$/.test(raw) ? raw : null;
+  // Reject local-format numbers (leading 0) — WhatsApp needs international format (e.g. 254720776486)
+  if (/^\d{7,15}$/.test(raw) && !raw.startsWith("0")) return raw;
+  return null;
 });
 
 function closeNewChat() {
@@ -274,7 +276,12 @@ function onNewChatEnter() {
   } else if (phoneOption.value) {
     startWithPhone(phoneOption.value);
   } else {
-    newChatError.value = "Select a contact or enter a valid phone number";
+    const raw = newChatQuery.value.trim().replace(/[\s\-()]/g, "").replace(/^\+/, "");
+    if (/^\d{7,15}$/.test(raw) && raw.startsWith("0")) {
+      newChatError.value = "Use international format — include country code (e.g. 254720776486, not 0720776486)";
+    } else {
+      newChatError.value = "Select a contact or enter a valid phone number with country code";
+    }
   }
 }
 
