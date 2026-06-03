@@ -228,6 +228,7 @@ class HelpdeskSearch(Search):
             "category",
             "title",
             "content",
+            "internal",
             "modified",
             "creation",
             "category.category_name as category",
@@ -242,6 +243,7 @@ class HelpdeskSearch(Search):
             {"name": "description", "weight": settings.description_weight or 5},
             {"name": "headings", "weight": settings.headings_weight or 8},
             {"name": "team", "type": "tag"},
+            {"name": "internal", "type": "tag"},
             {"name": "modified", "sortable": True},
             {"name": "creation", "sortable": True},
         ]
@@ -275,6 +277,7 @@ class HelpdeskSearch(Search):
                 "subject": doc.title,
                 "description": strip_html_tags(doc.content),
                 "headings": doc.headings,
+                "internal": cstr(doc.internal or 0),
                 "modified": doc.modified,
             }
         if fields:
@@ -377,6 +380,8 @@ def search(
                 r = []
             groups.setdefault("Tickets", []).append(r)
         if doctype == "HD Article":
+            if not is_agent() and getattr(r, "internal", "0") == "1":
+                continue
             groups.setdefault("Articles", []).append(r)
 
     out = []

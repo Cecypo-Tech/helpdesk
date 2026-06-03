@@ -11,7 +11,9 @@ from helpdesk.utils import is_agent
 def get_article(name: str):
     article = frappe.get_doc("HD Article", name).as_dict()
 
-    if not is_agent() and article["status"] != "Published":
+    if not is_agent() and (
+        article["status"] != "Published" or article.get("internal")
+    ):
         frappe.throw(_("Access denied"), frappe.PermissionError)
 
     author = get_user_info_for_avatar(article["author"])
@@ -87,9 +89,10 @@ def get_categories():
         fields=["name", "category_name", "modified"],
     )
     for c in categories:
-        c["article_count"] = frappe.db.count(
-            "HD Article", filters={"category": c.name, "status": "Published"}
-        )
+        filters = {"category": c.name, "status": "Published"}
+        if not is_agent():
+            filters["internal"] = 0
+        c["article_count"] = frappe.db.count("HD Article", filters=filters)
 
     categories.sort(key=lambda c: c["article_count"], reverse=True)
     categories = [c for c in categories if c["article_count"] > 0]
@@ -98,10 +101,13 @@ def get_categories():
 
 @frappe.whitelist()
 def get_category_articles(category: str):
+    filters = {"category": category, "status": "Published"}
+    if not is_agent():
+        filters["internal"] = 0
     articles = frappe.get_all(
         "HD Article",
-        filters={"category": category, "status": "Published"},
-        fields=["name", "title", "published_on", "modified", "author", "content"],
+        filters=filters,
+        fields=["name", "title", "published_on", "modified", "author", "content", "source_url"],
     )
     for article in articles:
         article["author"] = get_user_info_for_avatar(article["author"])

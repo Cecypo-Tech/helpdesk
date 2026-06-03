@@ -8,12 +8,15 @@
  "field_order": [
   "title",
   "status",
+  "internal",
   "published_on",
   "views",
   "column_break_7",
   "category",
   "author",
   "title_slug",
+  "outline_doc_id",
+  "source_url",
   "content_section",
   "content"
  ],
@@ -78,6 +81,26 @@
    "fieldtype": "Data",
    "is_virtual": 1,
    "label": "Title Slug"
+  },
+  {
+   "default": "0",
+   "fieldname": "internal",
+   "fieldtype": "Check",
+   "label": "Internal (Agents Only)"
+  },
+  {
+   "fieldname": "outline_doc_id",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Outline Document ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_url",
+   "fieldtype": "Data",
+   "label": "Source URL",
+   "read_only": 1
   },
   {
    "default": "0",

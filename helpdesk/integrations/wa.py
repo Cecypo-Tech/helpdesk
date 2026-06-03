@@ -150,6 +150,8 @@ def _set_ticket_status(ticket_name: str, status_name: str) -> None:
 
 
 def _agent_initials() -> str:
+    if frappe.session.user in ("Guest", ""):
+        return "BOT"
     full_name = frappe.db.get_value("User", frappe.session.user, "full_name") or ""
     parts = full_name.strip().split()
     if len(parts) >= 2:
@@ -766,7 +768,12 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		_publish_wa_event(jid, is_incoming=False, line=line.name)
 		return {"status": "ok", "mirrored": True}
 
-	# Incoming message
+	# Incoming message — link to existing HD Ticket if one owns this JID
+	try:
+		_ticket_ref = frappe.db.get_value("HD Ticket", {"baileys_jid": jid}, "name") or ""
+	except Exception:
+		_ticket_ref = ""
+
 	try:
 		frappe.get_doc({
 			"doctype": "WA Message",
@@ -781,8 +788,8 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			"message_id": stored_msg_id,
 			"reply_to_message_id": reply_to_message_id,
 			"status": "Pending",
-			"reference_doctype": "",
-			"reference_name": "",
+			"reference_doctype": "HD Ticket" if _ticket_ref else "",
+			"reference_name": _ticket_ref,
 			"line": line.name,
 			"is_read": 0,
 		}).insert(ignore_permissions=True)

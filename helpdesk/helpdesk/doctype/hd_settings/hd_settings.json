@@ -18,6 +18,10 @@
   "base_support_rotation",
   "knowledge_base_section",
   "prefer_knowledge_base",
+  "outline_section",
+  "outline_api_url",
+  "col_break_outline",
+  "outline_api_token",
   "ticket_tab",
   "ticket_type_section",
   "default_ticket_type",
@@ -98,6 +102,26 @@
    "fieldname": "knowledge_base_section",
    "fieldtype": "Section Break",
    "label": "Knowledge Base"
+  },
+  {
+   "fieldname": "outline_section",
+   "fieldtype": "Section Break",
+   "label": "Outline KB Sync"
+  },
+  {
+   "fieldname": "outline_api_url",
+   "fieldtype": "Data",
+   "label": "Outline URL",
+   "placeholder": "https://docs.example.com"
+  },
+  {
+   "fieldname": "col_break_outline",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "outline_api_token",
+   "fieldtype": "Password",
+   "label": "Outline API Token"
   },
   {
    "fieldname": "agent_groups_section",

@@ -40,6 +40,7 @@ scheduler_events = {
     ],
     "hourly": [
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_due_task_wpa_notifications",
+        "helpdesk.integrations.outline.sync_outline_docs",
     ],
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days"

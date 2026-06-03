@@ -19,29 +19,76 @@ def _is_short_message(text: str | None, min_words: int) -> bool:
 	return len((text or "").split()) < min_words
 
 
-def _search_kb(query: str, limit: int) -> list[dict]:
-	"""Full-text search against published HD Article records.
+_SEARCH_STOPWORDS = {
+	"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
+	"is", "are", "was", "were", "be", "been", "have", "has", "had", "do", "does",
+	"i", "me", "you", "we", "it", "its", "my", "your",
+	"give", "tell", "show", "get", "find", "need", "want", "know", "help",
+	"can", "please", "some", "more", "about", "with", "what", "how", "where",
+	"when", "who", "which", "that", "this", "these", "those", "information",
+	"details", "info",
+}
 
-	Returns a list of dicts with keys: name, title, content.
+
+def _search_kb(query: str, limit: int) -> list[dict]:
+	"""Full-text search against published, non-internal HD Article records.
+
+	Returns a list of dicts with keys: name, title, content, outline_doc_id.
 	"""
 	if not query:
 		return []
-	like = f"%{query}%"
+
+	terms = {query}
+	for word in query.split():
+		clean = word.strip(".,!?;:\"'").lower()
+		if len(clean) >= 3 and clean not in _SEARCH_STOPWORDS:
+			terms.add(clean)
+
+	conditions = " OR ".join(
+		f"(title LIKE %(t{i})s OR content LIKE %(t{i})s)"
+		for i in range(len(terms))
+	)
+	params = {f"t{i}": f"%{term}%" for i, term in enumerate(sorted(terms))}
+	params["limit"] = limit
+
 	return frappe.db.sql(
-		"""
-		SELECT name, title, content
+		f"""
+		SELECT name, title, content, outline_doc_id
 		FROM `tabHD Article`
 		WHERE status = 'Published'
-		  AND (title LIKE %(like)s OR content LIKE %(like)s)
+		  AND (internal = 0 OR internal IS NULL)
+		  AND ({conditions})
 		LIMIT %(limit)s
 		""",
-		{"like": like, "limit": limit},
+		params,
 		as_dict=True,
 	)
 
 
+def _combined_kb_search(query: str, limit: int) -> list[dict]:
+	"""Query both local HD Articles and Outline directly, merge and deduplicate.
+
+	Outline results take precedence for documents that exist in both (fresher content).
+	"""
+	hd_articles = _search_kb(query, limit)
+
+	outline_results: list[dict] = []
+	try:
+		from helpdesk.integrations.outline import search as _outline_search
+
+		outline_results = _outline_search(query, limit=limit, exclude_internal=True)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: Outline search failed")
+
+	# Remove HD Article entries already covered by Outline (Outline is fresher)
+	outline_ids = {r["outline_doc_id"] for r in outline_results if r.get("outline_doc_id")}
+	hd_filtered = [a for a in hd_articles if a.get("outline_doc_id") not in outline_ids]
+
+	return (hd_filtered + outline_results)[:limit]
+
+
 def _record_gap(
-	ticket_name: str,
+	ticket_name: str | None,
 	channel: str,
 	query_text: str,
 	suggested_title: str,
@@ -52,7 +99,7 @@ def _record_gap(
 		frappe.get_doc(
 			{
 				"doctype": "HD Bot Missing KB Query",
-				"ticket": ticket_name,
+				"ticket": ticket_name or "",
 				"channel": channel,
 				"query_text": query_text,
 				"suggested_title": suggested_title,
@@ -64,11 +111,75 @@ def _record_gap(
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: _record_gap failed")
 
 
+# ── Bot state abstraction ──────────────────────────────────────────────────────
+
+
+class _BotState:
+	"""Wraps bot conversation state stored on either an HD Ticket or Redis cache.
+
+	When a ticket exists, state is persisted in HD Ticket fields. When no ticket
+	exists, state is stored in Redis with a 7-day TTL (keyed by line:jid).
+	"""
+
+	def __init__(self, ticket_name: str | None, jid: str, line_name: str | None):
+		self.ticket_name = ticket_name
+		self.jid = jid
+		self.line_name = line_name
+		self._ticket = None
+		self._cache_key = f"wa_bot_session:{line_name}:{jid}"
+
+		if ticket_name:
+			self._ticket = frappe.get_doc("HD Ticket", ticket_name)
+
+	def _get_cache(self) -> dict:
+		return frappe.cache().get_value(self._cache_key) or {
+			"bot_reply_count": 0,
+			"bot_escalated": 0,
+			"bot_active": 0,
+		}
+
+	def _set_cache(self, data: dict) -> None:
+		frappe.cache().set_value(self._cache_key, data, expires_in_sec=86400 * 7)
+
+	@property
+	def bot_reply_count(self) -> int:
+		if self._ticket:
+			return self._ticket.bot_reply_count or 0
+		return self._get_cache()["bot_reply_count"]
+
+	@property
+	def bot_escalated(self) -> bool:
+		if self._ticket:
+			return bool(self._ticket.bot_escalated)
+		return bool(self._get_cache()["bot_escalated"])
+
+	def update(self, **kwargs) -> None:
+		if self._ticket:
+			frappe.db.set_value("HD Ticket", self.ticket_name, kwargs, update_modified=False)
+		else:
+			session = self._get_cache()
+			session.update(kwargs)
+			self._set_cache(session)
+
+	def send_reply(self, message: str) -> None:
+		if not send_wa_reply:
+			return
+		if self.ticket_name:
+			send_wa_reply(ticket=self.ticket_name, message=message)
+		else:
+			send_wa_reply(jid=self.jid, line=self.line_name, message=message)
+
+
 # ── Conversation history ───────────────────────────────────────────────────────
 
 
-def _get_conversation_history(ticket_name: str, channel: str) -> list[dict]:
-	"""Return last 10 messages for the ticket as role/content dicts, oldest first."""
+def _get_conversation_history(
+	ticket_name: str | None, channel: str, jid: str | None = None
+) -> list[dict]:
+	"""Return last 10 messages as role/content dicts, oldest first.
+
+	Uses ticket reference when available, falls back to jid-based lookup.
+	"""
 	if channel == "waba":
 		rows = frappe.db.get_all(
 			"WhatsApp Message",
@@ -82,10 +193,16 @@ def _get_conversation_history(ticket_name: str, channel: str) -> list[dict]:
 			{"role": "user" if r.type == "Incoming" else "assistant", "content": r.message or ""}
 			for r in rows
 		]
-	# wa_line
+
+	# wa_line — prefer ticket reference, fall back to jid
+	filters = (
+		{"reference_doctype": "HD Ticket", "reference_name": ticket_name}
+		if ticket_name
+		else {"jid": jid}
+	)
 	rows = frappe.db.get_all(
 		"WA Message",
-		filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
+		filters=filters,
 		fields=["direction", "message", "creation"],
 		order_by="creation desc",
 		limit=10,
@@ -127,22 +244,16 @@ def _download_image_wa_line(media_url: str, line_name: str) -> bytes | None:
 # ── Escalation ────────────────────────────────────────────────────────────────
 
 
-def _escalate(ticket_name: str) -> None:
-	"""Optionally send an escalation message then mark the ticket as escalated."""
+def _escalate(state: _BotState) -> None:
+	"""Optionally send an escalation message then mark the conversation as escalated."""
 	settings = _bot_settings()
 	if settings.escalation_message_enabled and settings.escalation_message:
 		try:
-			if send_wa_reply:
-				send_wa_reply(ticket=ticket_name, message=settings.escalation_message)
+			state.send_reply(settings.escalation_message)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: escalation message failed")
 
-	frappe.db.set_value(
-		"HD Ticket",
-		ticket_name,
-		{"bot_escalated": 1, "bot_active": 0},
-		update_modified=False,
-	)
+	state.update(bot_escalated=1, bot_active=0)
 
 
 # ── Background job ────────────────────────────────────────────────────────────
@@ -163,9 +274,12 @@ def process_message(msg_name: str, channel: str) -> None:
 	if channel == "waba":
 		msg = frappe.get_doc("WhatsApp Message", msg_name)
 		ticket_name = msg.reference_name if msg.reference_doctype == "HD Ticket" else None
+		if not ticket_name:
+			return  # WABA always requires a ticket
 		text = msg.message or ""
 		has_image = msg.content_type == "image"
 		image_source = msg.attach if has_image else None
+		jid = None
 		channel_label = "WABA"
 	else:
 		msg = frappe.get_doc("WA Message", msg_name)
@@ -174,35 +288,27 @@ def process_message(msg_name: str, channel: str) -> None:
 		has_image = msg.content_type == "image"
 		image_source = msg.media_url if has_image else None
 		line_name = msg.line
+		jid = msg.jid
 		channel_label = "WA Line"
 
-	if not ticket_name:
-		return
+	state = _BotState(ticket_name, jid, line_name)
 
-	ticket = frappe.get_doc("HD Ticket", ticket_name)
-
-	if ticket.bot_escalated:
+	if state.bot_escalated:
 		return
 
 	if _is_short_message(text, settings.min_message_words or 3):
-		if (ticket.bot_reply_count or 0) == 0 and settings.clarification_message_enabled and settings.clarification_message:
+		if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
 			try:
-				if send_wa_reply:
-					send_wa_reply(ticket=ticket_name, message=settings.clarification_message)
-				frappe.db.set_value(
-					"HD Ticket",
-					ticket_name,
-					{"bot_reply_count": 1, "bot_active": 1},
-					update_modified=False,
-				)
+				state.send_reply(settings.clarification_message)
+				state.update(bot_reply_count=1, bot_active=1)
 			except Exception:
 				frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: clarification message failed")
 		return
 
 	# Multi-turn reply limit
 	if settings.conversation_mode == "Multi-turn":
-		if (ticket.bot_reply_count or 0) >= (settings.max_bot_replies or 3):
-			_escalate(ticket_name)
+		if state.bot_reply_count >= (settings.max_bot_replies or 3):
+			_escalate(state)
 			return
 
 	# Download image
@@ -215,31 +321,21 @@ def process_message(msg_name: str, channel: str) -> None:
 		if img_bytes:
 			images.append(img_bytes)
 
-	# KB search
-	articles = _search_kb(text, settings.kb_search_limit or 3)
+	# KB search (local HD Articles + live Outline query, deduped)
+	articles = _combined_kb_search(text, settings.kb_search_limit or 3)
 
 	# Gap tracking
 	if not articles and settings.enable_gap_tracking:
 		_handle_kb_gap(ticket_name, channel_label, text, settings)
 		if settings.auto_escalate_on_no_kb:
-			if (
-				(ticket.bot_reply_count or 0) == 0
-				and settings.clarification_message_enabled
-				and settings.clarification_message
-			):
+			if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
 				try:
-					if send_wa_reply:
-						send_wa_reply(ticket=ticket_name, message=settings.clarification_message)
-					frappe.db.set_value(
-						"HD Ticket",
-						ticket_name,
-						{"bot_reply_count": 1, "bot_active": 1},
-						update_modified=False,
-					)
+					state.send_reply(settings.clarification_message)
+					state.update(bot_reply_count=1, bot_active=1)
 				except Exception:
 					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: clarification message failed")
 				return
-			_escalate(ticket_name)
+			_escalate(state)
 			return
 
 	# Build prompt
@@ -248,10 +344,20 @@ def process_message(msg_name: str, channel: str) -> None:
 	if kb_context:
 		system_content += f"\n\nKnowledge Base:\n{kb_context}"
 
-	history = _get_conversation_history(ticket_name, channel)
+	history = _get_conversation_history(ticket_name, channel, jid=jid)
+	prior_turns = history[:-1]
+	if prior_turns:
+		system_content += (
+			"\n\nOVERRIDE — FOLLOW-UP RULE (takes precedence over all other instructions): "
+			"The conversation history shows prior exchanges. If the user's current message asks you to "
+			"reformat, filter, modify, or clarify your PREVIOUS response (examples: 'remove the expiry date', "
+			"'show only names', 'make it a table', 'without the key column') you MUST fulfil that request "
+			"using your previous response as the source. Do NOT say you lack information. "
+			"This rule overrides the KB-only restriction."
+		)
+
 	messages = [{"role": "system", "content": system_content}]
-	# Include history excluding the current message (last item)
-	for h in history[:-1]:
+	for h in prior_turns:
 		messages.append(h)
 	messages.append({"role": "user", "content": text})
 
@@ -262,31 +368,24 @@ def process_message(msg_name: str, channel: str) -> None:
 		reply = llm_chat(messages, images or None)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: LLM call failed")
-		_escalate(ticket_name)
+		_escalate(state)
 		return
 
 	# Send reply
 	try:
-		if send_wa_reply:
-			send_wa_reply(ticket=ticket_name, message=reply)
+		state.send_reply(reply)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: send reply failed")
 		return
 
-	# Update ticket state
-	frappe.db.set_value(
-		"HD Ticket",
-		ticket_name,
-		{"bot_reply_count": (ticket.bot_reply_count or 0) + 1, "bot_active": 1},
-		update_modified=False,
-	)
+	state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
 
 	if settings.conversation_mode == "Single Reply":
-		_escalate(ticket_name)
+		_escalate(state)
 
 
 def _handle_kb_gap(
-	ticket_name: str,
+	ticket_name: str | None,
 	channel_label: str,
 	text: str,
 	settings,
@@ -348,8 +447,6 @@ def handle_whatsapp_message(doc, method=None) -> None:
 def handle_wa_message(doc, method=None) -> None:
 	"""after_insert handler for WA Message (Evolution API / WA Line path)."""
 	if doc.direction != "Incoming":
-		return
-	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
 		return
 
 	settings = _bot_settings()

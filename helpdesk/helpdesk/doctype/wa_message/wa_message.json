@@ -102,8 +102,7 @@
   {
    "fieldname": "message_id",
    "fieldtype": "Data",
-   "label": "Message ID",
-   "unique": 1
+   "label": "Message ID"
   },
   {
    "fieldname": "reply_to_message_id",
