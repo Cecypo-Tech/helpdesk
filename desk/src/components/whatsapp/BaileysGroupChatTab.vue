@@ -68,6 +68,9 @@ function retryMessage(messageName: string) {
 
 const editResource = createResource({
   url: "helpdesk.integrations.wa.edit_wa_message",
+  onSuccess() {
+    messages.reload();
+  },
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to edit message");
   },
@@ -199,6 +202,8 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-status-update", handleStatusUpdate);
   $socket.off("helpdesk:whatsapp-message-edit", handleEditUpdate);
 });
+
+defineExpose({ scrollToBottom });
 </script>
 
 <template>
@@ -233,6 +238,7 @@ onBeforeUnmount(() => {
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="true"
             :allowRetry="true"
+            :allowEdit="true"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"

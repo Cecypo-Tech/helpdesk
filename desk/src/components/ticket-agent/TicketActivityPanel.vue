@@ -8,10 +8,12 @@
     <template #tab-panel="{ tab }">
       <WhatsAppChatTab
         v-if="tab.name === 'whatsapp'"
+        ref="whatsappTabRef"
         :ticketId="String(ticket.doc?.name)"
       />
       <BaileysGroupChatTab
         v-else-if="tab.name === 'baileys'"
+        ref="baileysTabRef"
         :ticketId="String(ticket.doc?.name)"
       />
       <template v-else>
@@ -79,25 +81,36 @@ import {
   TicketSymbol,
   TicketTab,
 } from "@/types";
-import { LoadingIndicator, Tabs } from "frappe-ui";
+import { createResource, LoadingIndicator, Tabs } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, ComputedRef, defineAsyncComponent, inject, ref } from "vue";
+import { computed, ComputedRef, defineAsyncComponent, inject, nextTick, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import TicketAgentActivities from "../ticket/TicketAgentActivities.vue";
 
 const CommunicationArea = defineAsyncComponent(
   () => import("@/components/CommunicationArea.vue")
 );
 
+const route = useRoute();
 const ticket = inject(TicketSymbol);
 const activities = inject(ActivitiesSymbol);
 
 const ticketAgentActivitiesRef = ref(null);
 const communicationAreaRef = ref(null);
+const whatsappTabRef = ref(null);
+const baileysTabRef = ref(null);
 const telephonyStore = useTelephonyStore();
 const { isCallingEnabled } = storeToRefs(telephonyStore);
 
 const hasBaileys = computed(() => Boolean(ticket.value?.doc?.baileys_jid));
 const hasWhatsApp = computed(() => !hasBaileys.value);
+
+// Fetch WABA ticket info to know if this is a WhatsApp-originated ticket
+const wabaTicketInfo = createResource({
+  url: "helpdesk.integrations.wa.get_whatsapp_ticket_info",
+  params: computed(() => ({ ticket: ticket.value?.doc?.name })),
+  auto: computed(() => Boolean(ticket.value?.doc?.name) && !hasBaileys.value),
+});
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [
@@ -145,7 +158,31 @@ const tabs: ComputedRef<TabObject[]> = computed(() => {
   return _tabs;
 });
 
-const { tabIndex, changeTabTo } = useActiveTabManager(tabs);
+// For baileys tickets: default to the baileys tab immediately (no async needed)
+const { tabIndex, changeTabTo } = useActiveTabManager(tabs, () =>
+  hasBaileys.value ? "baileys" : null
+);
+
+// For WABA tickets: auto-select the whatsapp tab once ticketInfo resolves
+watch(
+  () => wabaTicketInfo.data,
+  (data) => {
+    if (!data?.has_whatsapp || !data?.via_frappe_whatsapp) return;
+    if (route.hash) return;
+    const idx = tabs.value.findIndex((t) => t.name === "whatsapp");
+    if (idx !== -1) changeTabTo(idx);
+  }
+);
+
+// Auto-scroll to bottom when switching to a chat tab
+watch(tabIndex, (idx) => {
+  const tabName = tabs.value[idx]?.name;
+  if (tabName === "whatsapp") {
+    nextTick(() => (whatsappTabRef.value as any)?.scrollToBottom?.());
+  } else if (tabName === "baileys") {
+    nextTick(() => (baileysTabRef.value as any)?.scrollToBottom?.());
+  }
+});
 
 const activeTabName = computed(() => {
   const currentTabs = tabs.value;

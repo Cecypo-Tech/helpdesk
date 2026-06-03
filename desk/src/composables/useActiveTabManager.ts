@@ -3,7 +3,7 @@ import { storeToRefs } from "pinia";
 import { ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-export function useActiveTabManager(tabs) {
+export function useActiveTabManager(tabs, getDefaultTabName?: () => string | null) {
   const route = useRoute();
   const router = useRouter();
   const telephonyStore = useTelephonyStore();
@@ -40,6 +40,18 @@ export function useActiveTabManager(tabs) {
         tabIndex.value = index;
         setActiveTabInUrl(tabs.value[index].name);
         return;
+      }
+    }
+
+    if (getDefaultTabName) {
+      const defaultName = getDefaultTabName();
+      if (defaultName) {
+        const idx = findTabIndex(defaultName);
+        if (idx !== -1) {
+          tabIndex.value = idx;
+          setActiveTabInUrl(tabs.value[idx].name);
+          return;
+        }
       }
     }
 

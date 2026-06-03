@@ -359,4 +359,6 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-status-update", handleStatusUpdate);
   $socket.off("helpdesk:whatsapp-message-edit", handleMessageEdit);
 });
+
+defineExpose({ scrollToBottom });
 </script>

@@ -35,9 +35,9 @@
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
-        <!-- Edit button (outgoing text only) -->
+        <!-- Edit button (outgoing text only, WA Line only) -->
         <button
-          v-if="isOutgoing && message.content_type === 'text' && message.message_id"
+          v-if="allowEdit && isOutgoing && message.content_type === 'text' && message.message_id"
           class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-ink-gray-8"
           title="Edit message"
           @click.stop="startEdit"
@@ -498,7 +498,8 @@ const props = withDefaults(defineProps<{
   isGroup?: boolean;
   mentionMap?: Record<string, string>;
   allowRetry?: boolean;
-}>(), { isGroup: false, mentionMap: () => ({}), allowRetry: false });
+  allowEdit?: boolean;
+}>(), { isGroup: false, mentionMap: () => ({}), allowRetry: false, allowEdit: false });
 
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;

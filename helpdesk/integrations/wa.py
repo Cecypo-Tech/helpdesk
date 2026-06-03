@@ -1077,7 +1077,7 @@ def send_wa_reply(
 
     if ticket:
         assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
-        if not frappe.parse_json(assign_json):
+        if frappe.session.user not in (frappe.parse_json(assign_json) or []):
             try:
                 frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
             except Exception:
@@ -1922,7 +1922,7 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_
 	})
 	msg_doc.insert(ignore_permissions=True)
 	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
-	if not frappe.parse_json(assign_json):
+	if frappe.session.user not in (frappe.parse_json(assign_json) or []):
 		try:
 			frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
 		except Exception:
