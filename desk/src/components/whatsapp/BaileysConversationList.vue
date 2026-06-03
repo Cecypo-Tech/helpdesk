@@ -205,14 +205,20 @@ function onSyncComplete(data: { contacts?: number; groups?: number; error?: stri
   conversations.reload();
 }
 
+function onBaileysMessage() {
+  conversations.reload();
+}
+
 onMounted(() => {
   const { $socket } = globalStore();
   $socket.on("helpdesk:wa-sync-complete", onSyncComplete);
+  $socket.on("helpdesk:baileys-message", onBaileysMessage);
 });
 
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
   $socket.off("helpdesk:wa-sync-complete", onSyncComplete);
+  $socket.off("helpdesk:baileys-message", onBaileysMessage);
 });
 
 watch(() => props.selectedJid, (jid) => {

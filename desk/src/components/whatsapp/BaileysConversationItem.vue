@@ -35,8 +35,12 @@
       <div class="mt-0.5 flex items-center justify-between gap-1">
         <span class="truncate text-xs text-ink-gray-5">
           <span v-if="lastDirection === 'Outgoing'" class="text-ink-gray-4">✓✓ </span>
-          <span v-if="isGroup && lastSenderName && lastDirection === 'Incoming'" class="font-medium text-ink-gray-6">{{ lastSenderName.split(" ")[0] }}: </span>
-          <span v-if="contentType !== 'text' && !lastMessage" class="italic">
+          <span v-if="isGroup && lastSenderName && lastDirection === 'Incoming' && contentType !== 'reaction'" class="font-medium text-ink-gray-6">{{ lastSenderName.split(" ")[0] }}: </span>
+          <span v-if="contentType === 'reaction'">
+            <span v-if="lastDirection === 'Incoming'" class="italic">Reacted {{ lastMessage || "👍" }}</span>
+            <span v-else class="italic">You reacted {{ lastMessage || "👍" }}</span>
+          </span>
+          <span v-else-if="contentType !== 'text' && !lastMessage" class="italic">
             [{{ contentType }}]
           </span>
           <span v-else>{{ lastMessage }}</span>

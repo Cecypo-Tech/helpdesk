@@ -308,7 +308,8 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import BaileysReplyBox from "./BaileysReplyBox.vue";
@@ -644,6 +645,22 @@ function onMessageSent() {
 }
 
 watch(messageList, () => { scrollToBottom(); });
+
+function handleBaileysMessage(data: { jid?: string }) {
+  if (data.jid && props.jid && data.jid === props.jid) {
+    loadMessages();
+  }
+}
+
+onMounted(() => {
+  const { $socket } = globalStore();
+  $socket.on("helpdesk:baileys-message", handleBaileysMessage);
+});
+
+onBeforeUnmount(() => {
+  const { $socket } = globalStore();
+  $socket.off("helpdesk:baileys-message", handleBaileysMessage);
+});
 
 defineExpose({
   refresh() {
