@@ -105,12 +105,22 @@ const { isCallingEnabled } = storeToRefs(telephonyStore);
 const hasBaileys = computed(() => Boolean(ticket.value?.doc?.baileys_jid));
 const hasWhatsApp = computed(() => !hasBaileys.value);
 
-// Fetch WABA ticket info to know if this is a WhatsApp-originated ticket
+// Fetch WABA ticket info to know if this is a WhatsApp-originated ticket.
+// Never pass computed refs or functions to `params`/`auto` — frappe-ui serialises
+// the options object and Vue reactive objects cause a circular-JSON error.
 const wabaTicketInfo = createResource({
   url: "helpdesk.integrations.wa.get_whatsapp_ticket_info",
-  params: computed(() => ({ ticket: ticket.value?.doc?.name })),
-  auto: computed(() => Boolean(ticket.value?.doc?.name) && !hasBaileys.value),
 });
+
+watch(
+  () => ticket.value?.doc?.name,
+  (name) => {
+    if (name && !hasBaileys.value) {
+      wabaTicketInfo.fetch({ ticket: name });
+    }
+  },
+  { immediate: true }
+);
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [

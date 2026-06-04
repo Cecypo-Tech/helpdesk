@@ -281,10 +281,8 @@ const linkedChat = ref<{ jid: string; line: string } | null>(null);
 async function loadLinkedChat(ticketName: string) {
   if (!ticketName) { linkedChat.value = null; return; }
   try {
-    const t = await call("frappe.client.get_value", {
-      doctype: "HD Ticket",
-      filters: { name: ticketName },
-      fieldname: ["baileys_jid", "baileys_line"],
+    const t = await call("helpdesk.integrations.wa.get_ticket_baileys_link", {
+      ticket: ticketName,
     });
     linkedChat.value = (t?.baileys_jid && t?.baileys_line)
       ? { jid: t.baileys_jid, line: t.baileys_line }

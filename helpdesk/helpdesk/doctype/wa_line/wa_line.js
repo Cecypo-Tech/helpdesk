@@ -75,6 +75,94 @@ frappe.ui.form.on("WA Line", {
 				});
 			}, __("WhatsApp"));
 
+			frm.add_custom_button(__("Test Connection"), () => {
+				function showResult(r) {
+					const { connected, evo_state, profile, live_error, checked_at, error } = r;
+
+					let indicator, stateLabel, detail;
+					if (error) {
+						indicator = "red";
+						stateLabel = __("Unreachable");
+						detail = `<p style="color:var(--red-600)">${frappe.utils.escape_html(error)}</p>`;
+					} else if (connected) {
+						indicator = "green";
+						stateLabel = __("Connected");
+						const name = (profile && (profile.name || profile.pushname)) ? frappe.utils.escape_html(profile.name || profile.pushname) : "";
+						detail = `<p style="color:var(--green-600)">✓ ${__("Evolution reports <b>{0}</b> and WhatsApp confirmed the session is live.", [evo_state])}${name ? ` (${name})` : ""}</p>`;
+					} else if (evo_state === "open") {
+						indicator = "orange";
+						stateLabel = __("Stale — needs reconnect");
+						detail = `<p style="color:var(--orange-600)">⚠ ${__("Evolution reports <b>open</b> but WhatsApp did not respond to the live check.")}</p>`
+							+ (live_error ? `<p style="font-size:12px;color:#888">${frappe.utils.escape_html(live_error)}</p>` : "");
+					} else {
+						indicator = "red";
+						stateLabel = __("Disconnected");
+						detail = `<p style="color:var(--red-600)">✗ ${__("Evolution state: <b>{0}</b>. WhatsApp session is not active.", [evo_state || "unknown"])}</p>`;
+					}
+
+					const d = new frappe.ui.Dialog({
+						title: __("Connection Test — {0}", [frm.doc.instance_name]),
+						indicator,
+						fields: [
+							{
+								fieldtype: "HTML",
+								options: `<div style="padding:8px 0">
+									${detail}
+									<p style="font-size:12px;color:#888;margin-top:8px">${__("Checked at {0}", [checked_at || ""])}</p>
+								</div>`,
+							},
+						],
+						primary_action_label: __("Reconnect"),
+						primary_action() {
+							d.hide();
+							frappe.show_alert({ message: __("Restarting instance…"), indicator: "blue" }, 4);
+							frappe.call({
+								method: "helpdesk.integrations.wa.reconnect_wa_line",
+								args: { line: frm.doc.name },
+								freeze: true,
+								freeze_message: __("Restarting…"),
+								callback(rv) {
+									if (rv.exc || !rv.message?.ok) {
+										frappe.msgprint({
+											title: __("Reconnect Failed"),
+											message: rv.message?.error || __("Unknown error"),
+											indicator: "red",
+										});
+										return;
+									}
+									frappe.show_alert({ message: __("Restarted. Re-testing in 5 seconds…"), indicator: "blue" }, 6);
+									setTimeout(() => {
+										frappe.call({
+											method: "helpdesk.integrations.wa.test_wa_connection",
+											args: { line: frm.doc.name },
+											freeze: true,
+											freeze_message: __("Testing…"),
+											callback(rv2) {
+												if (rv2.exc) return;
+												showResult(rv2.message);
+											},
+										});
+									}, 5000);
+								},
+							});
+						},
+					});
+					if (connected) d.get_primary_btn().hide();
+					d.show();
+				}
+
+				frappe.call({
+					method: "helpdesk.integrations.wa.test_wa_connection",
+					args: { line: frm.doc.name },
+					freeze: true,
+					freeze_message: __("Testing connection…"),
+					callback(r) {
+						if (r.exc) return;
+						showResult(r.message);
+					},
+				});
+			}, __("WhatsApp"));
+
 			frm.add_custom_button(__("Sync Old Messages"), () => {
 				frappe.prompt(
 					{

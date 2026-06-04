@@ -1779,6 +1779,106 @@ def get_wa_instance_status(line: str) -> dict:
 
 
 @frappe.whitelist()
+def test_wa_connection(line: str) -> dict:
+    """Test actual WhatsApp connectivity for a WA Line.
+
+    Returns a richer status dict compared to get_wa_instance_status:
+      - evo_state: raw state string from Evolution API
+      - connected: bool
+      - profile: dict from /chat/whatsappNumbers (proves real WA reachability), or None
+      - error: str if something failed
+    """
+    import time as _time
+
+    settings = _settings()
+    if not settings.enabled or not settings.server_url:
+        return {"connected": False, "evo_state": "unknown", "error": "WA API not configured"}
+
+    line_doc = frappe.get_doc("WA Line", line)
+
+    # Step 1: Evolution cached state
+    evo_state = "unknown"
+    try:
+        r = _evo_session.get(
+            _url("instance/connectionState", line_doc.instance_name),
+            headers=_headers(line_doc),
+            timeout=6,
+        )
+        r.raise_for_status()
+        evo_state = (r.json().get("instance") or {}).get("state") or "unknown"
+    except Exception as e:
+        return {"connected": False, "evo_state": "unknown", "error": f"Could not reach Evolution API: {e}"}
+
+    # Step 2: live WA check — ask Evolution for 1 recent chat.
+    # findChats requires an active Baileys socket; if the session is actually dead
+    # Evolution returns an error even when connectionState still says "open".
+    profile = None
+    live_error = None
+    try:
+        # connected_user is stored as a JID (e.g. "2547XXXX@s.whatsapp.net")
+        instance_number = _normalize_phone(getattr(line_doc, "connected_user", "") or "")
+        if instance_number:
+            cr = _evo_session.post(
+                _url("chat/whatsappNumbers", line_doc.instance_name),
+                headers=_headers(line_doc),
+                json={"numbers": [instance_number]},
+                timeout=10,
+            )
+            if cr.ok:
+                results = cr.json()
+                if isinstance(results, list) and results:
+                    profile = results[0]
+                elif isinstance(results, dict):
+                    profile = results
+            else:
+                live_error = f"Live check HTTP {cr.status_code}: {cr.text[:200]}"
+        else:
+            # No connected_user stored — fall back to fetching 1 recent chat
+            cr = _evo_session.get(
+                _url("chat/findChats", line_doc.instance_name),
+                headers=_headers(line_doc),
+                params={"limit": 1},
+                timeout=10,
+            )
+            if cr.ok:
+                profile = {"chats_reachable": True}
+            else:
+                live_error = f"Chat fetch HTTP {cr.status_code}: {cr.text[:200]}"
+    except Exception as e:
+        live_error = str(e)
+
+    truly_connected = evo_state == "open" and profile is not None
+    return {
+        "connected": truly_connected,
+        "evo_state": evo_state,
+        "profile": profile,
+        "live_error": live_error,
+        "checked_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@frappe.whitelist()
+def reconnect_wa_line(line: str) -> dict:
+    """Restart the Evolution API instance to force a fresh WA connection."""
+    settings = _settings()
+    if not settings.enabled or not settings.server_url:
+        frappe.throw(_("WA API not configured or disabled"))
+
+    line_doc = frappe.get_doc("WA Line", line)
+    try:
+        resp = _evo_session.post(
+            _url("instance/restart", line_doc.instance_name),
+            headers=_headers(line_doc),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return {"ok": True, "message": "Instance restarted. WhatsApp will reconnect in a few seconds."}
+    except Exception as e:
+        frappe.log_error(f"WA reconnect failed for {line}: {e}", "WA Reconnect")
+        return {"ok": False, "error": str(e)}
+
+
+@frappe.whitelist()
 def get_wa_qr(line: str) -> dict:
     """Fetch QR code (or pairing code) for an WA Line instance."""
     settings = _settings()
@@ -2301,6 +2401,26 @@ def get_whatsapp_ticket_info(ticket: str) -> dict:
 		"allow_template_outside_window": _fw_allow_template_outside_window(),
 		"via_frappe_whatsapp": True,
 	}
+
+
+@frappe.whitelist()
+def get_ticket_baileys_link(ticket: str) -> dict:
+	"""Return baileys_jid and baileys_line for a ticket, or nulls if absent.
+
+	Uses frappe.db.get_value (no field-permission gate) so restricted roles
+	that can read HD Ticket don't hit the 'Field not permitted in query' error
+	that frappe.client.get_value raises for custom fields.
+	"""
+	jid, line = None, None
+	try:
+		jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+	except Exception:
+		pass
+	try:
+		line = frappe.db.get_value("HD Ticket", ticket, "baileys_line")
+	except Exception:
+		pass
+	return {"baileys_jid": jid or None, "baileys_line": line or None}
 
 
 @frappe.whitelist()
