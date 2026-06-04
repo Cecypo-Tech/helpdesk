@@ -116,7 +116,7 @@ watch(
   () => ticket.value?.doc?.name,
   (name) => {
     if (name && !hasBaileys.value) {
-      wabaTicketInfo.fetch({ ticket: name });
+      wabaTicketInfo.fetch({ ticket: String(name) });
     }
   },
   { immediate: true }

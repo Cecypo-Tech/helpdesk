@@ -1443,7 +1443,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
 
 
 @frappe.whitelist()
-def mark_wa_messages_read(jid: str = "", ticket: str = "") -> int:
+def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
     """Mark all unread incoming messages as read (Baileys or frappe_whatsapp)."""
     if not jid and ticket:
         try:
@@ -2329,7 +2329,7 @@ def get_customer_notes(customer: str) -> dict:
 
 
 @frappe.whitelist()
-def get_whatsapp_ticket_info(ticket: str) -> dict:
+def get_whatsapp_ticket_info(ticket: str | int) -> dict:
 	"""Return WhatsApp metadata for the ticket activity tab.
 
 	Handles two paths:
@@ -2404,7 +2404,7 @@ def get_whatsapp_ticket_info(ticket: str) -> dict:
 
 
 @frappe.whitelist()
-def get_ticket_baileys_link(ticket: str) -> dict:
+def get_ticket_baileys_link(ticket: str | int) -> dict:
 	"""Return baileys_jid and baileys_line for a ticket, or nulls if absent.
 
 	Uses frappe.db.get_value (no field-permission gate) so restricted roles
