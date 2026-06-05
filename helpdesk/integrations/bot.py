@@ -241,6 +241,40 @@ def _download_image_wa_line(media_url: str, line_name: str) -> bytes | None:
 		return None
 
 
+# ── Company name extraction ───────────────────────────────────────────────────
+
+
+def _extract_company_name(text: str) -> str:
+	"""Use the LLM to pull just the company/business name out of a free-form message.
+
+	Falls back to the raw text (truncated) if the LLM call fails.
+	"""
+	from helpdesk.integrations.llm import chat as llm_chat
+
+	try:
+		messages = [
+			{
+				"role": "system",
+				"content": (
+					"You are a company-name extractor. "
+					"From the user's message, return ONLY the company or business name — "
+					"nothing else. No explanation, no punctuation around it. "
+					"If no company name is present, return an empty string."
+				),
+			},
+			{"role": "user", "content": text},
+		]
+		result = llm_chat(messages).strip().strip(".,;:")
+		# Sanity-check: if the model returned something absurdly long it probably
+		# hallucinated a summary instead of a name — fall back to raw text.
+		if not result or len(result) > 120:
+			return text.strip()[:120]
+		return result
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company name extraction failed")
+		return text.strip()[:120]
+
+
 # ── Escalation ────────────────────────────────────────────────────────────────
 
 
@@ -303,9 +337,12 @@ def process_message(msg_name: str, channel: str) -> None:
 
 	if ticket_name:
 		_company_key = f"wa_bot_company:{ticket_name}"
-		if frappe.cache().get_value(_company_key):
-			# Previous bot message asked for company name — treat this reply as the answer
-			company_name = text.strip()
+		# Atomic-ish: fetch and immediately delete so a concurrent job won't also claim it.
+		_waiting_for_company = frappe.cache().get_value(_company_key)
+		if _waiting_for_company:
+			frappe.cache().delete_value(_company_key)
+			# Previous bot message asked for company name — extract it from the reply.
+			company_name = _extract_company_name(text)
 			if company_name:
 				existing = frappe.db.get_value("HD Customer", {"customer_name": company_name}, "name")
 				if existing:
@@ -316,7 +353,6 @@ def process_message(msg_name: str, channel: str) -> None:
 					frappe.db.commit()
 					cust_name = cust.name
 				frappe.db.set_value("HD Ticket", ticket_name, "customer", cust_name)
-				frappe.cache().delete_value(_company_key)
 				try:
 					state.send_reply(f"Thank you! I've noted your company as *{company_name}*. How can I help you?")
 					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
