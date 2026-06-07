@@ -121,6 +121,32 @@ def get_all_task_tags() -> list[str]:
 	return sorted(tags)
 
 
+def _format_due_label(due_date, due_time) -> str:
+	"""Render a task due date (optionally with HH:MM time) for messages."""
+	label = str(due_date)
+	if due_time:
+		# due_time is a timedelta from MySQL — format as HH:MM
+		total_seconds = int(due_time.total_seconds())
+		h, m = divmod(total_seconds // 60, 60)
+		label += f" at {h:02d}:{m:02d}"
+	return label
+
+
+def _send_wa_text(phone: str, message: str) -> None:
+	"""Send a plain-text WhatsApp message to a phone number via frappe_whatsapp.
+
+	Mirrors the outbound mechanism used for per-task reminders. Caller is
+	responsible for ensuring the WhatsApp Message doctype exists.
+	"""
+	frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"message": message,
+		"content_type": "text",
+	}).insert(ignore_permissions=True)
+
+
 def send_due_task_wpa_notifications() -> None:
 	"""Hourly scheduler: send a WhatsApp reminder to the assigned agent when a task is due.
 
@@ -167,24 +193,12 @@ def send_due_task_wpa_notifications() -> None:
 			if not phone:
 				continue
 
-			due_label = str(task.due_date)
-			if task.due_time:
-				# due_time is a timedelta from MySQL — format as HH:MM
-				total_seconds = int(task.due_time.total_seconds())
-				h, m = divmod(total_seconds // 60, 60)
-				due_label += f" at {h:02d}:{m:02d}"
-
+			due_label = _format_due_label(task.due_date, task.due_time)
 			lines = [f"⏰ Task due: {task.title}", f"Due: {due_label}", f"Status: {task.status}"]
 			if task.ticket:
 				lines.append(f"Ticket: {task.ticket}")
 
-			frappe.get_doc({
-				"doctype": "WhatsApp Message",
-				"type": "Outgoing",
-				"to": phone,
-				"message": "\n".join(lines),
-				"content_type": "text",
-			}).insert(ignore_permissions=True)
+			_send_wa_text(phone, "\n".join(lines))
 
 			frappe.db.set_value("HD Task", task.name, "wpa_notified", 1, update_modified=False)
 			frappe.db.commit()
