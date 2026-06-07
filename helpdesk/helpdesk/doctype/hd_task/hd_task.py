@@ -376,6 +376,32 @@ def get_team_task_health() -> dict:
 
 
 @frappe.whitelist()
+def get_tasks_for_customer(customer: str) -> list[dict]:
+	"""Return all HD Tasks for the given HD Customer, enriched with assignee username."""
+	if not customer:
+		return []
+	fields = ["name", "title", "status", "priority", "assigned_to", "due_date", "ticket", "creation"]
+	tasks = frappe.get_all(
+		"HD Task",
+		filters={"customer": customer},
+		fields=fields,
+		order_by="creation desc",
+	)
+	assigned_emails = list({t.assigned_to for t in tasks if t.assigned_to})
+	username_map: dict[str, str] = {}
+	if assigned_emails:
+		for row in frappe.get_all(
+			"User",
+			filters={"name": ["in", assigned_emails]},
+			fields=["name", "username"],
+		):
+			username_map[row.name] = row.username or ""
+	for t in tasks:
+		t["assigned_to_username"] = username_map.get(t.assigned_to or "", "")
+	return tasks
+
+
+@frappe.whitelist()
 def search_tasks(query: str) -> list[str]:
 	"""Search task names, descriptions, and subtask titles via SQL LIKE.
 

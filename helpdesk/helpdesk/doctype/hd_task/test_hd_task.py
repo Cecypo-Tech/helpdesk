@@ -400,3 +400,36 @@ class TestHDTask(FrappeTestCase):
 		self.assertTrue(wa.called)
 		# Sent FROM the configured task WA Line.
 		self.assertEqual(wa.call_args_list[0].args[0], "WA-TEST-LINE")
+
+	def test_get_tasks_for_customer_returns_correct_tasks(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_tasks_for_customer
+
+		# Create a customer
+		cust = frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": "_Test Tasks Customer",
+		}).insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("HD Customer", cust.name, force=True))
+
+		# Two tasks for this customer
+		t1 = frappe.get_doc({"doctype": "HD Task", "title": "Alpha", "customer": cust.name, "status": "Todo"}).insert(ignore_permissions=True)
+		t2 = frappe.get_doc({"doctype": "HD Task", "title": "Beta",  "customer": cust.name, "status": "Done"}).insert(ignore_permissions=True)
+		# One task for a different customer — must NOT appear
+		t3 = frappe.get_doc({"doctype": "HD Task", "title": "Gamma", "status": "Todo"}).insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("HD Task", t1.name, force=True))
+		self.addCleanup(lambda: frappe.delete_doc("HD Task", t2.name, force=True))
+		self.addCleanup(lambda: frappe.delete_doc("HD Task", t3.name, force=True))
+
+		result = get_tasks_for_customer(cust.name)
+		names = [t["name"] for t in result]
+
+		self.assertIn(t1.name, names)
+		self.assertIn(t2.name, names)
+		self.assertNotIn(t3.name, names)
+		# Every row must carry the username enrichment key
+		for t in result:
+			self.assertIn("assigned_to_username", t)
+
+	def test_get_tasks_for_customer_empty_string_returns_empty(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_tasks_for_customer
+		self.assertEqual(get_tasks_for_customer(""), [])
