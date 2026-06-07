@@ -433,3 +433,25 @@ class TestHDTask(FrappeTestCase):
 	def test_get_tasks_for_customer_empty_string_returns_empty(self):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_tasks_for_customer
 		self.assertEqual(get_tasks_for_customer(""), [])
+
+	def test_create_task_for_ticket_sets_customer_and_ticket(self):
+		from unittest.mock import patch
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import create_task_for_ticket
+
+		cust = frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": "_Test Create Task Customer",
+		}).insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("HD Customer", cust.name, force=True))
+
+		# Patch frappe.db.get_value so we don't need a real HD Ticket in the DB
+		with patch("frappe.db.get_value", return_value=cust.name):
+			task_name = create_task_for_ticket("FAKE-TICKET-999", "Fix the widget")
+
+		task = frappe.get_doc("HD Task", task_name)
+		self.addCleanup(lambda: frappe.delete_doc("HD Task", task_name, force=True))
+
+		self.assertEqual(task.title, "Fix the widget")
+		self.assertEqual(task.ticket, "FAKE-TICKET-999")
+		self.assertEqual(task.customer, cust.name)
+		self.assertEqual(task.status, "Todo")

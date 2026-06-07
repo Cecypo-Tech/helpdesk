@@ -402,6 +402,21 @@ def get_tasks_for_customer(customer: str) -> list[dict]:
 
 
 @frappe.whitelist()
+def create_task_for_ticket(ticket: str, title: str) -> str:
+	"""Create an HD Task linked to the ticket and auto-populate the customer."""
+	customer = frappe.db.get_value("HD Ticket", ticket, "customer")
+	task = frappe.get_doc({
+		"doctype": "HD Task",
+		"title": title,
+		"ticket": ticket,
+		"customer": customer or None,
+		"status": "Todo",
+	})
+	task.insert(ignore_permissions=True)
+	return task.name
+
+
+@frappe.whitelist()
 def search_tasks(query: str) -> list[str]:
 	"""Search task names, descriptions, and subtask titles via SQL LIKE.
 
