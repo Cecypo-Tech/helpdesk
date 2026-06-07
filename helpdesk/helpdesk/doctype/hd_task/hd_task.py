@@ -328,13 +328,14 @@ def _get_due_and_overdue_tasks(window_hours: int = 48) -> dict:
 
 	overdue = frappe.get_all(
 		"HD Task",
-		filters=[["due_date", "<", today], ["status", "!=", "Done"]],
+		filters=[["due_date", "is", "set"], ["due_date", "<", today], ["status", "!=", "Done"]],
 		fields=fields,
 		order_by="due_date asc",
 	)
 	due_soon = frappe.get_all(
 		"HD Task",
 		filters=[
+			["due_date", "is", "set"],
 			["due_date", ">=", today],
 			["due_date", "<=", window_end],
 			["status", "!=", "Done"],

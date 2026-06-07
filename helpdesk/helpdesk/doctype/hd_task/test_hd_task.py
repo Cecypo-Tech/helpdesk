@@ -214,6 +214,20 @@ class TestHDTask(FrappeTestCase):
 		self.assertIn(on_boundary, due_soon_names)
 		self.assertNotIn(beyond, due_soon_names)
 
+	def test_due_helper_excludes_null_due_date(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import _get_due_and_overdue_tasks
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": "No due date sentinel",
+			"status": "Todo",
+		}).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda n=task.name: frappe.delete_doc("HD Task", n, ignore_permissions=True, force=True)
+		)
+		result = _get_due_and_overdue_tasks(window_hours=48)
+		all_names = [t["name"] for t in result["overdue"]] + [t["name"] for t in result["due_soon"]]
+		self.assertNotIn(task.name, all_names)
+
 	def _set_task_settings(self, enabled, recipients):
 		settings = frappe.get_single("HD Task Settings")
 		settings.enable_manager_digest = 1 if enabled else 0
