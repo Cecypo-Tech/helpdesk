@@ -213,3 +213,70 @@ class TestHDTask(FrappeTestCase):
 		due_soon_names = [t["name"] for t in result["due_soon"]]
 		self.assertIn(on_boundary, due_soon_names)
 		self.assertNotIn(beyond, due_soon_names)
+
+	def _set_task_settings(self, enabled, recipients):
+		settings = frappe.get_single("HD Task Settings")
+		settings.enable_manager_digest = 1 if enabled else 0
+		settings.due_soon_window_hours = 48
+		settings.digest_recipients = []
+		for r in recipients:
+			settings.append("digest_recipients", r)
+		settings.save(ignore_permissions=True)
+		self.addCleanup(self._reset_task_settings)
+
+	def _reset_task_settings(self):
+		settings = frappe.get_single("HD Task Settings")
+		settings.enable_manager_digest = 0
+		settings.digest_recipients = []
+		settings.save(ignore_permissions=True)
+
+	def test_digest_noop_when_disabled(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest.mock import patch
+		self._make_task("Overdue for disabled test", -1)
+		self._set_task_settings(enabled=False, recipients=[{"phone": "15550001111"}])
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
+			send_manager_task_digest()
+		wa.assert_not_called()
+		inapp.assert_not_called()
+
+	def test_digest_noop_when_nothing_due(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest.mock import patch
+		self._make_task("Far future", 30)
+		self._set_task_settings(enabled=True, recipients=[{"phone": "15550001111"}])
+		empty = {"overdue": [], "due_soon": [], "unassigned": []}
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_due_and_overdue_tasks", return_value=empty), \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
+			send_manager_task_digest()
+		wa.assert_not_called()
+		inapp.assert_not_called()
+
+	def test_digest_sends_to_each_recipient(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest.mock import patch
+		self._make_task("Overdue for send test", -1)
+		self._set_task_settings(
+			enabled=True,
+			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
+		)
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
+			send_manager_task_digest()
+		self.assertEqual(wa.call_count, 2)
+
+	def test_digest_one_bad_recipient_does_not_stop_others(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest.mock import patch
+		self._make_task("Overdue resilience test", -1)
+		self._set_task_settings(
+			enabled=True,
+			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
+		)
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text",
+		           side_effect=[Exception("boom"), None]) as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
+			send_manager_task_digest()
+		self.assertEqual(wa.call_count, 2)

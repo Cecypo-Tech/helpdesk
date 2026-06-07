@@ -135,9 +135,10 @@ def _format_due_label(due_date, due_time) -> str:
 def _send_wa_text(phone: str, message: str) -> None:
 	"""Send a plain-text WhatsApp message to a phone number via frappe_whatsapp.
 
-	Mirrors the outbound mechanism used for per-task reminders. Caller is
-	responsible for ensuring the WhatsApp Message doctype exists.
+	No-op when the WhatsApp Message DocType is not installed.
 	"""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return
 	frappe.get_doc({
 		"doctype": "WhatsApp Message",
 		"type": "Outgoing",
@@ -204,6 +205,71 @@ def send_due_task_wpa_notifications() -> None:
 			frappe.db.commit()
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), f"WPA task notification failed: {task.name}")
+
+
+def _build_digest_message(overdue: list, due_soon: list, max_lines: int = 5) -> str:
+	"""Build the plain-text WhatsApp digest body."""
+	lines = [f"📋 Task digest: {len(overdue)} overdue, {len(due_soon)} due soon"]
+
+	def fmt(task):
+		who = task.get("assigned_to") or "Unassigned"
+		return f"• {task['title']} — {who} — {_format_due_label(task.get('due_date'), task.get('due_time'))}"
+
+	preview = (overdue + due_soon)[:max_lines]
+	lines.extend(fmt(t) for t in preview)
+	remaining = (len(overdue) + len(due_soon)) - len(preview)
+	if remaining > 0:
+		lines.append(f"+{remaining} more")
+	return "\n".join(lines)
+
+
+def _notify_digest_recipient(agent: str, overdue_count: int, due_soon_count: int) -> None:
+	"""Create an in-app HD Notification for a digest recipient agent."""
+	user_to = frappe.db.get_value("HD Agent", agent, "user") or agent
+	frappe.get_doc({
+		"doctype": "HD Notification",
+		"user_from": "Administrator",
+		"user_to": user_to,
+		"notification_type": "Task",
+		"message": f"{overdue_count} overdue, {due_soon_count} due soon — review Team Health.",
+	}).insert(ignore_permissions=True)
+
+
+def send_manager_task_digest() -> None:
+	"""Daily scheduler: send a digest of overdue/due-soon tasks to configured managers.
+
+	Delivered over WhatsApp (per recipient phone) and as an in-app notification
+	(per recipient agent). No-op when disabled, no recipients, or nothing is due.
+	"""
+	try:
+		settings = frappe.get_cached_doc("HD Task Settings")
+	except Exception:
+		return
+	if not settings.enable_manager_digest or not settings.digest_recipients:
+		return
+
+	data = _get_due_and_overdue_tasks(settings.due_soon_window_hours or 48)
+	overdue, due_soon = data["overdue"], data["due_soon"]
+	if not overdue and not due_soon:
+		return
+
+	message = _build_digest_message(overdue, due_soon)
+
+	for recipient in settings.digest_recipients:
+		try:
+			phone = recipient.phone
+			if not phone and recipient.agent:
+				phone = _get_agent_phone(recipient.agent)
+			if phone:
+				_send_wa_text(phone, message)
+			if recipient.agent:
+				_notify_digest_recipient(recipient.agent, len(overdue), len(due_soon))
+			frappe.db.commit()
+		except Exception:
+			frappe.log_error(
+				frappe.get_traceback(),
+				f"Manager task digest failed for recipient: {recipient.agent or recipient.phone}",
+			)
 
 
 def _get_agent_phone(assigned_to: str) -> str | None:
