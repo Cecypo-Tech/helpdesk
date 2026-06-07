@@ -1395,6 +1395,24 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         ):
             contacts[c.jid] = c
 
+    # Non-Done task counts per JID — single query, silently skipped if custom field absent.
+    task_counts: dict[str, int] = {}
+    if jids:
+        try:
+            for row in frappe.db.sql(
+                """
+                SELECT baileys_jid, COUNT(*) AS cnt
+                FROM `tabHD Task`
+                WHERE status != 'Done' AND baileys_jid IN %(jids)s
+                GROUP BY baileys_jid
+                """,
+                {"jids": tuple(jids)},
+                as_dict=True,
+            ):
+                task_counts[row.baileys_jid] = row.cnt
+        except Exception:
+            pass
+
     result = []
     for r in deduped:
         jid = r.jid
@@ -1437,6 +1455,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             "last_message_time": str(r["creation"]),
             "last_direction": r.get("direction", "Incoming"),
             "content_type": r.get("content_type", "text"),
+            "open_task_count": task_counts.get(jid, 0),
         })
 
     return result

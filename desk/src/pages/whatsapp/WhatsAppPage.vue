@@ -130,6 +130,8 @@ function reloadTasksCount() {
     ticketsCountResource.update({ params: { jid: selectedJid.value } });
     ticketsCountResource.reload();
   }
+  // Refresh the conversation list so avatar badges stay in sync.
+  convListRef.value?.reload();
 }
 
 // ── Mobile detection ──────────────────────────────────────────────────────────

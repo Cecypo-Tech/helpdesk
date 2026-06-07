@@ -145,6 +145,7 @@
         :contentType="conv.content_type"
         :hasUnread="isUnread(conv)"
         :selected="conv.jid === selectedJid"
+        :openTaskCount="conv.open_task_count || 0"
         @select="(jid, name, company, team, phone) => $emit('select', jid, name, company, team, phone)"
       />
     </div>

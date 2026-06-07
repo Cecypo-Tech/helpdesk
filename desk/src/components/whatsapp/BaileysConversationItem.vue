@@ -12,6 +12,11 @@
       >
         {{ avatarLetter }}
       </div>
+      <!-- Open task count badge -->
+      <span
+        v-if="openTaskCount > 0"
+        class="absolute -top-1.5 -right-1.5 flex min-w-[14px] h-3.5 items-center justify-center rounded-full bg-blue-600 px-0.5 text-[8px] font-bold text-white ring-1 ring-surface-white leading-none"
+      >{{ openTaskCount }}</span>
       <span
         v-if="isGroup"
         class="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-surface-white ring-1 ring-outline-gray-2"
@@ -72,6 +77,7 @@ const props = defineProps<{
   contentType: string;
   hasUnread: boolean;
   selected: boolean;
+  openTaskCount?: number;
 }>();
 
 defineEmits<{
