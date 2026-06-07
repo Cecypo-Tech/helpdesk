@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "creation": "2026-06-06 00:00:00",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enable_manager_digest",
+  "due_soon_window_hours",
+  "section_recipients",
+  "digest_recipients"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enable_manager_digest",
+   "fieldtype": "Check",
+   "label": "Enable Manager Task Digest"
+  },
+  {
+   "default": "48",
+   "description": "How far ahead (in hours) a task counts as \"due soon\".",
+   "fieldname": "due_soon_window_hours",
+   "fieldtype": "Int",
+   "label": "Due Soon Window (Hours)"
+  },
+  {
+   "fieldname": "section_recipients",
+   "fieldtype": "Section Break",
+   "label": "Digest Recipients"
+  },
+  {
+   "fieldname": "digest_recipients",
+   "fieldtype": "Table",
+   "label": "Digest Recipients",
+   "options": "HD Task Digest Recipient"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-06 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Task Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Agent Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
