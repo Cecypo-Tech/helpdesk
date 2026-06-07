@@ -39,7 +39,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "Assignment\nMention\nReaction\nWhatsApp",
+   "options": "Assignment\nMention\nReaction\nWhatsApp\nTask",
    "reqd": 1
   },
   {
