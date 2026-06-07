@@ -222,6 +222,7 @@ class TestHDTask(FrappeTestCase):
 		for r in recipients:
 			settings.append("digest_recipients", r)
 		settings.save(ignore_permissions=True)
+		frappe.clear_document_cache("HD Task Settings")
 		self.addCleanup(self._reset_task_settings)
 
 	def _reset_task_settings(self):
@@ -229,6 +230,7 @@ class TestHDTask(FrappeTestCase):
 		settings.enable_manager_digest = 0
 		settings.digest_recipients = []
 		settings.save(ignore_permissions=True)
+		frappe.clear_document_cache("HD Task Settings")
 
 	def test_digest_noop_when_disabled(self):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
@@ -280,3 +282,18 @@ class TestHDTask(FrappeTestCase):
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
 		self.assertEqual(wa.call_count, 2)
+
+	def test_digest_resolves_agent_phone_when_no_direct_phone(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest import mock
+		agent = frappe.db.get_value("HD Agent", {}, "name")
+		if not agent:
+			self.skipTest("No HD Agent available in this site")
+		self._make_task("Overdue for agent-phone test", -1)
+		self._set_task_settings(enabled=True, recipients=[{"agent": agent}])
+		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_agent_phone", return_value="15559998888") as gp, \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
+			send_manager_task_digest()
+		gp.assert_called_once_with(agent)
+		wa.assert_called_once_with("15559998888", mock.ANY)

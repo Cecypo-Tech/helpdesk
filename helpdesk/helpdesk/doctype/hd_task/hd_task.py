@@ -266,6 +266,7 @@ def send_manager_task_digest() -> None:
 				_notify_digest_recipient(recipient.agent, len(overdue), len(due_soon))
 			frappe.db.commit()
 		except Exception:
+			frappe.db.rollback()
 			frappe.log_error(
 				frappe.get_traceback(),
 				f"Manager task digest failed for recipient: {recipient.agent or recipient.phone}",
