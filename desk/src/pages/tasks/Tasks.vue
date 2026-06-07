@@ -20,8 +20,11 @@
         </RouterLink>
       </template>
     </LayoutHeader>
+    <TeamHealthView
+      v-if="isTeamHealthView"
+    />
     <CalendarView
-      v-if="isCalendarView"
+      v-else-if="isCalendarView"
     />
     <KanbanView
       v-else-if="isKanbanView"
@@ -48,6 +51,31 @@
           <LucideCalendarClock class="h-3 w-3" />
           {{ __('Due Today') }}
         </button>
+
+        <div class="ml-auto flex items-center gap-1.5">
+          <button
+            v-if="isManager"
+            class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4"
+            @click="() => { currentView = { label: __('Team Health'), icon: LucideHeartPulse }; router.push({ name: 'TasksAgent', query: { view: 'team-health' } }); }"
+          >
+            <LucideHeartPulse class="h-3 w-3" />
+            {{ __('Team Health') }}
+          </button>
+          <button
+            class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4"
+            @click="() => { currentView = { label: __('Calendar'), icon: LucideCalendarDays }; router.push({ name: 'TasksAgent', query: { view: 'calendar' } }); }"
+          >
+            <LucideCalendarDays class="h-3 w-3" />
+            {{ __('Calendar') }}
+          </button>
+          <button
+            class="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors bg-surface-white border-outline-gray-2 text-ink-gray-6 hover:border-outline-gray-4"
+            @click="() => { currentView = { label: __('Kanban'), icon: LucideLayoutDashboard }; router.push({ name: 'TasksAgent', query: { view: 'kanban' } }); }"
+          >
+            <LucideLayoutDashboard class="h-3 w-3" />
+            {{ __('Kanban') }}
+          </button>
+        </div>
       </div>
       <ListViewBuilder
         ref="listViewRef"
@@ -70,6 +98,7 @@
 import { LayoutHeader, ListViewBuilder } from "@/components";
 import CalendarView from "@/pages/tasks/CalendarView.vue";
 import KanbanView from "@/pages/tasks/KanbanView.vue";
+import TeamHealthView from "@/pages/tasks/TeamHealthView.vue";
 import {
   EditIcon,
   PinIcon,
@@ -86,6 +115,8 @@ import { getIcon } from "@/utils";
 import { Badge, FeatherIcon, toast, usePageMeta } from "frappe-ui";
 import LucideAlignJustify from "~icons/lucide/align-justify";
 import LucideCalendarDays from "~icons/lucide/calendar-days";
+import LucideLayoutDashboard from "~icons/lucide/layout-dashboard";
+import LucideHeartPulse from "~icons/lucide/heart-pulse";
 import LucidePlus from "~icons/lucide/plus";
 import LucideAlertCircle from "~icons/lucide/alert-circle";
 import LucideCalendarClock from "~icons/lucide/calendar-clock";
@@ -126,9 +157,12 @@ const {
 
 const isCalendarView = computed(() => route.query.view === "calendar");
 
+const isTeamHealthView = computed(() => route.query.view === "team-health");
+
 const isKanbanView = computed(() => {
   const viewName = route.query.view as string | undefined;
   if (!viewName || viewName === "calendar") return false;
+  if (viewName === "kanban") return true;
   return findView(viewName).value?.type === "kanban";
 });
 
