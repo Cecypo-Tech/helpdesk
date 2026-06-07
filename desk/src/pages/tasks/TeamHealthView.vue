@@ -19,6 +19,9 @@
     <!-- Grouped task list -->
     <div class="flex-1 overflow-auto p-4 space-y-5">
       <div v-if="resource.loading" class="text-sm text-ink-gray-5">{{ __('Loading…') }}</div>
+      <div v-else-if="resource.error" class="text-sm text-red-600 mt-20 text-center">
+        {{ __('Could not load team task health. Please try again.') }}
+      </div>
       <div
         v-else-if="visibleGroups.length === 0"
         class="text-sm text-ink-gray-5 flex flex-col items-center gap-2 mt-20"
