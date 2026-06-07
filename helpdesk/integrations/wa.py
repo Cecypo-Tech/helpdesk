@@ -1608,21 +1608,30 @@ def get_wa_group_participants(jid: str, line: str) -> list[dict]:
 
 @frappe.whitelist()
 def get_tasks_for_jid(jid: str) -> list[dict]:
-    """Return HD Tasks linked (via ticket) to the WhatsApp JID."""
+    """Return HD Tasks for the WhatsApp JID.
+
+    Includes tasks tagged with the jid directly (created from the chat) plus any
+    linked via a ticket on the same chat (back-compat with older tasks).
+    """
     if not jid:
         return []
+    fields = ["name", "title", "status", "priority", "assigned_to", "due_date", "creation"]
+    by_name: dict[str, dict] = {}
+    # Direct association — tasks created from this chat.
+    try:
+        for t in frappe.get_all("HD Task", filters={"baileys_jid": jid}, fields=fields):
+            by_name[t["name"]] = t
+    except Exception:
+        pass
+    # Back-compat — tasks linked via a ticket on this chat.
     try:
         tickets = frappe.get_all("HD Ticket", filters={"baileys_jid": jid}, pluck="name")
+        if tickets:
+            for t in frappe.get_all("HD Task", filters={"ticket": ["in", tickets]}, fields=fields):
+                by_name[t["name"]] = t
     except Exception:
-        return []
-    if not tickets:
-        return []
-    return frappe.get_all(
-        "HD Task",
-        filters={"ticket": ["in", tickets]},
-        fields=["name", "title", "status", "priority", "assigned_to", "due_date"],
-        order_by="creation desc",
-    )
+        pass
+    return sorted(by_name.values(), key=lambda r: r.get("creation") or "", reverse=True)
 
 
 @frappe.whitelist()
@@ -1671,30 +1680,23 @@ def get_tickets_for_jid(jid: str) -> list[dict]:
 
 @frappe.whitelist()
 def create_task_from_chat(jid: str, line: str, title: str) -> str:
-    """Create an HD Task linked to the WA conversation, creating a ticket if none exists."""
-    ticket_name = frappe.db.get_value("HD Ticket", {"baileys_jid": jid}, "name")
-    if not ticket_name:
-        line_doc = frappe.get_doc("WA Line", line) if line else None
-        ticket_data = {
-            "doctype": "HD Ticket",
-            "subject": title,
-            "description": title,
-            "ticket_channel": "WhatsApp",
-            "baileys_jid": jid,
-            "baileys_line": line,
-        }
-        if line_doc and line_doc.default_ticket_type:
-            ticket_data["ticket_type"] = line_doc.default_ticket_type
-        if line_doc and line_doc.default_team:
-            ticket_data["agent_group"] = line_doc.default_team
-        ticket = frappe.get_doc(ticket_data)
-        ticket.insert(ignore_permissions=True)
-        ticket_name = ticket.name
+    """Create an HD Task tied to the WA conversation.
+
+    The task is associated with the chat directly via baileys_jid. It links to an
+    existing ticket for the chat if one already exists, but does NOT create a
+    ticket — use create_ticket_from_chat for that.
+    """
+    try:
+        existing_ticket = frappe.db.get_value("HD Ticket", {"baileys_jid": jid}, "name")
+    except Exception:
+        existing_ticket = None
     task = frappe.get_doc({
         "doctype": "HD Task",
         "title": title,
-        "ticket": ticket_name,
         "status": "Todo",
+        "baileys_jid": jid,
+        "baileys_line": line or None,
+        "ticket": existing_ticket or None,
     })
     task.insert(ignore_permissions=True)
     frappe.db.commit()
