@@ -230,6 +230,17 @@ class TestHDTask(FrappeTestCase):
 
 	def _set_task_settings(self, enabled, recipients, wa_line=None):
 		settings = frappe.get_single("HD Task Settings")
+		# Snapshot the real singleton once so the test run restores it exactly
+		# (send_manager_task_digest commits mid-run, escaping FrappeTestCase's
+		# rollback, so without this a test run would clobber the live config).
+		if not hasattr(self, "_orig_settings_snapshot"):
+			self._orig_settings_snapshot = {
+				"enable_manager_digest": settings.enable_manager_digest,
+				"due_soon_window_hours": settings.due_soon_window_hours,
+				"digest_wa_line": settings.digest_wa_line,
+				"recipients": [{"agent": r.agent, "phone": r.phone} for r in settings.digest_recipients],
+			}
+			self.addCleanup(self._restore_task_settings)
 		settings.enable_manager_digest = 1 if enabled else 0
 		settings.due_soon_window_hours = 48
 		settings.digest_wa_line = None  # clear any stale link before save
@@ -240,14 +251,20 @@ class TestHDTask(FrappeTestCase):
 		# Set directly to bypass Link validation in tests (the WA send is mocked).
 		frappe.db.set_single_value("HD Task Settings", "digest_wa_line", wa_line)
 		frappe.clear_document_cache("HD Task Settings")
-		self.addCleanup(self._reset_task_settings)
 
-	def _reset_task_settings(self):
+	def _restore_task_settings(self):
+		snap = getattr(self, "_orig_settings_snapshot", None)
+		if snap is None:
+			return
 		settings = frappe.get_single("HD Task Settings")
-		settings.enable_manager_digest = 0
-		settings.digest_wa_line = None  # clear before save so a dummy test line isn't validated
+		settings.enable_manager_digest = snap["enable_manager_digest"]
+		settings.due_soon_window_hours = snap["due_soon_window_hours"]
+		settings.digest_wa_line = snap["digest_wa_line"] or None
 		settings.digest_recipients = []
+		for r in snap["recipients"]:
+			settings.append("digest_recipients", r)
 		settings.save(ignore_permissions=True)
+		frappe.db.commit()
 		frappe.clear_document_cache("HD Task Settings")
 
 	def test_digest_noop_when_disabled(self):
