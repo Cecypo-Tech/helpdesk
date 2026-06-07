@@ -229,6 +229,42 @@ def get_my_due_tasks() -> list[dict]:
 	)
 
 
+def _get_due_and_overdue_tasks(window_hours: int = 48) -> dict:
+	"""Return tasks that are overdue or due soon, for the manager digest and dashboard.
+
+	overdue   = due_date < today and status != Done
+	due_soon  = today <= due_date <= today + ceil(window_hours/24) days, status != Done
+	unassigned = subset of (overdue + due_soon) with no assigned_to
+
+	All lists are sorted by due_date ascending.
+	"""
+	import math
+
+	window_days = max(1, math.ceil((window_hours or 0) / 24))
+	today = frappe.utils.today()
+	window_end = frappe.utils.add_days(today, window_days)
+	fields = ["name", "title", "assigned_to", "due_date", "due_time", "priority", "ticket"]
+
+	overdue = frappe.get_all(
+		"HD Task",
+		filters=[["due_date", "<", today], ["status", "!=", "Done"]],
+		fields=fields,
+		order_by="due_date asc",
+	)
+	due_soon = frappe.get_all(
+		"HD Task",
+		filters=[
+			["due_date", ">=", today],
+			["due_date", "<=", window_end],
+			["status", "!=", "Done"],
+		],
+		fields=fields,
+		order_by="due_date asc",
+	)
+	unassigned = [t for t in (overdue + due_soon) if not t.get("assigned_to")]
+	return {"overdue": overdue, "due_soon": due_soon, "unassigned": unassigned}
+
+
 @frappe.whitelist()
 def search_tasks(query: str) -> list[str]:
 	"""Search task names, descriptions, and subtask titles via SQL LIKE.

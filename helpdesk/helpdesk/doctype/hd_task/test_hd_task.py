@@ -163,3 +163,43 @@ class TestHDTask(FrappeTestCase):
 			self.assertNotIn(task.name, names)
 		finally:
 			frappe.delete_doc("HD Task", task.name, ignore_permissions=True, force=True)
+
+	def _make_task(self, title, due_offset_days, status="Todo", assigned_to=None):
+		task = frappe.get_doc({
+			"doctype": "HD Task",
+			"title": title,
+			"status": status,
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("HD Task", task.name, {
+			"assigned_to": assigned_to,
+			"due_date": frappe.utils.add_days(frappe.utils.today(), due_offset_days),
+		})
+		self.addCleanup(
+			lambda n=task.name: frappe.delete_doc("HD Task", n, ignore_permissions=True, force=True)
+		)
+		return task.name
+
+	def test_due_helper_partitions_overdue_and_due_soon(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import _get_due_and_overdue_tasks
+		overdue_name = self._make_task("Overdue one", -1)
+		today_name = self._make_task("Due today", 0)
+		soon_name = self._make_task("Due in 1 day", 1)
+		far_name = self._make_task("Due in 5 days", 5)
+		done_name = self._make_task("Done overdue", -1, status="Done")
+
+		result = _get_due_and_overdue_tasks(window_hours=48)
+		overdue_names = [t["name"] for t in result["overdue"]]
+		due_soon_names = [t["name"] for t in result["due_soon"]]
+
+		self.assertIn(overdue_name, overdue_names)
+		self.assertIn(today_name, due_soon_names)
+		self.assertIn(soon_name, due_soon_names)
+		self.assertNotIn(far_name, overdue_names + due_soon_names)
+		self.assertNotIn(done_name, overdue_names + due_soon_names)
+
+	def test_due_helper_groups_unassigned(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import _get_due_and_overdue_tasks
+		unassigned_name = self._make_task("Nobody owns me", -1, assigned_to=None)
+		result = _get_due_and_overdue_tasks(window_hours=48)
+		self.assertIn(unassigned_name, [t["name"] for t in result["overdue"]])
+		self.assertIn(unassigned_name, [t["name"] for t in result["unassigned"]])
