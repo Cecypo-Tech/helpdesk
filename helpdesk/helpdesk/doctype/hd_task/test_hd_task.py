@@ -283,6 +283,19 @@ class TestHDTask(FrappeTestCase):
 			send_manager_task_digest()
 		self.assertEqual(wa.call_count, 2)
 
+	def test_team_task_health_shape(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_team_task_health
+		self._make_task("Overdue for health", -1)
+		self._make_task("Due soon for health", 1)
+		self._make_task("Unassigned for health", -1, assigned_to=None)
+		result = get_team_task_health()
+		self.assertIn("overdue", result)
+		self.assertIn("due_soon", result)
+		self.assertIn("counts", result)
+		self.assertGreaterEqual(result["counts"]["overdue"], 1)
+		self.assertGreaterEqual(result["counts"]["due_soon"], 1)
+		self.assertGreaterEqual(result["counts"]["unassigned"], 1)
+
 	def test_digest_resolves_agent_phone_when_no_direct_phone(self):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
 		from unittest import mock

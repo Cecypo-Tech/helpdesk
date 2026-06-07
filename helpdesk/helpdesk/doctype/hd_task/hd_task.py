@@ -347,6 +347,33 @@ def _get_due_and_overdue_tasks(window_hours: int = 48) -> dict:
 
 
 @frappe.whitelist()
+def get_team_task_health() -> dict:
+	"""Manager dashboard data: overdue + due-soon tasks, team-wide, with counts.
+
+	Restricted to Agent Manager / System Manager.
+	"""
+	roles = set(frappe.get_roles(frappe.session.user))
+	if not ({"Agent Manager", "System Manager"} & roles):
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+
+	try:
+		window_hours = frappe.db.get_single_value("HD Task Settings", "due_soon_window_hours") or 48
+	except Exception:
+		window_hours = 48
+
+	data = _get_due_and_overdue_tasks(window_hours)
+	return {
+		"overdue": data["overdue"],
+		"due_soon": data["due_soon"],
+		"counts": {
+			"overdue": len(data["overdue"]),
+			"due_soon": len(data["due_soon"]),
+			"unassigned": len(data["unassigned"]),
+		},
+	}
+
+
+@frappe.whitelist()
 def search_tasks(query: str) -> list[str]:
 	"""Search task names, descriptions, and subtask titles via SQL LIKE.
 
