@@ -132,24 +132,12 @@ def _format_due_label(due_date, due_time) -> str:
 	return label
 
 
-def _send_wa_text(phone: str, message: str) -> None:
-	"""Send a plain-text WhatsApp message to a phone number via frappe_whatsapp.
-
-	No-op when the WhatsApp Message DocType is not installed.
-	"""
-	if not frappe.db.exists("DocType", "WhatsApp Message"):
-		return
-	frappe.get_doc({
-		"doctype": "WhatsApp Message",
-		"type": "Outgoing",
-		"to": phone,
-		"message": message,
-		"content_type": "text",
-	}).insert(ignore_permissions=True)
-
-
 def send_due_task_wpa_notifications() -> None:
 	"""Hourly scheduler: send a WhatsApp reminder to the assigned agent when a task is due.
+
+	Sent via the configured task WA Line (Evolution API), which has no 24-hour
+	template restriction — unlike WABA, which cannot reliably deliver proactive
+	reminders to agents who haven't recently messaged the business number.
 
 	Criteria for sending:
 	- status != 'Done'
@@ -161,14 +149,11 @@ def send_due_task_wpa_notifications() -> None:
 
 	After sending, wpa_notified is set to 1 to prevent re-sending.
 	"""
-	if not frappe.db.exists("DocType", "WhatsApp Message"):
-		return
-
 	try:
-		settings = frappe.get_cached_doc("WhatsApp Helpdesk Settings")
-		if not settings.enabled:
-			return
+		task_line = frappe.db.get_single_value("HD Task Settings", "task_wa_line")
 	except Exception:
+		task_line = None
+	if not task_line:
 		return
 
 	due_tasks = frappe.db.sql(
@@ -199,7 +184,7 @@ def send_due_task_wpa_notifications() -> None:
 			if task.ticket:
 				lines.append(f"Ticket: {task.ticket}")
 
-			_send_wa_text(phone, "\n".join(lines))
+			_send_task_wa(task_line, phone, "\n".join(lines))
 
 			frappe.db.set_value("HD Task", task.name, "wpa_notified", 1, update_modified=False)
 			frappe.db.commit()
@@ -235,12 +220,12 @@ def _notify_digest_recipient(agent: str, overdue_count: int, due_soon_count: int
 	}).insert(ignore_permissions=True)
 
 
-def _send_digest_wa(line: str, phone: str, message: str) -> None:
-	"""Send the digest to a phone number via the WA Line (Evolution API) path.
+def _send_task_wa(line: str, phone: str, message: str) -> None:
+	"""Send a task notification to a phone number via the WA Line (Evolution API) path.
 
-	The WA Line path has no 24-hour template restriction, unlike WABA which
-	cannot send proactive non-template messages. Caller passes the configured
-	digest WA Line to send from.
+	Used by both the manager digest and the per-task reminders. The WA Line path
+	has no 24-hour template restriction, unlike WABA which cannot send proactive
+	non-template messages. Caller passes the configured task WA Line to send from.
 	"""
 	from helpdesk.integrations.wa import _normalize_phone, send_wa_reply
 
@@ -269,7 +254,7 @@ def send_manager_task_digest() -> None:
 		return
 
 	message = _build_digest_message(overdue, due_soon)
-	wa_line = settings.digest_wa_line
+	wa_line = settings.task_wa_line
 
 	for recipient in settings.digest_recipients:
 		try:
@@ -277,7 +262,7 @@ def send_manager_task_digest() -> None:
 			if not phone and recipient.agent:
 				phone = _get_agent_phone(recipient.agent)
 			if phone and wa_line:
-				_send_digest_wa(wa_line, phone, message)
+				_send_task_wa(wa_line, phone, message)
 			if recipient.agent:
 				_notify_digest_recipient(recipient.agent, len(overdue), len(due_soon))
 			frappe.db.commit()

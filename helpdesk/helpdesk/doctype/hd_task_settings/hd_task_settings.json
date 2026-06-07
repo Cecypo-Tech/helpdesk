@@ -8,7 +8,7 @@
  "field_order": [
   "enable_manager_digest",
   "due_soon_window_hours",
-  "digest_wa_line",
+  "task_wa_line",
   "section_recipients",
   "digest_recipients"
  ],
@@ -27,10 +27,10 @@
    "label": "Due Soon Window (Hours)"
   },
   {
-   "description": "WhatsApp Line the digest is sent FROM (Evolution API / WA Line). Required for WhatsApp delivery; in-app notifications work without it. WABA cannot send proactive non-template messages, so it is not used here.",
-   "fieldname": "digest_wa_line",
+   "description": "WhatsApp Line (Evolution API / WA Line) used to send task notifications FROM — both the manager digest and per-task due reminders. Required for WhatsApp delivery; in-app digest notifications work without it. WABA is not used (it cannot send proactive non-template messages).",
+   "fieldname": "task_wa_line",
    "fieldtype": "Link",
-   "label": "Digest WA Line",
+   "label": "Task WA Line",
    "options": "WA Line"
   },
   {

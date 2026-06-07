@@ -237,19 +237,19 @@ class TestHDTask(FrappeTestCase):
 			self._orig_settings_snapshot = {
 				"enable_manager_digest": settings.enable_manager_digest,
 				"due_soon_window_hours": settings.due_soon_window_hours,
-				"digest_wa_line": settings.digest_wa_line,
+				"task_wa_line": settings.task_wa_line,
 				"recipients": [{"agent": r.agent, "phone": r.phone} for r in settings.digest_recipients],
 			}
 			self.addCleanup(self._restore_task_settings)
 		settings.enable_manager_digest = 1 if enabled else 0
 		settings.due_soon_window_hours = 48
-		settings.digest_wa_line = None  # clear any stale link before save
+		settings.task_wa_line = None  # clear any stale link before save
 		settings.digest_recipients = []
 		for r in recipients:
 			settings.append("digest_recipients", r)
 		settings.save(ignore_permissions=True)
 		# Set directly to bypass Link validation in tests (the WA send is mocked).
-		frappe.db.set_single_value("HD Task Settings", "digest_wa_line", wa_line)
+		frappe.db.set_single_value("HD Task Settings", "task_wa_line", wa_line)
 		frappe.clear_document_cache("HD Task Settings")
 
 	def _restore_task_settings(self):
@@ -259,7 +259,7 @@ class TestHDTask(FrappeTestCase):
 		settings = frappe.get_single("HD Task Settings")
 		settings.enable_manager_digest = snap["enable_manager_digest"]
 		settings.due_soon_window_hours = snap["due_soon_window_hours"]
-		settings.digest_wa_line = snap["digest_wa_line"] or None
+		settings.task_wa_line = snap["task_wa_line"] or None
 		settings.digest_recipients = []
 		for r in snap["recipients"]:
 			settings.append("digest_recipients", r)
@@ -272,7 +272,7 @@ class TestHDTask(FrappeTestCase):
 		from unittest.mock import patch
 		self._make_task("Overdue for disabled test", -1)
 		self._set_task_settings(enabled=False, recipients=[{"phone": "15550001111"}], wa_line="WA-TEST-LINE")
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
 			send_manager_task_digest()
 		wa.assert_not_called()
@@ -285,7 +285,7 @@ class TestHDTask(FrappeTestCase):
 		self._set_task_settings(enabled=True, recipients=[{"phone": "15550001111"}], wa_line="WA-TEST-LINE")
 		empty = {"overdue": [], "due_soon": [], "unassigned": []}
 		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_due_and_overdue_tasks", return_value=empty), \
-		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
 			send_manager_task_digest()
 		wa.assert_not_called()
@@ -300,7 +300,7 @@ class TestHDTask(FrappeTestCase):
 			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
 			wa_line="WA-TEST-LINE",
 		)
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
 		self.assertEqual(wa.call_count, 2)
@@ -314,7 +314,7 @@ class TestHDTask(FrappeTestCase):
 			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
 			wa_line="WA-TEST-LINE",
 		)
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa",
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa",
 		           side_effect=[Exception("boom"), None]) as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
@@ -352,7 +352,7 @@ class TestHDTask(FrappeTestCase):
 		self._make_task("Overdue for agent-phone test", -1)
 		self._set_task_settings(enabled=True, recipients=[{"agent": agent}], wa_line="WA-TEST-LINE")
 		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_agent_phone", return_value="15559998888") as gp, \
-		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
 		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
 		gp.assert_called_once_with(agent)
@@ -371,8 +371,32 @@ class TestHDTask(FrappeTestCase):
 			recipients=[{"phone": "15550001111", "agent": agent}],
 			wa_line=None,
 		)
-		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
 		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
 			send_manager_task_digest()
 		wa.assert_not_called()
 		inapp.assert_called_once()
+
+	def test_due_reminder_skips_without_wa_line(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_due_task_wpa_notifications
+		from unittest import mock
+		self._set_task_settings(enabled=False, recipients=[], wa_line=None)
+		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa:
+			send_due_task_wpa_notifications()
+		wa.assert_not_called()
+
+	def test_due_reminder_sends_via_wa_line(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_due_task_wpa_notifications
+		from unittest import mock
+		agent = frappe.db.get_value("HD Agent", {}, "name") or frappe.session.user
+		self._set_task_settings(enabled=False, recipients=[], wa_line="WA-TEST-LINE")
+		self._make_task("Reminder line test", -1, assigned_to=agent)
+		# Mock the mutations/send so no real task is altered and nothing is sent.
+		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_agent_phone", return_value="15557776666"), \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_task_wa") as wa, \
+		     mock.patch("frappe.db.set_value"), \
+		     mock.patch("frappe.db.commit"):
+			send_due_task_wpa_notifications()
+		self.assertTrue(wa.called)
+		# Sent FROM the configured task WA Line.
+		self.assertEqual(wa.call_args_list[0].args[0], "WA-TEST-LINE")
