@@ -72,6 +72,41 @@
       </button>
     </div>
 
+    <!-- AI suggestion popover -->
+    <Teleport to="body">
+      <div
+        v-if="showAiSuggestion"
+        ref="aiPopup"
+        class="fixed z-50 flex flex-col rounded-xl border border-outline-gray-2 bg-surface-white shadow-xl"
+        :style="aiPopupStyle"
+      >
+        <div class="flex items-center justify-between border-b border-outline-gray-2 px-3 py-2">
+          <span class="flex items-center gap-1.5 text-xs font-semibold text-ink-gray-7">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .963L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+            </svg>
+            AI Suggestion
+          </span>
+          <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="showAiSuggestion = false">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="px-3 py-2.5 text-xs text-ink-gray-8 whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed">{{ aiSuggestion }}</div>
+        <div class="flex gap-2 border-t border-outline-gray-2 px-3 py-2">
+          <button
+            class="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+            @click="applyAiSuggestion"
+          >Use this</button>
+          <button
+            class="rounded-lg border border-outline-gray-3 px-3 py-1.5 text-xs text-ink-gray-6 hover:bg-surface-gray-1"
+            @click="showAiSuggestion = false"
+          >Dismiss</button>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Saved replies picker -->
     <Teleport to="body">
       <div
@@ -169,6 +204,23 @@
           <line x1="9" y1="14" x2="13" y2="14"/>
         </svg>
       </button>
+
+      <!-- AI suggest reply -->
+      <button
+        ref="aiBtn"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        :class="{ 'bg-surface-gray-1 text-ink-gray-8 border-purple-300 text-purple-600': showAiSuggestion }"
+        :disabled="aiLoading"
+        title="AI suggest reply"
+        @click.stop="toggleAiSuggestion"
+      >
+        <svg v-if="!aiLoading" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .963L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+        </svg>
+        <svg v-else class="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12"/>
+        </svg>
+      </button>
       <input
         ref="fileInput"
         type="file"
@@ -206,7 +258,7 @@
 </template>
 
 <script setup lang="ts">
-import { createListResource, createResource } from "frappe-ui";
+import { call, createListResource, createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 
 interface Participant {
@@ -291,6 +343,56 @@ function onPaste(e: ClipboardEvent) {
       if (file) { e.preventDefault(); setFile(file); return; }
     }
   }
+}
+
+// ── AI suggestion ─────────────────────────────────────────────────────────────
+const aiBtn = ref<HTMLButtonElement | null>(null);
+const aiPopup = ref<HTMLElement | null>(null);
+const showAiSuggestion = ref(false);
+const aiSuggestion = ref("");
+const aiLoading = ref(false);
+const aiPopupStyle = ref<Record<string, string>>({});
+
+function positionAiPopup() {
+  if (!aiBtn.value) return;
+  const rect = aiBtn.value.getBoundingClientRect();
+  aiPopupStyle.value = {
+    bottom: `${window.innerHeight - rect.top + 8}px`,
+    left: `${rect.left}px`,
+    width: "320px",
+  };
+}
+
+async function toggleAiSuggestion() {
+  if (aiLoading.value) return;
+  if (showAiSuggestion.value) {
+    showAiSuggestion.value = false;
+    return;
+  }
+  aiLoading.value = true;
+  try {
+    const result = await call("helpdesk.integrations.bot.suggest_agent_reply", {
+      ticket: props.ticketId,
+      channel: "wa_line",
+    });
+    if (!result) {
+      toast.warning("Not enough conversation history to suggest a reply.");
+      return;
+    }
+    aiSuggestion.value = result;
+    showAiSuggestion.value = true;
+    nextTick(positionAiPopup);
+  } catch {
+    toast.error("Could not generate a suggestion. Check the AI settings.");
+  } finally {
+    aiLoading.value = false;
+  }
+}
+
+function applyAiSuggestion() {
+  text.value = aiSuggestion.value;
+  showAiSuggestion.value = false;
+  nextTick(() => { autoResize(); textareaRef.value?.focus(); });
 }
 
 // ── Saved replies ─────────────────────────────────────────────────────────────
@@ -394,6 +496,13 @@ function onDocClick(e: MouseEvent) {
   }
   if (showMentionPicker.value && !mentionPickerRef.value?.contains(e.target as Node)) {
     showMentionPicker.value = false;
+  }
+  if (
+    showAiSuggestion.value &&
+    !aiPopup.value?.contains(e.target as Node) &&
+    !aiBtn.value?.contains(e.target as Node)
+  ) {
+    showAiSuggestion.value = false;
   }
 }
 
