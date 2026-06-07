@@ -12,6 +12,7 @@
   "due_date",
   "due_time",
   "ticket",
+  "customer",
   "team",
   "description",
   "subtasks_section",
@@ -77,6 +78,12 @@
    "fieldtype": "Link",
    "label": "Ticket",
    "options": "HD Ticket"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "HD Customer"
   },
   {
    "fieldname": "team",
