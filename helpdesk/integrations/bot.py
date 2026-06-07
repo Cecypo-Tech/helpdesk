@@ -194,19 +194,25 @@ def _get_conversation_history(
 			for r in rows
 		]
 
-	# wa_line — prefer ticket reference, fall back to jid
-	filters = (
-		{"reference_doctype": "HD Ticket", "reference_name": ticket_name}
-		if ticket_name
-		else {"jid": jid}
-	)
-	rows = frappe.db.get_all(
-		"WA Message",
-		filters=filters,
-		fields=["direction", "message", "creation"],
-		order_by="creation desc",
-		limit=10,
-	)
+	# wa_line: try reference first; fall back to jid when reference returns nothing.
+	# Messages created before a ticket was linked (or via phone-mirror path) only have jid set.
+	rows = []
+	if ticket_name:
+		rows = frappe.db.get_all(
+			"WA Message",
+			filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
+			fields=["direction", "message", "creation"],
+			order_by="creation desc",
+			limit=10,
+		)
+	if not rows and jid:
+		rows = frappe.db.get_all(
+			"WA Message",
+			filters={"jid": jid},
+			fields=["direction", "message", "creation"],
+			order_by="creation desc",
+			limit=10,
+		)
 	rows = list(reversed(rows))
 	return [
 		{"role": "user" if r.direction == "Incoming" else "assistant", "content": r.message or ""}
@@ -398,8 +404,23 @@ def process_message(msg_name: str, channel: str) -> None:
 	# KB search (local HD Articles + live Outline query, deduped)
 	articles = _combined_kb_search(text, settings.kb_search_limit or 3)
 
+	# Semantic search over resolved tickets (RAG — same Gemini API key)
+	resolved_context = ""
+	try:
+		from helpdesk.integrations.embeddings import search_resolved_tickets
+		similar = search_resolved_tickets(text, top_k=2)
+		if similar:
+			parts = []
+			for r in similar:
+				if r["resolution_details"]:
+					parts.append(f"Past ticket: {r['subject']}\nResolution: {r['resolution_details'][:600]}")
+			if parts:
+				resolved_context = "\n\n".join(parts)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: resolved ticket search failed")
+
 	# Gap tracking
-	if not articles and settings.enable_gap_tracking:
+	if not articles and not resolved_context and settings.enable_gap_tracking:
 		_handle_kb_gap(ticket_name, channel_label, text, settings)
 		if settings.auto_escalate_on_no_kb:
 			if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
@@ -417,6 +438,8 @@ def process_message(msg_name: str, channel: str) -> None:
 	system_content = settings.system_prompt or "You are a helpful support assistant."
 	if kb_context:
 		system_content += f"\n\nKnowledge Base:\n{kb_context}"
+	if resolved_context:
+		system_content += f"\n\nResolved past tickets (use as reference, do not quote directly):\n{resolved_context}"
 
 	history = _get_conversation_history(ticket_name, channel, jid=jid)
 	prior_turns = history[:-1]
@@ -456,6 +479,65 @@ def process_message(msg_name: str, channel: str) -> None:
 
 	if settings.conversation_mode == "Single Reply":
 		_escalate(state)
+
+
+@frappe.whitelist()
+def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
+	"""Return an LLM-drafted reply suggestion for the agent UI.
+
+	Never sent automatically — the agent reviews and edits before sending.
+	"""
+	jid = None
+	if channel == "wa_line":
+		try:
+			jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+		except Exception:
+			pass
+
+	history = _get_conversation_history(ticket, channel, jid=jid)
+	if not history:
+		return ""
+
+	last_customer_msg = next(
+		(h["content"] for h in reversed(history) if h["role"] == "user"), ""
+	)
+
+	articles = _combined_kb_search(last_customer_msg, 3) if last_customer_msg else []
+	kb_context = "\n\n".join(f"Article: {a['title']}\n{a['content']}" for a in articles)
+
+	resolved_context = ""
+	try:
+		from helpdesk.integrations.embeddings import search_resolved_tickets
+
+		similar = search_resolved_tickets(last_customer_msg, top_k=2)
+		if similar:
+			parts = [
+				f"Past ticket: {r['subject']}\nResolution: {r['resolution_details'][:500]}"
+				for r in similar
+				if r["resolution_details"]
+			]
+			resolved_context = "\n\n".join(parts)
+	except Exception:
+		pass
+
+	system = (
+		"You are an experienced customer support agent. "
+		"Draft a clear, concise, professional reply to the customer's latest message. "
+		"Write in first person as the agent — friendly but to the point, 2 to 4 sentences. "
+		"Do not mention AI or that this is a suggestion."
+	)
+	if kb_context:
+		system += f"\n\nRelevant knowledge base:\n{kb_context}"
+	if resolved_context:
+		system += f"\n\nHow similar past issues were resolved:\n{resolved_context}"
+
+	from helpdesk.integrations.llm import chat as llm_chat
+
+	try:
+		return llm_chat([{"role": "system", "content": system}] + history, max_tokens=256)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Bot: suggest_agent_reply failed")
+		return ""
 
 
 def _handle_kb_gap(

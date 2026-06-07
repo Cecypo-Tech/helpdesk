@@ -8,23 +8,25 @@ def _settings():
 	return frappe.get_cached_doc("Helpdesk Bot Settings")
 
 
-def chat(messages: list[dict], images: list[bytes] | None = None) -> str:
+def chat(messages: list[dict], images: list[bytes] | None = None, max_tokens: int = 512) -> str:
 	"""Send messages to the configured LLM and return the reply string.
 
 	Args:
-		messages: [{"role": "system"|"user"|"assistant", "content": str}, ...]
-		images:   Optional raw image bytes attached to the last user message.
+		messages:   [{"role": "system"|"user"|"assistant", "content": str}, ...]
+		images:     Optional raw image bytes attached to the last user message.
+		max_tokens: Upper bound on response length (default 512 for bot replies;
+		            pass 1024+ for longer generated content like KB articles).
 	"""
 	settings = _settings()
 	provider = settings.llm_provider or "gemini-3.1-flash-lite"
 	if provider == "gemini-3.1-flash-lite":
-		return _gemini(messages, images, settings)
+		return _gemini(messages, images, settings, max_tokens)
 	if provider == "claude-haiku-4-5":
-		return _haiku(messages, images, settings)
+		return _haiku(messages, images, settings, max_tokens)
 	raise ValueError(f"Unknown LLM provider: {provider!r}")
 
 
-def _gemini(messages: list[dict], images: list[bytes] | None, settings) -> str:
+def _gemini(messages: list[dict], images: list[bytes] | None, settings, max_tokens: int = 512) -> str:
 	import google.generativeai as genai
 
 	genai.configure(api_key=settings.get_password("gemini_api_key"))
@@ -57,11 +59,14 @@ def _gemini(messages: list[dict], images: list[bytes] | None, settings) -> str:
 		"gemini-3.1-flash-lite",
 		system_instruction=system_text or None,
 	)
-	response = model.generate_content(contents)
+	response = model.generate_content(
+		contents,
+		generation_config={"max_output_tokens": max_tokens},
+	)
 	return response.text.strip()
 
 
-def _haiku(messages: list[dict], images: list[bytes] | None, settings) -> str:
+def _haiku(messages: list[dict], images: list[bytes] | None, settings, max_tokens: int = 512) -> str:
 	import anthropic
 
 	client = anthropic.Anthropic(api_key=settings.get_password("anthropic_api_key"))
@@ -96,7 +101,7 @@ def _haiku(messages: list[dict], images: list[bytes] | None, settings) -> str:
 
 	response = client.messages.create(
 		model="claude-haiku-4-5-20251001",
-		max_tokens=512,
+		max_tokens=max_tokens,
 		system=system_text or "You are a helpful support assistant.",
 		messages=anthropic_messages,
 	)
