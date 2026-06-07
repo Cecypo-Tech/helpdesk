@@ -57,7 +57,7 @@
             <span class="space-x-1 text-ink-gray-7">
               <span
                 class="font-medium text-ink-gray-9"
-                v-if="n.notification_type !== 'Reaction' || !n.message"
+                v-if="(n.notification_type !== 'Reaction' || !n.message) && n.notification_type !== 'Task'"
               >
                 {{ n.notification_type === 'WhatsApp' ? '' : n.user_from }}
               </span>
@@ -71,6 +71,9 @@
                 {{ n.message || "has reopened the ticket" }}
               </span>
               <span v-if="n.notification_type === 'WhatsApp'" class="text-sm text-ink-gray-6">
+                {{ n.message }}
+              </span>
+              <span v-if="n.notification_type === 'Task'" class="text-sm text-ink-gray-6">
                 {{ n.message }}
               </span>
             </span>
@@ -142,7 +145,11 @@ onClickOutside(
 function handleNotificationClick(n: Notification) {
   notificationStore.toggle();
   if (n.read) return;
-  notificationStore.read(n.reference_ticket);
+  if (n.notification_type === "Task") {
+    notificationStore.readByName(n.name);
+  } else {
+    notificationStore.read(n.reference_ticket);
+  }
 }
 
 function getRoute(n: Notification) {
@@ -178,6 +185,11 @@ function getRoute(n: Notification) {
         params: {
           ticketId: n.reference_ticket,
         },
+      };
+    case "Task":
+      return {
+        name: "TasksAgent",
+        query: { view: "team-health" },
       };
   }
 }

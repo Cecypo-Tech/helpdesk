@@ -44,6 +44,17 @@ export const useNotificationStore = defineStore("notification", () => {
     });
   };
 
+  const readByName = (name: string) => {
+    createResource({
+      url: "helpdesk.helpdesk.doctype.hd_notification.utils.clear",
+      auto: true,
+      params: {
+        notification: name,
+      },
+      onSuccess: () => resource.reload(),
+    });
+  };
+
   const data = computed(() => resource.data || []);
   const unread = computed(() => data.value.filter((d) => !d.read).length);
 
@@ -211,6 +222,7 @@ export const useNotificationStore = defineStore("notification", () => {
     data,
     toggle,
     read,
+    readByName,
     unread,
     visible,
     resource,
