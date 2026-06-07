@@ -101,6 +101,34 @@
       >
         {{ __('Clear all') }}
       </button>
+
+      <!-- Right-side toggles -->
+      <div class="ml-auto flex items-center gap-2">
+        <!-- Calendar / Kanban view toggle -->
+        <div class="flex items-center rounded-lg border border-outline-gray-2 overflow-hidden text-xs">
+          <button
+            class="px-2.5 py-1.5 transition-colors text-ink-gray-5 hover:bg-surface-gray-1"
+            @click="router.push({ name: 'TasksAgent', query: { view: 'calendar' } })"
+          >{{ __('Calendar') }}</button>
+          <button
+            class="px-2.5 py-1.5 border-l border-outline-gray-2 transition-colors bg-surface-gray-2 font-semibold text-ink-gray-8"
+          >{{ __('Kanban') }}</button>
+        </div>
+
+        <!-- Status / User view toggle -->
+        <div class="flex items-center rounded-lg border border-outline-gray-2 overflow-hidden text-xs">
+          <button
+            class="px-2.5 py-1.5 transition-colors"
+            :class="kanbanMode === 'status' ? 'bg-surface-gray-2 font-semibold text-ink-gray-8' : 'text-ink-gray-5 hover:bg-surface-gray-1'"
+            @click="kanbanMode = 'status'"
+          >{{ __('Status') }}</button>
+          <button
+            class="px-2.5 py-1.5 border-l border-outline-gray-2 transition-colors"
+            :class="kanbanMode === 'user' ? 'bg-surface-gray-2 font-semibold text-ink-gray-8' : 'text-ink-gray-5 hover:bg-surface-gray-1'"
+            @click="kanbanMode = 'user'"
+          >{{ __('Users') }}</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── Main area: columns + panel ── -->
@@ -109,27 +137,32 @@
     <!-- ── Kanban columns ── -->
     <div class="flex-1 flex overflow-x-auto gap-3 p-4">
       <div
-        v-for="col in columns"
-        :key="col.status"
+        v-for="col in activeColumns"
+        :key="col.key"
         class="flex flex-col w-72 flex-shrink-0 rounded-lg bg-surface-gray-1 border border-outline-gray-2 transition-all"
-        :class="hoveredColumn === col.status ? 'ring-2 ring-ink-blue-3 ring-offset-1' : ''"
-        @dragover.prevent="onDragOver(col.status)"
+        :class="hoveredColumn === col.key ? 'ring-2 ring-ink-blue-3 ring-offset-1' : ''"
+        @dragover.prevent="onDragOver(col.key)"
         @dragleave="onDragLeave"
-        @drop.prevent="onDrop(col.status)"
+        @drop.prevent="onDrop(col.key)"
       >
         <!-- Column header -->
         <div class="flex items-center justify-between px-3 py-2.5 border-b border-outline-gray-1">
           <div class="flex items-center gap-2">
-            <span class="h-2.5 w-2.5 rounded-full flex-shrink-0" :class="col.dotClass" />
-            <span class="text-sm font-semibold text-ink-gray-8">{{ col.label ?? col.status }}</span>
+            <span v-if="kanbanMode === 'status'" class="h-2.5 w-2.5 rounded-full flex-shrink-0" :class="col.dotClass" />
+            <span v-else
+              class="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+              :class="col.key === '__unassigned' ? 'bg-surface-gray-3 text-ink-gray-5' : [avatarColor(col.key).bg, avatarColor(col.key).text]"
+            >{{ col.key === '__unassigned' ? '?' : avatarInitials(col.key) }}</span>
+            <span class="text-sm font-semibold text-ink-gray-8">{{ col.label }}</span>
             <span class="text-xs text-ink-gray-4 font-normal">
-              {{ getCardsForStatus(col.status).length }}
+              {{ getCardsForColumn(col.key).length }}
             </span>
           </div>
           <button
+            v-if="kanbanMode === 'status'"
             class="flex items-center justify-center h-5 w-5 rounded text-ink-gray-4 hover:text-ink-gray-8 hover:bg-surface-gray-2 transition-colors"
             :title="__('Add task')"
-            @click="createTask(col.status)"
+            @click="createTask(col.key)"
           >
             <LucidePlus class="h-3.5 w-3.5" />
           </button>
@@ -138,7 +171,7 @@
         <!-- Cards -->
         <div class="flex flex-col gap-2 p-2 overflow-y-auto flex-1">
           <div
-            v-for="card in getCardsForStatus(col.status)"
+            v-for="card in getCardsForColumn(col.key)"
             :key="card.name"
             draggable="true"
             class="bg-surface-white rounded-md border border-outline-gray-1 p-3 cursor-pointer hover:border-outline-gray-3 hover:shadow-sm transition-all select-none"
@@ -208,7 +241,7 @@
 
           <!-- Empty state -->
           <div
-            v-if="getCardsForStatus(col.status).length === 0 && !tasks.list?.loading"
+            v-if="getCardsForColumn(col.key).length === 0 && !tasks.list?.loading"
             class="flex flex-col items-center justify-center py-8 text-ink-gray-3"
           >
             <LucideSquareDashed class="h-8 w-8 mb-2 opacity-40" />
@@ -320,13 +353,40 @@ function toggleCollapse() {
   localStorage.setItem(COLLAPSE_KEY, String(panelCollapsed.value));
 }
 
+// ── View mode ────────────────────────────────────────────────
+const kanbanMode = ref<"status" | "user">("status");
+
 // ── Columns ──────────────────────────────────────────────────
-const columns = [
-  { status: "Backlog",     dotClass: "bg-gray-400"   },
-  { status: "Todo",        dotClass: "bg-blue-400"   },
-  { status: "In Progress", dotClass: "bg-orange-400" },
-  { status: "Done",        dotClass: "bg-green-400", label: "Done (last 3 days)" },
+const STATUS_COLUMNS = [
+  { key: "Backlog",     label: "Backlog",              dotClass: "bg-gray-400"   },
+  { key: "Todo",        label: "Todo",                 dotClass: "bg-blue-400"   },
+  { key: "In Progress", label: "In Progress",          dotClass: "bg-orange-400" },
+  { key: "Done",        label: "Done (last 3 days)",   dotClass: "bg-green-400"  },
 ];
+
+const userColumns = computed(() => {
+  const seen = new Set<string>();
+  const cols: { key: string; label: string; dotClass: string }[] = [];
+  let hasUnassigned = false;
+  for (const t of tasks.data ?? []) {
+    if (!t.assigned_to) { hasUnassigned = true; continue; }
+    if (!seen.has(t.assigned_to)) {
+      seen.add(t.assigned_to);
+      const parts = t.assigned_to.split(/[@.\s]/).filter(Boolean);
+      const label = parts.length >= 2
+        ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) + " " + parts[1].charAt(0).toUpperCase() + "."
+        : t.assigned_to;
+      cols.push({ key: t.assigned_to, label, dotClass: "" });
+    }
+  }
+  cols.sort((a, b) => a.label.localeCompare(b.label));
+  if (hasUnassigned) cols.unshift({ key: "__unassigned", label: "Unassigned", dotClass: "" });
+  return cols;
+});
+
+const activeColumns = computed(() =>
+  kanbanMode.value === "status" ? STATUS_COLUMNS : userColumns.value
+);
 
 // ── Task list ────────────────────────────────────────────────
 const tasks = createListResource({
@@ -338,21 +398,23 @@ const tasks = createListResource({
   auto: true,
 });
 
-function getCardsForStatus(status: string) {
+function getCardsForColumn(key: string) {
   const today = dayjs().format("YYYY-MM-DD");
   const threeDaysAgo = dayjs().subtract(3, "day").startOf("day");
 
   return (tasks.data ?? []).filter((t: any) => {
-    if (t.status !== status) return false;
-
-    // Done column: only last 3 days (by modified timestamp)
-    if (status === "Done" && t.modified) {
-      if (dayjs(t.modified).isBefore(threeDaysAgo)) return false;
+    // Column membership
+    if (kanbanMode.value === "status") {
+      if (t.status !== key) return false;
+      if (key === "Done" && t.modified && dayjs(t.modified).isBefore(threeDaysAgo)) return false;
+    } else {
+      const assignee = t.assigned_to || "__unassigned";
+      if (assignee !== key) return false;
     }
 
-    // Overdue chip: due_date < today, skip Done column entirely
+    // Overdue chip (status mode: skip Done; user mode: skip Done status tasks)
     if (filterOverdue.value) {
-      if (status === "Done") return false;
+      if (t.status === "Done") return false;
       if (!t.due_date || t.due_date >= today) return false;
     }
 
@@ -456,25 +518,43 @@ function onDragLeave() {
   hoveredColumn.value = null;
 }
 
-async function onDrop(targetStatus: string) {
+async function onDrop(targetKey: string) {
   hoveredColumn.value = null;
   const card = draggedCard.value;
   draggedCard.value = null;
 
-  if (!card || card.status === targetStatus) return;
+  if (!card) return;
 
   const live = (tasks.data ?? []).find((t: any) => t.name === card.name);
-  if (live) live.status = targetStatus;
 
-  try {
-    await call(
-      "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
-      { task_name: card.name, fieldname: "status", value: targetStatus }
-    );
-    tasks.reload();
-  } catch {
-    if (live) live.status = card.status;
-    toast.error(__("Failed to move task"));
+  if (kanbanMode.value === "user") {
+    const newAssignee = targetKey === "__unassigned" ? "" : targetKey;
+    const currentAssignee = live?.assigned_to || "__unassigned";
+    if ((live?.assigned_to || "__unassigned") === targetKey) return;
+    if (live) live.assigned_to = newAssignee;
+    try {
+      await call(
+        "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
+        { task_name: card.name, fieldname: "assigned_to", value: newAssignee }
+      );
+      tasks.reload();
+    } catch {
+      if (live) live.assigned_to = currentAssignee === "__unassigned" ? "" : currentAssignee;
+      toast.error(__("Failed to reassign task"));
+    }
+  } else {
+    if (card.status === targetKey) return;
+    if (live) live.status = targetKey;
+    try {
+      await call(
+        "helpdesk.helpdesk.doctype.hd_task.hd_task.set_task_field",
+        { task_name: card.name, fieldname: "status", value: targetKey }
+      );
+      tasks.reload();
+    } catch {
+      if (live) live.status = card.status;
+      toast.error(__("Failed to move task"));
+    }
   }
 }
 
