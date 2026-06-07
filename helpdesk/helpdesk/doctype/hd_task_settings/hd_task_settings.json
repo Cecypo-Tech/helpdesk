@@ -8,6 +8,7 @@
  "field_order": [
   "enable_manager_digest",
   "due_soon_window_hours",
+  "digest_wa_line",
   "section_recipients",
   "digest_recipients"
  ],
@@ -24,6 +25,13 @@
    "fieldname": "due_soon_window_hours",
    "fieldtype": "Int",
    "label": "Due Soon Window (Hours)"
+  },
+  {
+   "description": "WhatsApp Line the digest is sent FROM (Evolution API / WA Line). Required for WhatsApp delivery; in-app notifications work without it. WABA cannot send proactive non-template messages, so it is not used here.",
+   "fieldname": "digest_wa_line",
+   "fieldtype": "Link",
+   "label": "Digest WA Line",
+   "options": "WA Line"
   },
   {
    "fieldname": "section_recipients",

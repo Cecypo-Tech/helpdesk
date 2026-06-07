@@ -228,20 +228,24 @@ class TestHDTask(FrappeTestCase):
 		all_names = [t["name"] for t in result["overdue"]] + [t["name"] for t in result["due_soon"]]
 		self.assertNotIn(task.name, all_names)
 
-	def _set_task_settings(self, enabled, recipients):
+	def _set_task_settings(self, enabled, recipients, wa_line=None):
 		settings = frappe.get_single("HD Task Settings")
 		settings.enable_manager_digest = 1 if enabled else 0
 		settings.due_soon_window_hours = 48
+		settings.digest_wa_line = None  # clear any stale link before save
 		settings.digest_recipients = []
 		for r in recipients:
 			settings.append("digest_recipients", r)
 		settings.save(ignore_permissions=True)
+		# Set directly to bypass Link validation in tests (the WA send is mocked).
+		frappe.db.set_single_value("HD Task Settings", "digest_wa_line", wa_line)
 		frappe.clear_document_cache("HD Task Settings")
 		self.addCleanup(self._reset_task_settings)
 
 	def _reset_task_settings(self):
 		settings = frappe.get_single("HD Task Settings")
 		settings.enable_manager_digest = 0
+		settings.digest_wa_line = None  # clear before save so a dummy test line isn't validated
 		settings.digest_recipients = []
 		settings.save(ignore_permissions=True)
 		frappe.clear_document_cache("HD Task Settings")
@@ -250,8 +254,8 @@ class TestHDTask(FrappeTestCase):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
 		from unittest.mock import patch
 		self._make_task("Overdue for disabled test", -1)
-		self._set_task_settings(enabled=False, recipients=[{"phone": "15550001111"}])
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		self._set_task_settings(enabled=False, recipients=[{"phone": "15550001111"}], wa_line="WA-TEST-LINE")
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
 			send_manager_task_digest()
 		wa.assert_not_called()
@@ -261,10 +265,10 @@ class TestHDTask(FrappeTestCase):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
 		from unittest.mock import patch
 		self._make_task("Far future", 30)
-		self._set_task_settings(enabled=True, recipients=[{"phone": "15550001111"}])
+		self._set_task_settings(enabled=True, recipients=[{"phone": "15550001111"}], wa_line="WA-TEST-LINE")
 		empty = {"overdue": [], "due_soon": [], "unassigned": []}
 		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_due_and_overdue_tasks", return_value=empty), \
-		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
 			send_manager_task_digest()
 		wa.assert_not_called()
@@ -277,8 +281,9 @@ class TestHDTask(FrappeTestCase):
 		self._set_task_settings(
 			enabled=True,
 			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
+			wa_line="WA-TEST-LINE",
 		)
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
 		self.assertEqual(wa.call_count, 2)
@@ -290,8 +295,9 @@ class TestHDTask(FrappeTestCase):
 		self._set_task_settings(
 			enabled=True,
 			recipients=[{"phone": "15550001111"}, {"phone": "15550002222"}],
+			wa_line="WA-TEST-LINE",
 		)
-		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text",
+		with patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa",
 		           side_effect=[Exception("boom"), None]) as wa, \
 		     patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
@@ -327,10 +333,29 @@ class TestHDTask(FrappeTestCase):
 		if not agent:
 			self.skipTest("No HD Agent available in this site")
 		self._make_task("Overdue for agent-phone test", -1)
-		self._set_task_settings(enabled=True, recipients=[{"agent": agent}])
+		self._set_task_settings(enabled=True, recipients=[{"agent": agent}], wa_line="WA-TEST-LINE")
 		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._get_agent_phone", return_value="15559998888") as gp, \
-		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_wa_text") as wa, \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
 		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient"):
 			send_manager_task_digest()
 		gp.assert_called_once_with(agent)
-		wa.assert_called_once_with("15559998888", mock.ANY)
+		wa.assert_called_once_with("WA-TEST-LINE", "15559998888", mock.ANY)
+
+	def test_digest_skips_whatsapp_without_wa_line(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
+		from unittest import mock
+		agent = frappe.db.get_value("HD Agent", {}, "name")
+		if not agent:
+			self.skipTest("No HD Agent available in this site")
+		self._make_task("Overdue no-line test", -1)
+		# Enabled, recipient has a phone, but NO digest WA Line configured.
+		self._set_task_settings(
+			enabled=True,
+			recipients=[{"phone": "15550001111", "agent": agent}],
+			wa_line=None,
+		)
+		with mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._send_digest_wa") as wa, \
+		     mock.patch("helpdesk.helpdesk.doctype.hd_task.hd_task._notify_digest_recipient") as inapp:
+			send_manager_task_digest()
+		wa.assert_not_called()
+		inapp.assert_called_once()

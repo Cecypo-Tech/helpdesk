@@ -235,11 +235,26 @@ def _notify_digest_recipient(agent: str, overdue_count: int, due_soon_count: int
 	}).insert(ignore_permissions=True)
 
 
+def _send_digest_wa(line: str, phone: str, message: str) -> None:
+	"""Send the digest to a phone number via the WA Line (Evolution API) path.
+
+	The WA Line path has no 24-hour template restriction, unlike WABA which
+	cannot send proactive non-template messages. Caller passes the configured
+	digest WA Line to send from.
+	"""
+	from helpdesk.integrations.wa import _normalize_phone, send_wa_reply
+
+	jid = f"{_normalize_phone(phone)}@s.whatsapp.net"
+	send_wa_reply(jid=jid, line=line, message=message)
+
+
 def send_manager_task_digest() -> None:
 	"""Daily scheduler: send a digest of overdue/due-soon tasks to configured managers.
 
-	Delivered over WhatsApp (per recipient phone) and as an in-app notification
-	(per recipient agent). No-op when disabled, no recipients, or nothing is due.
+	Delivered over WhatsApp via the configured WA Line (per recipient phone) and
+	as an in-app notification (per recipient agent). The WhatsApp half is skipped
+	when no digest WA Line is configured; in-app still works. No-op when disabled,
+	no recipients, or nothing is due.
 	"""
 	try:
 		settings = frappe.get_cached_doc("HD Task Settings")
@@ -254,14 +269,15 @@ def send_manager_task_digest() -> None:
 		return
 
 	message = _build_digest_message(overdue, due_soon)
+	wa_line = settings.digest_wa_line
 
 	for recipient in settings.digest_recipients:
 		try:
 			phone = recipient.phone
 			if not phone and recipient.agent:
 				phone = _get_agent_phone(recipient.agent)
-			if phone:
-				_send_wa_text(phone, message)
+			if phone and wa_line:
+				_send_digest_wa(wa_line, phone, message)
 			if recipient.agent:
 				_notify_digest_recipient(recipient.agent, len(overdue), len(due_soon))
 			frappe.db.commit()
