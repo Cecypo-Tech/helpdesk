@@ -77,7 +77,9 @@
                 {{ n.message }}
               </span>
             </span>
-            <span class="font-medium text-ink-gray-9"
+            <span
+              v-if="n.reference_ticket"
+              class="font-medium text-ink-gray-9"
               >&nbsp{{ n.reference_ticket }}
             </span>
           </div>
