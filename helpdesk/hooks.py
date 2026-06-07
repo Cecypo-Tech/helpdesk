@@ -45,6 +45,7 @@ scheduler_events = {
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",
         "helpdesk.integrations.wa.enqueue_wa_sync",
+        "helpdesk.helpdesk.doctype.hd_task.hd_task.send_manager_task_digest",
     ],
 }
 
