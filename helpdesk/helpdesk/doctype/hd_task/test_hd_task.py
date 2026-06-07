@@ -203,3 +203,13 @@ class TestHDTask(FrappeTestCase):
 		result = _get_due_and_overdue_tasks(window_hours=48)
 		self.assertIn(unassigned_name, [t["name"] for t in result["overdue"]])
 		self.assertIn(unassigned_name, [t["name"] for t in result["unassigned"]])
+
+	def test_due_helper_window_upper_boundary(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import _get_due_and_overdue_tasks
+		# window_hours=48 -> ceil(48/24)=2 days, so today+2 is the inclusive upper bound
+		on_boundary = self._make_task("Due in exactly 2 days", 2)
+		beyond = self._make_task("Due in 3 days", 3)
+		result = _get_due_and_overdue_tasks(window_hours=48)
+		due_soon_names = [t["name"] for t in result["due_soon"]]
+		self.assertIn(on_boundary, due_soon_names)
+		self.assertNotIn(beyond, due_soon_names)
