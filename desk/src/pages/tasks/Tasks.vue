@@ -137,10 +137,10 @@ watch(quickFilter, () => {
 	const today = new Date().toISOString().slice(0, 10);
 	const filters =
 		quickFilter.value === "overdue"
-			? [["due_date", "<", today], ["status", "!=", "Done"]]
+			? { due_date: ["<", today], status: ["!=", "Done"] }
 			: quickFilter.value === "due-today"
-			? [["due_date", "=", today]]
-			: [];
+			? { due_date: ["=", today] }
+			: {};
 	listViewRef.value.list.params.filters = filters;
 	listViewRef.value.list.reload();
 }, { immediate: true });
