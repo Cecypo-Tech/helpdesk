@@ -296,6 +296,16 @@ class TestHDTask(FrappeTestCase):
 		self.assertGreaterEqual(result["counts"]["due_soon"], 1)
 		self.assertGreaterEqual(result["counts"]["unassigned"], 1)
 
+	def test_team_task_health_denies_non_manager(self):
+		from helpdesk.helpdesk.doctype.hd_task.hd_task import get_team_task_health
+		# Guest has neither Agent Manager nor System Manager → must be rejected.
+		frappe.set_user("Guest")
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_team_task_health()
+		finally:
+			frappe.set_user("Administrator")
+
 	def test_digest_resolves_agent_phone_when_no_direct_phone(self):
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import send_manager_task_digest
 		from unittest import mock
