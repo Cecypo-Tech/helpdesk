@@ -94,7 +94,7 @@ def _combined_kb_search(query: str, limit: int) -> list[dict]:
 	outline_ids = {r["outline_doc_id"] for r in outline_results if r.get("outline_doc_id")}
 	hd_filtered = [a for a in hd_articles if a.get("outline_doc_id") not in outline_ids]
 
-	return (hd_filtered + outline_results)[:limit]
+	return (outline_results + hd_filtered)[:limit]
 
 
 def _record_gap(
