@@ -170,74 +170,89 @@
 
         <!-- Cards -->
         <div class="flex flex-col gap-2 p-2 overflow-y-auto flex-1">
-          <div
-            v-for="card in getCardsForColumn(col.key)"
-            :key="card.name"
-            draggable="true"
-            class="bg-surface-white rounded-md border border-outline-gray-1 p-3 cursor-pointer hover:border-outline-gray-3 hover:shadow-sm transition-all select-none"
-            :class="[
-              card.name === selectedTaskId ? 'ring-2 ring-ink-blue-3' : '',
-              draggedCard?.name === card.name ? 'opacity-40' : '',
-            ]"
-            @click="selectedTaskId = card.name"
-            @dragstart="onDragStart(card)"
-            @dragend="onDragEnd"
+          <template
+            v-for="item in getColumnItems(col.key)"
+            :key="item.type === 'card' ? item.card.name : 'h-' + item.status"
           >
-            <!-- Title -->
-            <p class="text-sm font-medium text-ink-gray-9 leading-snug mb-2">{{ card.title }}</p>
-
-            <!-- Tags row -->
-            <div v-if="cardTags(card).length" class="flex flex-wrap gap-1 mb-2">
-              <span
-                v-for="tag in cardTags(card).slice(0, 2)"
-                :key="tag"
-                class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium"
-                :class="tagColor(tag)"
-              >{{ tag }}</span>
-              <span
-                v-if="cardTags(card).length > 2"
-                class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-surface-gray-2 text-ink-gray-5"
-              >+{{ cardTags(card).length - 2 }}</span>
+            <!-- Status group sub-header (user mode only) -->
+            <div
+              v-if="item.type === 'header'"
+              class="flex items-center gap-1.5 px-1 pt-1 pb-0.5"
+            >
+              <span class="h-1.5 w-1.5 rounded-full flex-shrink-0" :class="item.dotClass" />
+              <span class="text-[10px] font-semibold uppercase tracking-wide text-ink-gray-4">{{ item.status }}</span>
+              <span class="text-[10px] text-ink-gray-3 ml-0.5">{{ item.count }}</span>
             </div>
 
-            <!-- Bottom row: priority | due date | avatar -->
-            <div class="flex items-center gap-2">
-              <!-- Priority bars -->
-              <span
-                v-if="card.priority"
-                :title="card.priority"
-                class="flex items-end gap-[2px] flex-shrink-0"
-              >
-                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 0), priorityBarColor(card.priority)]" />
-                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 1), priorityBarColor(card.priority)]" />
-                <span class="w-[3px] rounded-sm" :class="[priorityBarH(card.priority, 2), priorityBarColor(card.priority)]" />
-              </span>
+            <!-- Task card -->
+            <div
+              v-else
+              draggable="true"
+              class="bg-surface-white rounded-md border border-outline-gray-1 p-3 cursor-pointer hover:border-outline-gray-3 hover:shadow-sm transition-all select-none"
+              :class="[
+                item.card.name === selectedTaskId ? 'ring-2 ring-ink-blue-3' : '',
+                draggedCard?.name === item.card.name ? 'opacity-40' : '',
+              ]"
+              @click="selectedTaskId = item.card.name"
+              @dragstart="onDragStart(item.card)"
+              @dragend="onDragEnd"
+            >
+              <!-- Title -->
+              <p class="text-sm font-medium text-ink-gray-9 leading-snug mb-2">{{ item.card.title }}</p>
 
-              <!-- Due date -->
-              <span
-                v-if="card.due_date"
-                class="flex items-center gap-1 text-xs"
-                :class="relativeDue(card.due_date).cls"
-              >
-                <LucideCalendar class="h-3 w-3 flex-shrink-0" />
-                {{ relativeDue(card.due_date).label }}
-              </span>
+              <!-- Tags row -->
+              <div v-if="cardTags(item.card).length" class="flex flex-wrap gap-1 mb-2">
+                <span
+                  v-for="tag in cardTags(item.card).slice(0, 2)"
+                  :key="tag"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                  :class="tagColor(tag)"
+                >{{ tag }}</span>
+                <span
+                  v-if="cardTags(item.card).length > 2"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-surface-gray-2 text-ink-gray-5"
+                >+{{ cardTags(item.card).length - 2 }}</span>
+              </div>
 
-              <!-- Spacer -->
-              <span class="flex-1" />
+              <!-- Bottom row: priority | due date | avatar -->
+              <div class="flex items-center gap-2">
+                <!-- Priority bars -->
+                <span
+                  v-if="item.card.priority"
+                  :title="item.card.priority"
+                  class="flex items-end gap-[2px] flex-shrink-0"
+                >
+                  <span class="w-[3px] rounded-sm" :class="[priorityBarH(item.card.priority, 0), priorityBarColor(item.card.priority)]" />
+                  <span class="w-[3px] rounded-sm" :class="[priorityBarH(item.card.priority, 1), priorityBarColor(item.card.priority)]" />
+                  <span class="w-[3px] rounded-sm" :class="[priorityBarH(item.card.priority, 2), priorityBarColor(item.card.priority)]" />
+                </span>
 
-              <!-- Assignee avatar -->
-              <span
-                v-if="card.assigned_to"
-                :title="card.assigned_to"
-                class="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0"
-                :class="[avatarColor(card.assigned_to).bg, avatarColor(card.assigned_to).text]"
-              >{{ avatarInitials(card.assigned_to) }}</span>
+                <!-- Due date -->
+                <span
+                  v-if="item.card.due_date"
+                  class="flex items-center gap-1 text-xs"
+                  :class="relativeDue(item.card.due_date).cls"
+                >
+                  <LucideCalendar class="h-3 w-3 flex-shrink-0" />
+                  {{ relativeDue(item.card.due_date).label }}
+                </span>
+
+                <!-- Spacer -->
+                <span class="flex-1" />
+
+                <!-- Assignee avatar -->
+                <span
+                  v-if="item.card.assigned_to"
+                  :title="item.card.assigned_to"
+                  class="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0"
+                  :class="[avatarColor(item.card.assigned_to).bg, avatarColor(item.card.assigned_to).text]"
+                >{{ avatarInitials(item.card.assigned_to) }}</span>
+              </div>
+
+              <!-- Ticket ref -->
+              <div v-if="item.card.ticket" class="mt-1.5 text-xs text-ink-gray-4">#{{ item.card.ticket }}</div>
             </div>
-
-            <!-- Ticket ref -->
-            <div v-if="card.ticket" class="mt-1.5 text-xs text-ink-gray-4">#{{ card.ticket }}</div>
-          </div>
+          </template>
 
           <!-- Empty state -->
           <div
@@ -410,6 +425,7 @@ function getCardsForColumn(key: string) {
     } else {
       const assignee = t.assigned_to || "__unassigned";
       if (assignee !== key) return false;
+      if (t.status === "Done") return false;
     }
 
     // Overdue chip (status mode: skip Done; user mode: skip Done status tasks)
@@ -431,6 +447,32 @@ function getCardsForColumn(key: string) {
     }
     return true;
   });
+}
+
+// ── User-mode status grouping ─────────────────────────────────
+const USER_STATUS_GROUPS = [
+  { status: "Backlog",     dotClass: "bg-gray-400"   },
+  { status: "Todo",        dotClass: "bg-blue-400"   },
+  { status: "In Progress", dotClass: "bg-orange-400" },
+] as const;
+
+interface HeaderItem { type: "header"; status: string; dotClass: string; count: number }
+interface CardItem   { type: "card"; card: any }
+type ColumnItem = HeaderItem | CardItem;
+
+function getColumnItems(key: string): ColumnItem[] {
+  const cards = getCardsForColumn(key);
+  if (kanbanMode.value === "status") {
+    return cards.map(card => ({ type: "card" as const, card }));
+  }
+  const items: ColumnItem[] = [];
+  for (const g of USER_STATUS_GROUPS) {
+    const group = cards.filter((c: any) => c.status === g.status);
+    if (!group.length) continue;
+    items.push({ type: "header", status: g.status, dotClass: g.dotClass, count: group.length });
+    for (const card of group) items.push({ type: "card", card });
+  }
+  return items;
 }
 
 // ── All tags (for panel autocomplete) ────────────────────────
