@@ -179,8 +179,10 @@ def send_due_task_wpa_notifications() -> None:
 			if not phone:
 				continue
 
+			first_name = _get_agent_first_name(task.assigned_to)
+			greeting = f"Hi {first_name},\n" if first_name else ""
 			due_label = _format_due_label(task.due_date, task.due_time)
-			lines = [f"⏰ Task due: {task.title}", f"Due: {due_label}", f"Status: {task.status}"]
+			lines = [f"{greeting}⏰ Task due: {task.title}", f"Due: {due_label}", f"Status: {task.status}"]
 			if task.ticket:
 				lines.append(f"Ticket: {task.ticket}")
 
@@ -192,13 +194,21 @@ def send_due_task_wpa_notifications() -> None:
 			frappe.log_error(frappe.get_traceback(), f"WPA task notification failed: {task.name}")
 
 
-def _build_digest_message(overdue: list, due_soon: list, max_lines: int = 5) -> str:
+def _build_digest_message(overdue: list, due_soon: list, name: str = "", max_lines: int = 5) -> str:
 	"""Build the plain-text WhatsApp digest body."""
-	lines = [f"📋 Task digest: {len(overdue)} overdue, {len(due_soon)} due soon"]
+	greeting = f"Hi {name},\n" if name else ""
+	lines = [f"{greeting}📋 Task digest: {len(overdue)} overdue, {len(due_soon)} due soon"]
+
+	site_url = frappe.utils.get_url().rstrip("/")
 
 	def fmt(task):
 		who = task.get("assigned_to") or "Unassigned"
-		return f"• {task['title']} — {who} — {_format_due_label(task.get('due_date'), task.get('due_time'))}"
+		line = f"• {task['title']} — {who} — {_format_due_label(task.get('due_date'), task.get('due_time'))}"
+		if task.get("ticket"):
+			line += f"\n  {site_url}/helpdesk/tickets/{task['ticket']}"
+		else:
+			line += f"\n  {site_url}/helpdesk/tasks/{task['name']}"
+		return line
 
 	preview = (overdue + due_soon)[:max_lines]
 	lines.extend(fmt(t) for t in preview)
@@ -253,7 +263,6 @@ def send_manager_task_digest() -> None:
 	if not overdue and not due_soon:
 		return
 
-	message = _build_digest_message(overdue, due_soon)
 	wa_line = settings.task_wa_line
 
 	for recipient in settings.digest_recipients:
@@ -261,6 +270,8 @@ def send_manager_task_digest() -> None:
 			phone = recipient.phone
 			if not phone and recipient.agent:
 				phone = _get_agent_phone(recipient.agent)
+			first_name = _get_agent_first_name(recipient.agent) if recipient.agent else ""
+			message = _build_digest_message(overdue, due_soon, name=first_name)
 			if phone and wa_line:
 				_send_task_wa(wa_line, phone, message)
 			if recipient.agent:
@@ -272,6 +283,15 @@ def send_manager_task_digest() -> None:
 				frappe.get_traceback(),
 				f"Manager task digest failed for recipient: {recipient.agent or recipient.phone}",
 			)
+
+
+def _get_agent_first_name(assigned_to: str) -> str:
+    """Resolve the first name for an HD Agent from their User record."""
+    user_email = frappe.db.get_value("HD Agent", assigned_to, "user")
+    if not user_email:
+        return ""
+    full_name = frappe.db.get_value("User", user_email, "full_name") or ""
+    return full_name.split()[0] if full_name else ""
 
 
 def _get_agent_phone(assigned_to: str) -> str | None:

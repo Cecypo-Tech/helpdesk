@@ -12,6 +12,8 @@
   "due_date",
   "due_time",
   "ticket",
+  "baileys_jid",
+  "baileys_line",
   "customer",
   "team",
   "description",
@@ -78,6 +80,19 @@
    "fieldtype": "Link",
    "label": "Ticket",
    "options": "HD Ticket"
+  },
+  {
+   "fieldname": "baileys_jid",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "WA JID"
+  },
+  {
+   "fieldname": "baileys_line",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "WA Line",
+   "options": "WA Line"
   },
   {
    "fieldname": "customer",
