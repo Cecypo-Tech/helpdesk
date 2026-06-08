@@ -245,8 +245,15 @@ def search(query: str, limit: int = 5, exclude_internal: bool = True) -> list[di
 			if exclude_internal and col_info.get("is_internal"):
 				continue
 
-			# Use search context snippet (most relevant part) or truncated text
-			context = item.get("context") or _md_to_text(doc.get("text") or "")[:600]
+			# Prefer the search-context snippet as a header (shows the matched passage),
+			# then append the full document text so the LLM has complete content.
+			# Cap at 2000 chars to stay within reasonable prompt budgets.
+			full_text = _md_to_text(doc.get("text") or "")
+			snippet = item.get("context", "").strip()
+			if snippet and snippet not in full_text:
+				context = f"{snippet}\n\n{full_text}"[:2000]
+			else:
+				context = full_text[:2000]
 
 			results.append({
 				"name": doc["id"],
