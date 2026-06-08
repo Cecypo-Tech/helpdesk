@@ -13,7 +13,7 @@ def test_chat(message: str, history: str = "[]") -> dict:
 	history: JSON-encoded list of {role, content} dicts for multi-turn context.
 	"""
 	import json
-	from helpdesk.integrations.bot import _search_kb
+	from helpdesk.integrations.bot import _combined_kb_search
 	from helpdesk.integrations.llm import chat as llm_chat
 
 	settings = frappe.get_doc("Helpdesk Bot Settings")
@@ -25,7 +25,7 @@ def test_chat(message: str, history: str = "[]") -> dict:
 	except Exception:
 		prior = []
 
-	articles = _search_kb(message, settings.kb_search_limit or 3)
+	articles = _combined_kb_search(message, settings.kb_search_limit or 3)
 	kb_context = "\n\n".join(f"Article: {a['title']}\n{a['content']}" for a in articles)
 	system_content = settings.system_prompt or "You are a helpful support assistant."
 	if kb_context:
