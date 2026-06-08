@@ -652,6 +652,8 @@ def webhook():
             data = [data]
         _handle_contacts_upsert(data)
         return {"status": "ok"}
+    if event == "connection.update":
+        return _handle_connection_update(payload.get("data") or {}, line)
 
     return {"status": "ignored", "event": event}
 
@@ -861,6 +863,21 @@ def _handle_update(updates: list, line) -> dict:
             after_commit=True,
         )
     return {"status": "ok"}
+
+
+def _handle_connection_update(data: dict, line) -> dict:
+    """Persist the connected WhatsApp JID when Evolution reports a live connection."""
+    # Evolution API v2 sends either data.instance.me.id or data.me.id for the
+    # instance's own WhatsApp JID when state becomes "open".
+    state = (data.get("instance") or {}).get("state") or data.get("state") or ""
+    me = (data.get("instance") or {}).get("me") or data.get("me") or {}
+    owner_jid = me.get("id") or ""
+    if state == "open" and owner_jid:
+        try:
+            frappe.db.set_value("WA Line", line.name, "connected_user", owner_jid)
+        except Exception as e:
+            frappe.log_error(f"Failed to save connected_user for {line.name}: {e}", "WA Connection Update")
+    return {"status": "ok", "state": state}
 
 
 def _handle_delete(data: dict, line) -> dict:
@@ -1854,17 +1871,33 @@ def test_wa_connection(line: str) -> dict:
             else:
                 live_error = f"Live check HTTP {cr.status_code}: {cr.text[:200]}"
         else:
-            # No connected_user stored — fall back to fetching 1 recent chat
+            # No connected_user stored — use fetchInstances which exists in all
+            # Evolution API v2 versions and returns the owner JID when connected.
+            base = (_settings().server_url or "").rstrip("/")
             cr = _evo_session.get(
-                _url("chat/findChats", line_doc.instance_name),
+                f"{base}/instance/fetchInstances",
                 headers=_headers(line_doc),
-                params={"limit": 1},
+                params={"instanceName": line_doc.instance_name},
                 timeout=10,
             )
             if cr.ok:
-                profile = {"chats_reachable": True}
+                items = cr.json()
+                if isinstance(items, dict):
+                    items = [items]
+                instance_info = items[0] if isinstance(items, list) and items else {}
+                owner_jid = instance_info.get("owner") or ""
+                profile_name = instance_info.get("profileName") or ""
+                profile = {"instance_reachable": True}
+                if profile_name:
+                    profile["name"] = profile_name
+                # Auto-populate connected_user so future checks use the faster path
+                if owner_jid and not getattr(line_doc, "connected_user", ""):
+                    try:
+                        frappe.db.set_value("WA Line", line_doc.name, "connected_user", owner_jid)
+                    except Exception:
+                        pass
             else:
-                live_error = f"Chat fetch HTTP {cr.status_code}: {cr.text[:200]}"
+                live_error = f"Instance fetch HTTP {cr.status_code}: {cr.text[:200]}"
     except Exception as e:
         live_error = str(e)
 
@@ -2936,14 +2969,41 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 
 @frappe.whitelist()
 def get_outgoing_templates() -> list[dict]:
-	"""Placeholder — template-outside-window feature not yet implemented for WA API."""
-	return []
+	"""Return approved WhatsApp Templates available for sending outside the 24-hour window."""
+	if not frappe.db.exists("DocType", "WhatsApp Templates"):
+		return []
+	return frappe.get_all(
+		"WhatsApp Templates",
+		filters={"status": "APPROVED"},
+		fields=["name", "template_name", "language_code"],
+		order_by="template_name asc",
+	)
 
 
 @frappe.whitelist()
 def send_template_to_ticket(ticket: str, template_name: str) -> dict:
-	"""Placeholder — template-outside-window feature not yet implemented for WA API."""
-	frappe.throw(_("Template sending outside the 24-hour window is not yet supported."))
+	"""Send an approved WhatsApp Template to the contact on this ticket.
+
+	Creates an Outgoing WhatsApp Message with the template set; frappe_whatsapp's
+	before_insert hook detects the template field and routes to send_template().
+	"""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		frappe.throw(_("frappe_whatsapp is not installed."))
+	if not frappe.db.exists("WhatsApp Templates", template_name):
+		frappe.throw(_("Template {0} not found.").format(template_name))
+	phone = get_contact_phone(ticket)
+	if not phone:
+		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+	msg_doc = frappe.get_doc({
+		"doctype": "WhatsApp Message",
+		"type": "Outgoing",
+		"to": phone,
+		"template": template_name,
+		"reference_doctype": "HD Ticket",
+		"reference_name": ticket,
+	})
+	msg_doc.insert(ignore_permissions=True)
+	return {"name": msg_doc.name, "status": msg_doc.status}
 
 
 @frappe.whitelist()
