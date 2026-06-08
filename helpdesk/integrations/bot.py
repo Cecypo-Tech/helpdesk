@@ -1,10 +1,20 @@
 # helpdesk/integrations/bot.py
+import re
 import frappe
 
 try:
 	from helpdesk.integrations.wa import send_wa_reply
 except Exception:
 	send_wa_reply = None  # type: ignore[assignment]
+
+# Matches the agent-initials stamp appended by send_wa_reply / _send_fw_reply,
+# e.g. "\n^BOT", "\n^AB". Strip these from assistant messages before feeding
+# conversation history to the LLM to prevent the model from mimicking the suffix.
+_AGENT_SUFFIX_RE = re.compile(r"\n\^[A-Z]{1,5}\s*$")
+
+
+def _strip_agent_suffix(text: str) -> str:
+	return _AGENT_SUFFIX_RE.sub("", text)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -190,7 +200,10 @@ def _get_conversation_history(
 		)
 		rows = list(reversed(rows))
 		return [
-			{"role": "user" if r.type == "Incoming" else "assistant", "content": r.message or ""}
+			{
+				"role": "user" if r.type == "Incoming" else "assistant",
+				"content": (r.message or "") if r.type == "Incoming" else _strip_agent_suffix(r.message or ""),
+			}
 			for r in rows
 		]
 
@@ -215,7 +228,10 @@ def _get_conversation_history(
 		)
 	rows = list(reversed(rows))
 	return [
-		{"role": "user" if r.direction == "Incoming" else "assistant", "content": r.message or ""}
+		{
+			"role": "user" if r.direction == "Incoming" else "assistant",
+			"content": (r.message or "") if r.direction == "Incoming" else _strip_agent_suffix(r.message or ""),
+		}
 		for r in rows
 	]
 
