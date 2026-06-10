@@ -793,13 +793,16 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		return {"status": "ok", "reason": "edit_original_not_found"}
 
 	# Deduplicate via Redis atomic SET NX — prevents the race where two concurrent
-	# webhook deliveries both pass a DB-level exists() check before either inserts.
+	# webhook deliveries for the SAME line both pass a DB-level exists() check before either inserts.
+	# Key is scoped per-line so that a group message legitimately received by multiple WA Lines
+	# (all members of the same group) is stored once per line, not deduplicated globally.
 	if message_id:
-		acquired = frappe.cache().set(f"wa_dedup:{message_id}", 1, ex=300, nx=True)
+		dedup_key = f"wa_dedup:{line.name}:{message_id}"
+		acquired = frappe.cache().set(dedup_key, 1, ex=300, nx=True)
 		if not acquired:
 			return {"status": "duplicate"}
 		# Belt-and-suspenders: also check DB in case Redis lost the key (restart/flush)
-		if frappe.db.exists("WA Message", {"message_id": message_id}):
+		if frappe.db.exists("WA Message", {"message_id": message_id, "line": line.name}):
 			return {"status": "duplicate"}
 
 	frappe.set_user("Administrator")
