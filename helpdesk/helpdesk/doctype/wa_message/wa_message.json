@@ -19,6 +19,7 @@
   "media_url",
   "message_id",
   "reply_to_message_id",
+  "raw_message",
   "section_meta",
   "status",
   "line",
@@ -88,7 +89,7 @@
    "fieldname": "content_type",
    "fieldtype": "Select",
    "label": "Content Type",
-   "options": "text\nimage\nvideo\naudio\ndocument\nreaction"
+   "options": "text\nimage\nvideo\naudio\ndocument\nsticker\nreaction"
   },
   {
    "fieldname": "col_break_media",
@@ -108,6 +109,12 @@
    "fieldname": "reply_to_message_id",
    "fieldtype": "Data",
    "label": "Reply To Message ID"
+  },
+  {
+   "fieldname": "raw_message",
+   "fieldtype": "Long Text",
+   "label": "Raw Message",
+   "hidden": 1
   },
   {
    "fieldname": "section_meta",

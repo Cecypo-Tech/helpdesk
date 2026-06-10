@@ -336,6 +336,19 @@ def _save_base64_media(b64: str, mime: str) -> str:
         return ""
 
 
+def _strip_media_thumbnails(msg: dict) -> dict:
+    """Strip large preview-only binary fields (jpegThumbnail, scansSidecar) from a raw message
+    dict before storing it, keeping all fields needed for media re-decryption."""
+    _THUMB_FIELDS = {"jpegThumbnail", "scansSidecar", "waveform", "streamingSidecar"}
+    stripped = {}
+    for k, v in msg.items():
+        if isinstance(v, dict):
+            stripped[k] = {ik: iv for ik, iv in v.items() if ik not in _THUMB_FIELDS}
+        else:
+            stripped[k] = v
+    return stripped
+
+
 def _download_media_via_wa(line, full_data: dict) -> str:
     """Call WA API /chat/getBase64FromMediaMessage.
     Passes the full message object (key + message content) so Evolution can decrypt the
@@ -382,12 +395,53 @@ def refetch_media_for_message(message_name: str) -> str:
             "id": doc.message_id,
         },
     }
+    # Include stored raw message so Evolution has the mediaKey needed for decryption
+    if doc.raw_message:
+        try:
+            full_data["message"] = frappe.parse_json(doc.raw_message)
+        except Exception:
+            pass
     new_url = _download_media_via_wa(line, full_data)
     if new_url:
         frappe.db.set_value("WA Message", message_name, "media_url", new_url)
         frappe.db.commit()
         return new_url
     return ""
+
+
+def _retry_media_download(message_name: str) -> None:
+    """Background job: re-download media for a WA Message whose download failed during webhook.
+    Enqueued automatically when Evolution is unreachable at webhook time."""
+    try:
+        doc = frappe.get_doc("WA Message", message_name)
+    except Exception:
+        return
+
+    if doc.media_url or not doc.raw_message:
+        return  # already downloaded or nothing to work with
+
+    try:
+        line = frappe.get_doc("WA Line", doc.line)
+    except Exception:
+        return
+
+    full_data = {
+        "key": {
+            "remoteJid": doc.jid,
+            "fromMe": doc.direction == "Outgoing",
+            "id": doc.message_id,
+        },
+    }
+    try:
+        full_data["message"] = frappe.parse_json(doc.raw_message)
+    except Exception:
+        return
+
+    new_url = _download_media_via_wa(line, full_data)
+    if new_url:
+        frappe.db.set_value("WA Message", message_name, "media_url", new_url)
+        frappe.db.commit()
+        _publish_wa_event(doc.jid, is_incoming=doc.direction == "Incoming", line=doc.line)
 
 
 def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = None) -> str:
@@ -711,7 +765,13 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
 	# Extract media URL for media messages — pass full `data` so Evolution can decrypt
 	media_url = ""
+	raw_message_json = ""
 	if content_type in ("image", "video", "audio", "document", "sticker"):
+		# Store stripped payload so Evolution can re-decrypt later if the download fails now
+		try:
+			raw_message_json = frappe.as_json(_strip_media_thumbnails(raw_msg))
+		except Exception:
+			pass
 		try:
 			media_url = _extract_media_url(raw_msg, line=line, full_webhook_data=data)
 		except Exception as exc:
@@ -764,6 +824,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 				"media_url": media_url,
 				"message_id": stored_msg_id,
 				"reply_to_message_id": reply_to_message_id,
+				"raw_message": raw_message_json,
 				"status": "Delivered",
 				"reference_doctype": "",
 				"reference_name": "",
@@ -774,6 +835,12 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			return {"status": "duplicate"}
 		frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
 		_publish_wa_event(jid, is_incoming=False, line=line.name)
+		if not media_url and raw_message_json:
+			frappe.enqueue(
+				"helpdesk.integrations.wa._retry_media_download",
+				message_name=doc.name,
+				queue="short",
+			)
 		return {"status": "ok", "mirrored": True}
 
 	# Incoming message — link to existing HD Ticket if one owns this JID
@@ -783,7 +850,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		_ticket_ref = ""
 
 	try:
-		frappe.get_doc({
+		incoming_doc = frappe.get_doc({
 			"doctype": "WA Message",
 			"direction": "Incoming",
 			"jid": jid,
@@ -795,6 +862,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			"media_url": media_url,
 			"message_id": stored_msg_id,
 			"reply_to_message_id": reply_to_message_id,
+			"raw_message": raw_message_json,
 			"status": "Pending",
 			"reference_doctype": "HD Ticket" if _ticket_ref else "",
 			"reference_name": _ticket_ref,
@@ -806,6 +874,12 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
 	_upsert_contact_name(jid, sender_name)
 	_publish_wa_event(jid, is_incoming=True, line=line.name)
+	if not media_url and raw_message_json:
+		frappe.enqueue(
+			"helpdesk.integrations.wa._retry_media_download",
+			message_name=incoming_doc.name,
+			queue="short",
+		)
 	if content_type != "reaction":
 		_notify_agents(jid, text, sender_name, line, settings)
 
@@ -980,12 +1054,29 @@ def _evo_send_message(
         headers=_headers(line),
         timeout=timeout,
     )
+    # Evolution can crash with a JS TypeError when the quoted key is malformed
+    # (e.g. wrong fromMe direction). Retry without quoted so the message still sends.
+    if not resp.ok and resp.status_code == 400 and "quoted" in payload:
+        try:
+            err_body = resp.json()
+            messages = err_body.get("response", {}).get("message", [])
+            if any("TypeError" in str(m) for m in messages):
+                payload.pop("quoted", None)
+                resp = _evo_session.post(
+                    _url(endpoint, line.instance_name),
+                    json=payload,
+                    headers=_headers(line),
+                    timeout=timeout,
+                )
+        except Exception:
+            pass
     if not resp.ok:
         frappe.log_error(
             f"WA send {resp.status_code} for {jid}: {resp.text[:500]}", "WA Send"
         )
     resp.raise_for_status()
-    return resp.json().get("key", {}).get("id") or resp.json().get("messageId", "")
+    data = resp.json()
+    return data.get("key", {}).get("id") or data.get("messageId", "")
 
 
 @frappe.whitelist()
