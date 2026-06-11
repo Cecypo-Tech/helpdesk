@@ -269,7 +269,7 @@ def _download_image_wa_line(media_url: str, line_name: str) -> bytes | None:
 def _extract_company_name(text: str) -> str:
 	"""Use the LLM to pull just the company/business name out of a free-form message.
 
-	Falls back to the raw text (truncated) if the LLM call fails.
+	Returns empty string if no company name is found or the LLM call fails.
 	"""
 	from helpdesk.integrations.llm import chat as llm_chat
 
@@ -278,23 +278,39 @@ def _extract_company_name(text: str) -> str:
 			{
 				"role": "system",
 				"content": (
-					"You are a company-name extractor. "
-					"From the user's message, return ONLY the company or business name — "
-					"nothing else. No explanation, no punctuation around it. "
-					"If no company name is present, return an empty string."
+					"You are a company-name extractor. Return ONLY the company or business name — "
+					"nothing else, no explanation, no punctuation around it.\n\n"
+					"Rules:\n"
+					"- Company names are short (1–6 words), typically proper nouns.\n"
+					"- If the message is a question, complaint, or does not clearly state a company name → return empty string.\n"
+					"- Do NOT return sentences, prices, dates, invoice references, or partial phrases.\n"
+					"- Be conservative: when in doubt, return empty string.\n\n"
+					"Examples:\n"
+					"User: 'We are Acme Corporation' → Acme Corporation\n"
+					"User: 'safaricom' → Safaricom\n"
+					"User: 'the company is TechCorp Ltd' → TechCorp Ltd\n"
+					"User: 'Also we agreed you'd charge 2k for the template' → \n"
+					"User: 'I need help with my invoice' → \n"
+					"User: 'you raised 2 invoices of 2k instead of one' → "
 				),
 			},
 			{"role": "user", "content": text},
 		]
 		result = llm_chat(messages).strip().strip(".,;:")
-		# Sanity-check: if the model returned something absurdly long it probably
-		# hallucinated a summary instead of a name — fall back to raw text.
-		if not result or len(result) > 120:
-			return text.strip()[:120]
+		# Reject anything that looks like a sentence rather than a name:
+		# too long, contains a question mark, too many words, or sentence-ending punctuation mid-string.
+		if (
+			not result
+			or len(result) > 60
+			or "?" in result
+			or result.count(" ") > 6
+			or any(result[i] in ".!" for i in range(len(result) - 1))
+		):
+			return ""
 		return result
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company name extraction failed")
-		return text.strip()[:120]
+		return ""
 
 
 # ── Escalation ────────────────────────────────────────────────────────────────
@@ -359,6 +375,7 @@ def process_message(msg_name: str, channel: str) -> None:
 
 	if ticket_name:
 		_company_key = f"wa_bot_company:{ticket_name}"
+		_company_retry_key = f"wa_bot_company_retry:{ticket_name}"
 		# Atomic-ish: fetch and immediately delete so a concurrent job won't also claim it.
 		_waiting_for_company = frappe.cache().get_value(_company_key)
 		if _waiting_for_company:
@@ -375,12 +392,27 @@ def process_message(msg_name: str, channel: str) -> None:
 					frappe.db.commit()
 					cust_name = cust.name
 				frappe.db.set_value("HD Ticket", ticket_name, "customer", cust_name)
+				frappe.cache().delete_value(_company_retry_key)
 				try:
 					state.send_reply(f"Thank you! I've noted your company as *{company_name}*. How can I help you?")
 					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
 				except Exception:
 					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company confirm message failed")
-			return
+				return
+			# Extraction failed — re-ask once; on second failure fall through to normal handling
+			# so the user's actual message still gets a response.
+			already_retried = frappe.cache().get_value(_company_retry_key)
+			if not already_retried:
+				frappe.cache().set_value(_company_retry_key, 1, expires_in_sec=3600)
+				frappe.cache().set_value(_company_key, 1, expires_in_sec=3600)
+				try:
+					state.send_reply("Sorry, I didn't catch that — could you share just your company name? (e.g. *Acme Ltd*)")
+					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
+				except Exception:
+					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company re-ask failed")
+				return
+			# Second failure: clear retry flag and fall through so the message is handled normally.
+			frappe.cache().delete_value(_company_retry_key)
 
 		customer = frappe.db.get_value("HD Ticket", ticket_name, "customer")
 		if not customer:
