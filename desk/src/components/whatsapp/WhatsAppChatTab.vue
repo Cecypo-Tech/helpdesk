@@ -152,7 +152,12 @@ const mentionMap = computed<Record<string, string>>(() => {
   const participants: Array<{ jid: string; phone: string; name: string }> = participantsResource.data || [];
   const map: Record<string, string> = {};
   for (const p of participants) {
-    if (p.phone && p.name) map[p.phone] = p.name;
+    if (!p.name) continue;
+    if (p.phone) map[p.phone] = p.name;
+    if (p.jid?.endsWith("@lid")) {
+      const lid = p.jid.split("@")[0];
+      if (lid) map[lid] = p.name;
+    }
   }
   return map;
 });

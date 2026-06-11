@@ -147,7 +147,7 @@
                 </svg>
               </button>
             </div>
-            <div v-else class="text-[11px] text-ink-gray-4 italic">phone unavailable (LID)</div>
+            <div v-else class="text-[11px] text-ink-gray-4 italic">LID: {{ p.jid.split('@')[0] }}</div>
           </div>
         </div>
       </div>
@@ -287,6 +287,7 @@
             :reactions="reactionsMap[msg.message_id] || []"
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="isGroup"
+            :mentionMap="mentionMap"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
@@ -373,6 +374,19 @@ const participantsResource = createResource({
   auto: false,
 });
 
+const mentionMap = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {};
+  for (const p of (participantsResource.data || []) as Array<{ jid: string; phone: string; name: string }>) {
+    if (!p.name) continue;
+    if (p.phone) map[p.phone] = p.name;
+    if (p.jid?.endsWith("@lid")) {
+      const lid = p.jid.split("@")[0];
+      if (lid) map[lid] = p.name;
+    }
+  }
+  return map;
+});
+
 function toggleMembers() {
   if (!showMembers.value) {
     showMembers.value = true;
@@ -402,11 +416,15 @@ function copyContactPhone() {
 }
 
 // Reset panels when switching conversations
-watch(() => props.jid, () => {
+watch(() => props.jid, (newJid) => {
   showMembers.value = false;
   participantsResource.data = null;
   showNotes.value = false;
   customerNotesResource.data = null;
+  // Eagerly fetch participants for groups so mentionMap resolves without opening the panel
+  if (newJid?.endsWith("@g.us") && props.line) {
+    participantsResource.submit({ jid: newJid, line: props.line });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -655,6 +673,9 @@ function handleBaileysMessage(data: { jid?: string }) {
 onMounted(() => {
   const { $socket } = globalStore();
   $socket.on("helpdesk:baileys-message", handleBaileysMessage);
+  if (props.jid?.endsWith("@g.us") && props.line && !participantsResource.data) {
+    participantsResource.submit({ jid: props.jid, line: props.line });
+  }
 });
 
 onBeforeUnmount(() => {
