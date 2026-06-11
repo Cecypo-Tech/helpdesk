@@ -3080,6 +3080,11 @@ def send_template_to_ticket(ticket: str, template_name: str) -> dict:
 
 	Creates an Outgoing WhatsApp Message with the template set; frappe_whatsapp's
 	before_insert hook detects the template field and routes to send_template().
+
+	When the template has variables (sample_values set), frappe_whatsapp's default
+	fallback incorrectly uses sample_values as field names, returning empty strings
+	that Meta rejects with #131008.  We resolve field values here instead and pass
+	them as body_param so frappe_whatsapp takes the explicit-param branch.
 	"""
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		frappe.throw(_("frappe_whatsapp is not installed."))
@@ -3088,11 +3093,39 @@ def send_template_to_ticket(ticket: str, template_name: str) -> dict:
 	phone = get_contact_phone(ticket)
 	if not phone:
 		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+
+	template_doc = frappe.get_doc("WhatsApp Templates", template_name)
+	body_param = None
+	params = {}
+	if template_doc.sample_values:
+		if not template_doc.field_names:
+			frappe.throw(
+				_("Template {0} has variables but no Field Names are configured. "
+				  "Open the WhatsApp Template and set Field Names to the HD Ticket "
+				  "field names that should fill each variable.").format(template_name)
+			)
+		ticket_doc = frappe.get_doc("HD Ticket", ticket)
+		field_names = [f.strip() for f in template_doc.field_names.split(",")]
+		params = {}
+		for i, fn in enumerate(field_names, 1):
+			raw = ticket_doc.get_formatted(fn)
+			params[str(i)] = frappe.utils.strip_html(raw) if raw else (str(ticket_doc.get(fn)) if ticket_doc.get(fn) is not None else "")
+		body_param = json.dumps(params)
+
+	# Render the template body text for display in the chat UI.
+	# frappe_whatsapp never sets `message` on template sends, leaving the bubble blank.
+	rendered_message = template_doc.template or ""
+	if params:
+		for idx, value in params.items():
+			rendered_message = rendered_message.replace("{{" + idx + "}}", str(value))
+
 	msg_doc = frappe.get_doc({
 		"doctype": "WhatsApp Message",
 		"type": "Outgoing",
 		"to": phone,
 		"template": template_name,
+		"body_param": body_param,
+		"message": rendered_message,
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
 	})
