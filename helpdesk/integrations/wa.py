@@ -722,6 +722,22 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 	sender_name = data.get("pushName") or ""
 	is_group = _is_group(jid)
 
+	# Cross-line echo detection: when multiple WA Lines are all members of the same
+	# group, a message sent by one line arrives at sibling lines with fromMe=False
+	# because Evolution marks fromMe relative to each instance. Without this check,
+	# sibling lines treat the outgoing message as incoming, the bot fires, and an
+	# unwanted automated reply is sent. Detect by comparing sender against the
+	# connected_user JID of every configured line.
+	if not from_me and is_group and sender and sender != jid:
+		try:
+			own_jids = set(frappe.get_all(
+				"WA Line", filters={"connected_user": ["!=", ""]}, pluck="connected_user"
+			))
+			if sender in own_jids:
+				from_me = True
+		except Exception:
+			pass
+
 	if not jid or jid == "status@broadcast" or jid.endswith("@broadcast"):
 		return {"status": "skipped", "reason": "broadcast or no jid"}
 
@@ -2090,6 +2106,21 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 			.orderby(BM.creation)
 			.run(as_dict=True)
 		)
+
+		# Deduplicate by message_id: when multiple WA Lines are members of the same
+		# group, the same message is stored once per line. Keep only the first copy
+		# (by creation order) for each message_id so the chat shows each message once.
+		# Messages without a message_id (old records) are kept as-is.
+		seen_ids: set = set()
+		deduped: list = []
+		for m in rows:
+			mid = m.get("message_id")
+			if mid:
+				if mid in seen_ids:
+					continue
+				seen_ids.add(mid)
+			deduped.append(m)
+		rows = deduped
 
 		for m in rows:
 			if m.get("creation") and not isinstance(m["creation"], str):
