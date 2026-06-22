@@ -15,8 +15,9 @@ import ShieldCheck from "~icons/lucide/shield-check";
 import Briefcase from "~icons/lucide/briefcase";
 import AssignmentRules from "./Assignment Rules/AssignmentRules.vue";
 import Settings from "~icons/lucide/settings-2";
-import { FieldDependencyIcon, PhoneIcon } from "@/components/icons";
+import { ERPNextSettingsIcon, FieldDependencyIcon, PhoneIcon } from "@/components/icons";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
+import ERPNextIntegrationSettings from "@/components/erpnext-integration/ERPNextIntegrationSettings.vue";
 import Telephony from "./Telephony/Telephony.vue";
 import WhatsAppSettings from "./WhatsApp/WhatsAppSettings.vue";
 import { EmailNotifications } from "./EmailNotifications";
@@ -138,6 +139,12 @@ export const tabs = computed(() => {
           component: markRaw(WhatsAppSettings),
           condition: () => auth.isAdmin,
         },
+        {
+          label: __("ERPNext"),
+          icon: markRaw(ERPNextSettingsIcon),
+          component: markRaw(ERPNextIntegrationSettings),
+          condition: () => auth.isAdmin,
+        },
       ],
     },
   ];
@@ -174,6 +181,7 @@ type TabName =
   | "Field Dependencies"
   | "Telephony"
   | "WhatsApp"
+  | "ERPNext"
   | "Saved Replies";
 
 export const setActiveSettingsTab = (tabName: TabName) => {

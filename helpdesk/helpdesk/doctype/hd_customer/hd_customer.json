@@ -11,6 +11,7 @@
   "customer_name",
   "domain",
   "helpdesk_notes",
+  "erpnext_customer",
   "references_tab",
   "contact_html"
  ],
@@ -38,6 +39,13 @@
    "fieldtype": "Long Text",
    "label": "Helpdesk Notes",
    "description": "Internal notes visible to agents (not shared with customer)."
+  },
+  {
+   "fieldname": "erpnext_customer",
+   "fieldtype": "Data",
+   "label": "ERPNext Customer",
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "references_tab",

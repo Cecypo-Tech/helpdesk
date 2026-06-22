@@ -35,3 +35,5 @@ export { default as ThumbsUpIcon } from "./ThumbsUpIcon.vue";
 export { default as TicketIcon } from "./TicketIcon.vue";
 export { default as UnpinIcon } from "./UnpinIcon.vue";
 export { default as WhatsAppIcon } from "./WhatsAppIcon.vue";
+export { default as ERPNextSettingsIcon } from "./ERPNextSettingsIcon.vue";
+export { default as ErpnextIcon } from "./ErpnextIcon.vue";
