@@ -222,7 +222,7 @@ function handle_resolution_by_field(row: any, item: string) {
       theme: "green",
       variant: "outline",
     });
-  } else if (dayjs(row.resolution_date).isAfter(item)) {
+  } else if (row.resolution_date && dayjs(row.resolution_date).isAfter(item)) {
     return h(Badge, {
       label: __("Failed"),
       theme: "red",

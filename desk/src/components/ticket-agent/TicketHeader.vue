@@ -286,7 +286,7 @@ const statusRef = useTemplateRef("statusRef");
 
 onMounted(() => {
   useShortcut("s", () => {
-    statusRef.value?.$el?.nextElementSibling?.click();
+    statusRef.value?.$el?.click();
   });
 });
 </script>

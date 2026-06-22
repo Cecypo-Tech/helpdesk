@@ -74,6 +74,6 @@ async function saveAssignees(
 const assignToRef = useTemplateRef("assigneeButton");
 
 useShortcut("a", () => {
-  (assignToRef.value?.$el as HTMLElement)?.nextElementSibling?.click();
+  (assignToRef.value?.$el as HTMLElement)?.click();
 });
 </script>

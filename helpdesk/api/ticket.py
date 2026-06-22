@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from helpdesk.utils import is_admin
 
 
 def assign_ticket_to_agent(ticket_id, agent_id=None):
@@ -17,3 +18,14 @@ def assign_ticket_to_agent(ticket_id, agent_id=None):
 
     ticket_doc.assign_agent(agent_id)
     return ticket_doc
+
+
+@frappe.whitelist()
+def delete_ticket(name: str):
+    if not is_admin():
+        frappe.throw(
+            msg=_("Only administrators can delete tickets."),
+            title=_("Not Allowed"),
+            exc=frappe.PermissionError,
+        )
+    frappe.delete_doc("HD Ticket", name, force=True, ignore_permissions=True)

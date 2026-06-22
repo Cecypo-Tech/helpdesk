@@ -222,7 +222,13 @@ onClickOutside(
     }
   },
   {
-    ignore: [".tippy-box", ".tippy-content"],
+    ignore: [
+      ".tippy-box",
+      ".tippy-content",
+      ".PopoverContent",
+      '[role="dialog"]',
+      ".dialog-overlay",
+    ],
   }
 );
 
@@ -234,7 +240,13 @@ onClickOutside(
     }
   },
   {
-    ignore: [".tippy-box", ".tippy-content"],
+    ignore: [
+      ".tippy-box",
+      ".tippy-content",
+      ".PopoverContent",
+      '[role="dialog"]',
+      ".dialog-overlay",
+    ],
   }
 );
 </script>

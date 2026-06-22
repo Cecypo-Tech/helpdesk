@@ -29,6 +29,7 @@
                 class="bg-surface-white hover:bg-surface-white focus:ring-0 border-outline-gray-2"
                 icon-left="search"
                 debounce="300"
+                autofocus
                 inputClass="p-4 pr-12"
               />
               <Button

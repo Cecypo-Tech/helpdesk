@@ -501,7 +501,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 const editor = computed(() => {
-  return editorRef.value.editor;
+  return editorRef.value?.editor;
 });
 
 defineExpose({

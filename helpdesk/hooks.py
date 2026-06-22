@@ -85,6 +85,9 @@ doc_events = {
     "WA Message": {
         "after_insert": "helpdesk.integrations.bot.handle_wa_message",
     },
+    "Notification Log": {
+        "before_insert": "helpdesk.extends.notification_log.before_insert",
+    },
 }
 
 has_permission = {
