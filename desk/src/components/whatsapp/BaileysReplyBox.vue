@@ -639,6 +639,12 @@ async function send() {
   if ((!text.value.trim() && !attachment.value) || sending.value) return;
   bannerError.value = "";
 
+  // Snapshot props immediately — before any await — so navigation to another
+  // ticket can't mutate these out from under an in-flight upload.
+  const ticketId = props.ticketId;
+  const jid = props.jid;
+  const line = props.line;
+
   const caption = text.value.trim();
   const replyToId = props.replyTo?.message_id || "";
   const replyToText = props.replyTo?.message || "";
@@ -688,8 +694,8 @@ async function send() {
     // saved message with status "Failed" — the chat then shows a red ! bubble with a
     // Retry button, so we deliberately do NOT raise a banner for that case.
     await sendReply.submit({
-      ...(props.jid ? { jid: props.jid } : { ticket: props.ticketId }),
-      ...(props.line ? { line: props.line } : {}),
+      ...(jid ? { jid } : { ticket: ticketId }),
+      ...(line ? { line } : {}),
       message: caption,
       content_type: file ? ct : "text",
       ...(fileUrl ? { media_url: fileUrl } : {}),

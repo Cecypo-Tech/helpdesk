@@ -1120,7 +1120,7 @@ def send_wa_reply(
         except Exception:
             pass
         if not jid:
-            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type, media_url=media_url)
+            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type, media_url=media_url, reply_to_message_id=reply_to_message_id)
 
     # ── Baileys/WA path ──────────────────────────────────────────────────────
     settings = _settings()
@@ -2186,7 +2186,7 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 
 # ── frappe_whatsapp integration handlers ──────────────────────────────────────
 
-def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None) -> dict:
+def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None, reply_to_message_id: str | None = None) -> dict:
 	"""Create an Outgoing WhatsApp Message via frappe_whatsapp for this ticket."""
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		frappe.throw(_("frappe_whatsapp is not installed."))
@@ -2206,6 +2206,8 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_
 		"attach": media_url or "",
 		"reference_doctype": "HD Ticket",
 		"reference_name": ticket,
+		"is_reply": 1 if reply_to_message_id else 0,
+		"reply_to_message_id": reply_to_message_id or "",
 	})
 	msg_doc.insert(ignore_permissions=True)
 	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
