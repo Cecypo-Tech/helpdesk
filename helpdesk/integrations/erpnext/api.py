@@ -14,6 +14,9 @@ def get_sync_info() -> dict:
     if "erpnext" not in frappe.get_installed_apps():
         return {"enabled": False, "in_sync": False}
 
+    if not frappe.db.exists("DocType", "ERPNext HD Settings"):
+        return {"enabled": False, "in_sync": False}
+
     if not frappe.has_permission("HD Customer", "read") or not frappe.has_permission(
         "Customer", "read"
     ):

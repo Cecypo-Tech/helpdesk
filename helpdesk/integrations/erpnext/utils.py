@@ -14,9 +14,11 @@ FIELDS_TO_SYNC: tuple[tuple[str, str], ...] = (("image", "image"),)
 
 
 def should_sync():
-    return "erpnext" in frappe.get_installed_apps() and frappe.db.get_single_value(
-        "ERPNext HD Settings", "enabled"
-    )
+    if "erpnext" not in frappe.get_installed_apps():
+        return False
+    if not frappe.db.exists("DocType", "ERPNext HD Settings"):
+        return False
+    return bool(frappe.db.get_single_value("ERPNext HD Settings", "enabled"))
 
 
 def set_links(erpnext_customer_name: str, hd_customer_name: str):
