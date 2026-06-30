@@ -637,6 +637,11 @@ class HDTicket(Document):
         ):
             return
 
+        if recipients and (
+            recipients.startswith("whatsapp+") or recipients.startswith("group+")
+        ):
+            return
+
         if not sender_email:
             frappe.throw(
                 _("Unable to send email. Please setup default outgoing email account.")
