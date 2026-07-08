@@ -46,3 +46,4 @@ helpdesk.patches.rename_evolution_doctypes_to_wa
 helpdesk.patches.reload_wa_message_doctypes
 helpdesk.patches.reconfigure_wa_webhooks
 helpdesk.patches.add_wa_message_composite_index
+helpdesk.patches.backfill_whatsapp_ticket_channel

@@ -2070,11 +2070,69 @@ def get_wa_qr(line: str) -> dict:
 # ── Migrated from baileys.py ──────────────────────────────────────────────────
 
 @frappe.whitelist()
-def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
+def get_whatsapp_conversations() -> list[dict]:
+	"""One entry per phone number for the WABA standalone chat page (WhatsApp Business),
+	most-recent message first. Unlike get_wa_conversations() (WA Line, keyed by jid),
+	a WABA "conversation" spans every ticket ever created for that phone number."""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return []
+
+	WM = frappe.qb.DocType("WhatsApp Message")
+	rows = (
+		frappe.qb.from_(WM)
+		.select(WM["from"], WM["to"], WM.type, WM.message, WM.content_type, WM.creation, WM.profile_name)
+		.orderby(WM.creation, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+
+	latest: dict[str, dict] = {}
+	for r in rows:
+		phone = _normalize_phone(r["from"] if r["type"] == "Incoming" else r["to"])
+		if not phone or phone in latest:
+			continue
+		latest[phone] = r
+
+	# Build normalized-phone → Contact name/first_name once, instead of the
+	# per-call full-table scan match_phone_to_contact() does.
+	phone_to_contact: dict[str, str] = {}
+	for c in frappe.get_all(
+		"Contact",
+		fields=["name", "first_name", "phone", "mobile_no"],
+		or_filters={"phone": ("is", "set"), "mobile_no": ("is", "set")},
+	):
+		for raw in (c.phone, c.mobile_no):
+			norm = _normalize_phone(raw)
+			if norm:
+				phone_to_contact[norm] = c
+	for row in frappe.get_all("Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}):
+		norm = _normalize_phone(row.phone)
+		if norm and norm not in phone_to_contact:
+			contact = frappe.db.get_value("Contact", row.parent, "first_name", as_dict=True)
+			if contact:
+				phone_to_contact[norm] = {"name": row.parent, "first_name": contact.first_name}
+
+	result = []
+	for phone, r in latest.items():
+		contact = phone_to_contact.get(phone)
+		display_name = (contact and contact.get("first_name")) or r.get("profile_name") or phone
+		result.append({
+			"phone": phone,
+			"display_name": display_name,
+			"last_message": r["message"] or f"[{r['content_type']}]",
+			"last_message_time": str(r["creation"]),
+			"last_direction": r["type"],
+		})
+	return result
+
+
+@frappe.whitelist()
+def get_whatsapp_messages(jid: str = None, ticket: str = None, phone: str = None) -> list[dict]:
 	"""Return messages for a conversation.
 
 	Baileys/WA path: looks up baileys_jid from ticket and queries WA Message.
-	frappe_whatsapp path: queries WhatsApp Message where reference_name = ticket.
+	frappe_whatsapp path (ticket): queries WhatsApp Message where reference_name = ticket.
+	frappe_whatsapp path (phone): queries WhatsApp Message across ALL tickets ever
+	linked to that phone number — used by the WhatsApp Business standalone chat page.
 	"""
 	from frappe.query_builder import DocType
 
@@ -2150,27 +2208,54 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None) -> list[dict]:
 		return rows
 
 	# ── frappe_whatsapp path ─────────────────────────────────────────────────
-	if not ticket or not frappe.db.exists("DocType", "WhatsApp Message"):
+	if not phone and not ticket:
+		return []
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		return []
 
 	WM = DocType("WhatsApp Message")
 	User = DocType("User")
 
-	rows = (
-		frappe.qb.from_(WM)
-		.left_join(User).on(User.name == WM.owner)
-		.select(
-			WM.name, WM.creation, WM.type, WM.message, WM.content_type,
-			WM.attach, WM.status, WM.profile_name, WM.message_id,
-			WM.reply_to_message_id, WM.is_reply, WM.owner,
-			WM["from"], WM["to"],
-			User.full_name.as_("sender_full_name"),
+	if phone:
+		# Stitch messages across every ticket ever linked to this phone number.
+		# `to`/`from` aren't guaranteed to be stored in the same format (raw
+		# webhook digits vs. Contact.mobile_no with symbols), so pre-filter on
+		# a substring match and confirm with an exact normalized comparison.
+		tail = phone[-9:] if len(phone) >= 9 else phone
+		candidates = (
+			frappe.qb.from_(WM)
+			.left_join(User).on(User.name == WM.owner)
+			.select(
+				WM.name, WM.creation, WM.type, WM.message, WM.content_type,
+				WM.attach, WM.status, WM.profile_name, WM.message_id,
+				WM.reply_to_message_id, WM.is_reply, WM.owner,
+				WM["from"], WM["to"], WM.reference_name,
+				User.full_name.as_("sender_full_name"),
+			)
+			.where(WM["from"].like(f"%{tail}%") | WM["to"].like(f"%{tail}%"))
+			.orderby(WM.creation)
+			.run(as_dict=True)
 		)
-		.where(WM.reference_doctype == "HD Ticket")
-		.where(WM.reference_name == ticket)
-		.orderby(WM.creation)
-		.run(as_dict=True)
-	)
+		rows = [
+			m for m in candidates
+			if _normalize_phone(m["from"]) == phone or _normalize_phone(m["to"]) == phone
+		]
+	else:
+		rows = (
+			frappe.qb.from_(WM)
+			.left_join(User).on(User.name == WM.owner)
+			.select(
+				WM.name, WM.creation, WM.type, WM.message, WM.content_type,
+				WM.attach, WM.status, WM.profile_name, WM.message_id,
+				WM.reply_to_message_id, WM.is_reply, WM.owner,
+				WM["from"], WM["to"],
+				User.full_name.as_("sender_full_name"),
+			)
+			.where(WM.reference_doctype == "HD Ticket")
+			.where(WM.reference_name == ticket)
+			.orderby(WM.creation)
+			.run(as_dict=True)
+		)
 
 	for m in rows:
 		if m.get("creation") and not isinstance(m["creation"], str):
@@ -2347,6 +2432,7 @@ def on_whatsapp_message_insert(doc, method=None):
 			"raised_by": email,
 			"description": doc.message or "",
 			"via_customer_portal": 0,
+			"ticket_channel": "WhatsApp",
 		}
 		if contact_name:
 			ticket_data["contact"] = contact_name
@@ -2507,6 +2593,49 @@ def get_customer_notes(customer: str) -> dict:
 		return {"notes": ""}
 	notes = frappe.db.get_value("HD Customer", customer, "helpdesk_notes") or ""
 	return {"notes": notes}
+
+
+@frappe.whitelist()
+def get_active_whatsapp_ticket_for_phone(phone: str) -> dict:
+	"""Resolve which HD Ticket a reply from the WhatsApp Business chat page should
+	attach to. Mirrors the open-ticket-within-timeout lookup in
+	on_whatsapp_message_insert(); falls back to the most recent ticket for this
+	phone (regardless of status) if none is currently open, so a reply always
+	has somewhere to go."""
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return {"ticket": None}
+
+	phone = _normalize_phone(phone)
+	if not phone:
+		return {"ticket": None}
+
+	WM = frappe.qb.DocType("WhatsApp Message")
+	tail = phone[-9:] if len(phone) >= 9 else phone
+	candidates = (
+		frappe.qb.from_(WM)
+		.select(WM.reference_name, WM.creation, WM["from"])
+		.where(WM.reference_doctype == "HD Ticket")
+		.where(WM.type == "Incoming")
+		.where(WM["from"].like(f"%{tail}%"))
+		.orderby(WM.creation, order=frappe.qb.desc)
+		.limit(5)
+		.run(as_dict=True)
+	)
+	linked = [c for c in candidates if _normalize_phone(c["from"]) == phone and c.reference_name]
+	if not linked:
+		return {"ticket": None}
+
+	latest = linked[0]
+	s = _fw_settings()
+	timeout = int((s and s.new_conversation_timeout_hours) or 24)
+
+	existing_ticket = None
+	status_category = frappe.db.get_value("HD Ticket", latest.reference_name, "status_category")
+	if status_category and status_category != "Resolved":
+		if time_diff_in_hours(now_datetime(), latest.creation) < timeout:
+			existing_ticket = latest.reference_name
+
+	return {"ticket": existing_ticket or latest.reference_name}
 
 
 @frappe.whitelist()

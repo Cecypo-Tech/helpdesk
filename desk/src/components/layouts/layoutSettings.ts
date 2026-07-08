@@ -5,6 +5,7 @@ import LucideTicket from "~icons/lucide/ticket";
 import { OrganizationsIcon } from "../icons";
 import PhoneIcon from "../icons/PhoneIcon.vue";
 import LucideHome from "~icons/lucide/home";
+import WhatsAppIcon from "../icons/WhatsAppIcon.vue";
 import { __ } from "@/translation";
 
 export const agentPortalSidebarOptions = [
@@ -42,6 +43,11 @@ export const agentPortalSidebarOptions = [
     label: __("Call Logs"),
     icon: PhoneIcon,
     to: "CallLogs",
+  },
+  {
+    label: __("WhatsApp Business"),
+    icon: WhatsAppIcon,
+    to: "WhatsAppBusinessChat",
   },
 ];
 

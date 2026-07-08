@@ -147,6 +147,11 @@ const routes = [
     name: "WhatsAppChat",
     component: () => import("@/pages/whatsapp/WhatsAppPage.vue"),
   },
+  {
+    path: "/whatsapp-business",
+    name: "WhatsAppBusinessChat",
+    component: () => import("@/pages/whatsapp/WhatsAppBusinessPage.vue"),
+  },
 
   // Customer Portal Routes
   {
