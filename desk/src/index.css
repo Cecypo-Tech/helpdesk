@@ -7,6 +7,11 @@
 @layer components {
   .prose-f {
     @apply break-normal max-w-none prose prose-code:break-all prose-code:whitespace-pre-wrap prose-img:border prose-img:rounded-lg prose-sm;
+    /* Tailwind Typography's `prose` sets color: var(--tw-prose-body), a
+       static gray unrelated to the app's --ink-gray-* dark-mode variables.
+       That silently wins over inherited/ancestor color in both themes.
+       Drop back to inheriting so prose content follows the app's theme. */
+    color: inherit;
   }
 }
 .tiptap input[placeholder="Add caption"] {
