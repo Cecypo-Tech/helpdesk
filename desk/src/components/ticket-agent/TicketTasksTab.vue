@@ -50,7 +50,7 @@
           v-model="newTaskTitle"
           type="text"
           placeholder="Task title..."
-          class="w-full rounded border border-outline-gray-3 px-2 py-1.5 text-xs text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none"
+          class="w-full rounded border border-outline-gray-3 bg-surface-white px-2 py-1.5 text-xs text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none"
           @keydown.enter="createTask"
           @keydown.esc="showNewTask = false"
         />

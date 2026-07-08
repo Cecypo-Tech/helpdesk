@@ -142,6 +142,14 @@ const htmlContent = computed(
         --bg-surface-gray-3: #343434;
         --bg-surface-gray-4: #424242;
       }
+      /* Email bodies are arbitrary sender-authored HTML that assumes a light
+         background. Force a light card regardless of app theme so text stays
+         legible — the app's dark-theme ink/surface variables would otherwise
+         flip default text to a near-white color with no matching background. */
+      html, body {
+        background-color: #ffffff !important;
+        color: #1a1a1a !important;
+      }
       .replied-content .collapse {
         margin: 10px 0 10px 0;
         visibility: visible;
