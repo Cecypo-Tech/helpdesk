@@ -2126,13 +2126,24 @@ def get_whatsapp_conversations() -> list[dict]:
 
 
 @frappe.whitelist()
-def get_whatsapp_messages(jid: str = None, ticket: str = None, phone: str = None) -> list[dict]:
+def get_whatsapp_messages(
+	jid: str = None,
+	ticket: str = None,
+	phone: str = None,
+	limit: int = 0,
+	before: str = None,
+) -> list[dict] | dict:
 	"""Return messages for a conversation.
 
 	Baileys/WA path: looks up baileys_jid from ticket and queries WA Message.
 	frappe_whatsapp path (ticket): queries WhatsApp Message where reference_name = ticket.
 	frappe_whatsapp path (phone): queries WhatsApp Message across ALL tickets ever
 	linked to that phone number — used by the WhatsApp Business standalone chat page.
+
+	When `phone` is given with `limit`, returns a paginated page instead of a bare
+	list: {"messages": [...oldest to newest...], "has_more": bool}. `before` is the
+	`creation` timestamp of the oldest message already loaded on the client — pass
+	it back to fetch the next older page.
 	"""
 	from frappe.query_builder import DocType
 
@@ -2216,13 +2227,16 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None, phone: str = None
 	WM = DocType("WhatsApp Message")
 	User = DocType("User")
 
+	paginated = False
+	has_more = False
 	if phone:
+		paginated = bool(limit)
 		# Stitch messages across every ticket ever linked to this phone number.
 		# `to`/`from` aren't guaranteed to be stored in the same format (raw
 		# webhook digits vs. Contact.mobile_no with symbols), so pre-filter on
 		# a substring match and confirm with an exact normalized comparison.
 		tail = phone[-9:] if len(phone) >= 9 else phone
-		candidates = (
+		query = (
 			frappe.qb.from_(WM)
 			.left_join(User).on(User.name == WM.owner)
 			.select(
@@ -2233,13 +2247,25 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None, phone: str = None
 				User.full_name.as_("sender_full_name"),
 			)
 			.where(WM["from"].like(f"%{tail}%") | WM["to"].like(f"%{tail}%"))
-			.orderby(WM.creation)
-			.run(as_dict=True)
 		)
+		if paginated:
+			# Fetched newest-first, capped by `limit`, so this is a hard boundary
+			# on how much history a single page can pull regardless of how many
+			# tail-match false positives get filtered out below.
+			if before:
+				query = query.where(WM.creation < before)
+			candidates = query.orderby(WM.creation, order=frappe.qb.desc).limit(limit + 1).run(as_dict=True)
+		else:
+			candidates = query.orderby(WM.creation).run(as_dict=True)
+
 		rows = [
 			m for m in candidates
 			if _normalize_phone(m["from"]) == phone or _normalize_phone(m["to"]) == phone
 		]
+		if paginated:
+			has_more = len(rows) > limit
+			rows = rows[:limit]
+			rows.reverse()  # newest-first → chronological for display
 	else:
 		rows = (
 			frappe.qb.from_(WM)
@@ -2266,6 +2292,8 @@ def get_whatsapp_messages(jid: str = None, ticket: str = None, phone: str = None
 		m["edit_history"] = []
 		m["is_edited"] = 0
 
+	if paginated:
+		return {"messages": rows, "has_more": has_more}
 	return rows
 
 

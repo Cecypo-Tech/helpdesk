@@ -31,17 +31,36 @@
       ref="chatRef"
       :phone="selectedPhone"
       :displayName="selectedDisplayName"
+      :activeTicketId="activeTicketId"
+      :activeTicketLoading="activeTicketResource.loading"
       :showBack="isMobile && mobileShowChat"
       class="flex-1 min-w-0"
       @back="mobileShowChat = false"
     />
+
+    <!-- Ticket sidepanel (Details / Contact / Tasks) — desktop only -->
+    <TicketSidebar v-if="!isMobile && activeTicketId" :key="activeTicketId" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
+import { createResource } from "frappe-ui";
 import WhatsAppConversationList from "@/components/whatsapp/WhatsAppConversationList.vue";
 import WhatsAppBusinessChat from "@/components/whatsapp/WhatsAppBusinessChat.vue";
+import TicketSidebar from "@/components/ticket-agent/TicketSidebar.vue";
+import { useTicket } from "@/composables/useTicket";
+import { globalStore } from "@/stores/globalStore";
+import {
+  ActivitiesSymbol,
+  AssigneeSymbol,
+  Customizations,
+  CustomizationSymbol,
+  RecentSimilarTicketsSymbol,
+  Resource,
+  TicketContactSymbol,
+  TicketSymbol,
+} from "@/types";
 
 defineOptions({ inheritAttrs: false });
 
@@ -50,6 +69,8 @@ const MIN_WIDTH = 160;
 const MAX_WIDTH = 420;
 const DEFAULT_WIDTH = 240;
 
+const { $socket } = globalStore();
+
 const containerRef = ref<HTMLElement | null>(null);
 const panelWidth = ref(Number(localStorage.getItem(STORAGE_KEY)) || DEFAULT_WIDTH);
 const selectedPhone = ref<string | null>(null);
@@ -57,6 +78,36 @@ const selectedDisplayName = ref<string>("");
 const convListRef = ref<InstanceType<typeof WhatsAppConversationList> | null>(null);
 const chatRef = ref<InstanceType<typeof WhatsAppBusinessChat> | null>(null);
 const mobileShowChat = ref(false);
+
+// ── Ticket context (Details/Contact/Tasks sidebar + status dropdown) ─────────
+const activeTicketResource = createResource({
+  url: "helpdesk.integrations.wa.get_active_whatsapp_ticket_for_phone",
+  auto: false,
+});
+const activeTicketId = computed<string | null>(() => activeTicketResource.data?.ticket || null);
+
+function reloadActiveTicket() {
+  if (!selectedPhone.value) return;
+  activeTicketResource.update({ params: { phone: selectedPhone.value } });
+  activeTicketResource.reload();
+}
+
+const customizations: Resource<Customizations> = createResource({
+  url: "helpdesk.helpdesk.doctype.hd_ticket.api.get_ticket_customizations",
+  cache: ["HD Ticket", "customizations"],
+  auto: true,
+});
+
+const ticketComposable = computed(() =>
+  activeTicketId.value ? useTicket(activeTicketId.value) : null
+);
+
+provide(TicketSymbol, computed(() => ticketComposable.value?.ticket));
+provide(AssigneeSymbol, computed(() => ticketComposable.value?.assignees));
+provide(TicketContactSymbol, computed(() => ticketComposable.value?.contact));
+provide(RecentSimilarTicketsSymbol, computed(() => ticketComposable.value?.recentSimilarTickets));
+provide(ActivitiesSymbol, computed(() => ticketComposable.value?.activities));
+provide(CustomizationSymbol, computed(() => customizations));
 
 // ── Mobile detection ──────────────────────────────────────────────────────────
 const isMobile = ref(window.innerWidth < 768);
@@ -93,19 +144,28 @@ function onDocumentMouseUp() {
   onMouseUp();
 }
 
+function handleWhatsAppMessage() {
+  // A new/updated ticket for the selected phone may have flipped which
+  // ticket is "active" (e.g. the previous one just resolved).
+  reloadActiveTicket();
+}
+
 onMounted(() => {
   document.addEventListener("mouseup", onDocumentMouseUp);
   window.addEventListener("resize", onWindowResize);
+  $socket.on("helpdesk:whatsapp-message", handleWhatsAppMessage);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onDocumentMouseUp);
   window.removeEventListener("resize", onWindowResize);
+  $socket.off("helpdesk:whatsapp-message", handleWhatsAppMessage);
 });
 
 function onSelect(phone: string, displayName: string) {
   selectedPhone.value = phone;
   selectedDisplayName.value = displayName;
   mobileShowChat.value = true;
+  reloadActiveTicket();
 }
 </script>

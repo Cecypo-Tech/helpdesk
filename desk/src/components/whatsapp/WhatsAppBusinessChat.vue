@@ -29,18 +29,28 @@
           <span class="text-[11px] font-medium text-ink-gray-6">+{{ phone }}</span>
         </div>
       </div>
-      <router-link
-        v-if="activeTicket.data?.ticket"
-        :to="`/tickets/${activeTicket.data.ticket}`"
-        class="shrink-0 text-xs font-medium text-blue-600 hover:underline"
-      >
-        View ticket #{{ activeTicket.data.ticket }} →
-      </router-link>
+      <div v-if="activeTicketId" class="flex shrink-0 items-center gap-2">
+        <Dropdown v-if="ticket?.doc" :options="statusDropdown" placement="right">
+          <template #default>
+            <Button :label="ticket.doc.status" size="sm">
+              <template #prefix>
+                <IndicatorIcon :class="ticketStatusStore.getStatus(ticket.doc.status)?.parsed_color" />
+              </template>
+            </Button>
+          </template>
+        </Dropdown>
+        <router-link
+          :to="`/tickets/${activeTicketId}`"
+          class="text-xs font-medium text-blue-600 hover:underline"
+        >
+          #{{ activeTicketId }} →
+        </router-link>
+      </div>
     </div>
 
     <!-- Messages Area -->
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto px-5 py-4">
-      <div v-if="messages.loading && !messages.data" class="flex justify-center py-10">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto px-5 py-4" @scroll="onScroll">
+      <div v-if="initialLoading && !messageList.length" class="flex justify-center py-10">
         <LoadingIndicator :scale="6" class="text-ink-gray-5" />
       </div>
 
@@ -53,6 +63,16 @@
       </div>
 
       <div v-else class="space-y-3">
+        <!-- Load older messages -->
+        <div v-if="hasMore" class="flex justify-center pb-2">
+          <button
+            :disabled="loadingOlder"
+            class="rounded-lg border border-outline-gray-3 px-3 py-1.5 text-xs font-medium text-ink-gray-6 hover:bg-surface-gray-1 disabled:opacity-50"
+            @click="loadOlder"
+          >
+            {{ loadingOlder ? "Loading…" : "Load older messages" }}
+          </button>
+        </div>
         <template v-for="(group, dateKey) in groupedMessages" :key="dateKey">
           <div class="my-4 flex items-center gap-3">
             <div class="flex-1 border-t border-outline-gray-2" />
@@ -78,14 +98,14 @@
 
     <!-- Reply box -->
     <WhatsAppReplyBox
-      v-if="activeTicket.data?.ticket"
-      :ticketId="activeTicket.data.ticket"
+      v-if="activeTicketId"
+      :ticketId="activeTicketId"
       :replyTo="replyingTo"
       @sent="onMessageSent"
       @clearReply="replyingTo = null"
     />
     <div
-      v-else-if="activeTicket.fetched"
+      v-else-if="!activeTicketLoading"
       class="border-t border-outline-gray-2 px-4 py-3 text-center text-xs text-ink-gray-5"
     >
       No ticket found for this number yet.
@@ -94,16 +114,26 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, LoadingIndicator, toast } from "frappe-ui";
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { call, createResource, Dropdown, LoadingIndicator, toast } from "frappe-ui";
+import { computed, h, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { useTicketStatusStore } from "@/stores/ticketStatus";
+import { TicketSymbol } from "@/types";
+import { HDTicketStatus } from "@/types/doctypes";
+import { IndicatorIcon } from "@/components/icons";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import WhatsAppReplyBox from "./WhatsAppReplyBox.vue";
 
+const PAGE_SIZE = 50;
+const NEAR_BOTTOM_THRESHOLD = 100;
+const NEAR_TOP_THRESHOLD = 80;
+
 const props = defineProps<{
   phone: string | null;
   displayName?: string;
+  activeTicketId?: string | null;
+  activeTicketLoading?: boolean;
   showBack?: boolean;
 }>();
 
@@ -113,25 +143,108 @@ const { $socket } = globalStore();
 const messagesContainer = ref<HTMLElement | null>(null);
 const replyingTo = ref<Record<string, any> | null>(null);
 
-const messages = createResource({
-  url: "helpdesk.integrations.wa.get_whatsapp_messages",
-  auto: false,
+// Loaded messages accumulate as older pages are fetched — oldest to newest.
+const loadedMessages = ref<Record<string, any>[]>([]);
+const hasMore = ref(false);
+const initialLoading = ref(false);
+const loadingOlder = ref(false);
+
+// ── Ticket status dropdown — same context WhatsAppBusinessPage.vue provides ──
+const ticket = inject(TicketSymbol);
+const ticketStatusStore = useTicketStatusStore();
+
+const statusDropdown = computed(() => {
+  const statuses = ticketStatusStore.statuses.data?.filter((s) => s.enabled) || [];
+  return statuses.map((o: HDTicketStatus) => ({
+    label: o.label_agent,
+    value: o.label_agent,
+    onClick: () => {
+      if (!ticket?.value || !props.activeTicketId) return;
+      $socket.emit("notify_ticket_update", props.activeTicketId, "Status", o.label_agent);
+      if (ticket.value.doc.status === o.label_agent) return;
+      ticket.value.setValue.submit({ status: o.label_agent });
+    },
+    icon: () => h(IndicatorIcon, { class: o.parsed_color }),
+  }));
 });
 
-const activeTicket = createResource({
-  url: "helpdesk.integrations.wa.get_active_whatsapp_ticket_for_phone",
-  auto: false,
-});
-
-function reload() {
-  if (!props.phone) return;
-  messages.update({ params: { phone: props.phone } });
-  messages.reload();
-  activeTicket.update({ params: { phone: props.phone } });
-  activeTicket.reload();
+function isNearBottom(): boolean {
+  const c = messagesContainer.value;
+  if (!c) return true;
+  return c.scrollHeight - c.scrollTop - c.clientHeight < NEAR_BOTTOM_THRESHOLD;
 }
 
-watch(() => props.phone, reload, { immediate: true });
+async function loadInitial() {
+  loadedMessages.value = [];
+  hasMore.value = false;
+  if (!props.phone) return;
+  initialLoading.value = true;
+  try {
+    const res: any = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
+      phone: props.phone,
+      limit: PAGE_SIZE,
+    });
+    loadedMessages.value = res?.messages || [];
+    hasMore.value = !!res?.has_more;
+    scrollToBottom();
+  } finally {
+    initialLoading.value = false;
+  }
+}
+
+watch(() => props.phone, loadInitial, { immediate: true });
+
+async function loadOlder() {
+  if (!props.phone || loadingOlder.value || !hasMore.value || !loadedMessages.value.length) return;
+  loadingOlder.value = true;
+  const oldest = loadedMessages.value[0];
+  const container = messagesContainer.value;
+  const prevScrollHeight = container?.scrollHeight || 0;
+  const prevScrollTop = container?.scrollTop || 0;
+  try {
+    const res: any = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
+      phone: props.phone,
+      limit: PAGE_SIZE,
+      before: oldest.creation,
+    });
+    const older = res?.messages || [];
+    hasMore.value = !!res?.has_more;
+    if (older.length) {
+      loadedMessages.value = [...older, ...loadedMessages.value];
+      await nextTick();
+      if (container) {
+        container.scrollTop = container.scrollHeight - prevScrollHeight + prevScrollTop;
+      }
+    }
+  } finally {
+    loadingOlder.value = false;
+  }
+}
+
+function onScroll() {
+  if (messagesContainer.value && messagesContainer.value.scrollTop < NEAR_TOP_THRESHOLD) {
+    loadOlder();
+  }
+}
+
+// Re-fetch just the latest page and merge it into what's already loaded —
+// keeps any older pages the user scrolled up to load intact, instead of
+// collapsing back to only the newest 50 on every new message.
+async function mergeLatest(forceScroll = false) {
+  if (!props.phone) return;
+  const wasNearBottom = forceScroll || isNearBottom();
+  const res: any = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
+    phone: props.phone,
+    limit: PAGE_SIZE,
+  });
+  const latest: Record<string, any>[] = res?.messages || [];
+  const byName = new Map(loadedMessages.value.map((m) => [m.name, m]));
+  for (const m of latest) byName.set(m.name, m);
+  const merged = Array.from(byName.values());
+  merged.sort((a, b) => new Date(a.creation).getTime() - new Date(b.creation).getTime());
+  loadedMessages.value = merged;
+  if (wasNearBottom) scrollToBottom();
+}
 
 const sendReactionResource = createResource({
   url: "helpdesk.integrations.wa.send_wa_reaction",
@@ -140,8 +253,8 @@ const sendReactionResource = createResource({
   },
 });
 
-// All messages (including reactions)
-const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+// All currently-loaded messages (including reactions)
+const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
 
 // Main message list — reactions are displayed as badges on bubbles, not as standalone items
 const messageList = computed(() =>
@@ -193,7 +306,7 @@ function scrollToBottom() {
 
 function onMessageSent() {
   replyingTo.value = null;
-  reload();
+  mergeLatest(true);
 }
 
 function startReply(message: Record<string, any>) {
@@ -201,13 +314,13 @@ function startReply(message: Record<string, any>) {
 }
 
 function sendReaction(emoji: string, targetMessageId: string) {
-  if (!activeTicket.data?.ticket) return;
+  if (!props.activeTicketId) return;
   if (!targetMessageId) {
     toast.error("Cannot react: message has no WhatsApp ID yet");
     return;
   }
   sendReactionResource.submit({
-    ticket: activeTicket.data.ticket,
+    ticket: props.activeTicketId,
     target_message_id: targetMessageId,
     emoji,
   });
@@ -227,10 +340,8 @@ function handleRealtimeMessage() {
   // frappe_whatsapp events only carry a ticket name, not a phone number, so
   // there's no cheap client-side way to filter to "does this belong to the
   // currently open phone conversation" — just re-resolve when one is open.
-  if (props.phone) reload();
+  if (props.phone) mergeLatest();
 }
-
-watch(messageList, () => scrollToBottom());
 
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
@@ -240,5 +351,5 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
 });
 
-defineExpose({ scrollToBottom, refresh: reload });
+defineExpose({ scrollToBottom, refresh: loadInitial });
 </script>
