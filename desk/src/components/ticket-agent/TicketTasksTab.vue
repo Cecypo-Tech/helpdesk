@@ -198,7 +198,7 @@ async function createTask() {
   try {
     const name = (await call(
       "helpdesk.helpdesk.doctype.hd_task.hd_task.create_task_for_ticket",
-      { ticket: ticketName, title: newTaskTitle.value.trim() },
+      { ticket: String(ticketName), title: newTaskTitle.value.trim() },
     )) as string;
     showNewTask.value = false;
     newTaskTitle.value = "";
