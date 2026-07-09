@@ -62,11 +62,15 @@
           <WhatsAppBubble
             v-for="msg in group"
             :key="msg.name"
+            :data-msg-id="msg.message_id"
             :message="msg"
-            :reactions="[]"
-            :replyToMessage="null"
+            :reactions="reactionsMap[msg.message_id] || []"
+            :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="false"
             :mentionMap="{}"
+            @reply="startReply"
+            @react="sendReaction"
+            @scrollToReply="scrollToMessage"
           />
         </template>
       </div>
@@ -76,7 +80,9 @@
     <WhatsAppReplyBox
       v-if="activeTicket.data?.ticket"
       :ticketId="activeTicket.data.ticket"
+      :replyTo="replyingTo"
       @sent="onMessageSent"
+      @clearReply="replyingTo = null"
     />
     <div
       v-else-if="activeTicket.fetched"
@@ -88,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, LoadingIndicator } from "frappe-ui";
+import { createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -105,6 +111,7 @@ const emit = defineEmits<{ (e: "back"): void }>();
 
 const { $socket } = globalStore();
 const messagesContainer = ref<HTMLElement | null>(null);
+const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
   url: "helpdesk.integrations.wa.get_whatsapp_messages",
@@ -126,7 +133,41 @@ function reload() {
 
 watch(() => props.phone, reload, { immediate: true });
 
-const messageList = computed<Record<string, any>[]>(() => messages.data || []);
+const sendReactionResource = createResource({
+  url: "helpdesk.integrations.wa.send_wa_reaction",
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to send reaction");
+  },
+});
+
+// All messages (including reactions)
+const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+
+// Main message list — reactions are displayed as badges on bubbles, not as standalone items
+const messageList = computed(() =>
+  allMessages.value.filter((m) => m.content_type !== "reaction")
+);
+
+// Map WhatsApp message_id → message object (for reply context lookups)
+const messageByMsgId = computed(() => {
+  const map: Record<string, Record<string, any>> = {};
+  for (const m of allMessages.value) {
+    if (m.message_id) map[m.message_id] = m;
+  }
+  return map;
+});
+
+// Map WhatsApp message_id → array of reactions
+const reactionsMap = computed(() => {
+  const map: Record<string, Array<{ emoji: string; type: string }>> = {};
+  for (const m of allMessages.value) {
+    if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
+      if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
+      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type });
+    }
+  }
+  return map;
+});
 
 const groupedMessages = computed(() => {
   const groups: Record<string, any[]> = {};
@@ -151,7 +192,35 @@ function scrollToBottom() {
 }
 
 function onMessageSent() {
+  replyingTo.value = null;
   reload();
+}
+
+function startReply(message: Record<string, any>) {
+  replyingTo.value = message;
+}
+
+function sendReaction(emoji: string, targetMessageId: string) {
+  if (!activeTicket.data?.ticket) return;
+  if (!targetMessageId) {
+    toast.error("Cannot react: message has no WhatsApp ID yet");
+    return;
+  }
+  sendReactionResource.submit({
+    ticket: activeTicket.data.ticket,
+    target_message_id: targetMessageId,
+    emoji,
+  });
+}
+
+function scrollToMessage(messageId: string) {
+  if (!messageId || !messagesContainer.value) return;
+  const el = messagesContainer.value.querySelector(`[data-msg-id="${messageId}"]`) as HTMLElement | null;
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.style.transition = "background 0.2s";
+  el.style.background = "rgba(99,178,115,0.25)";
+  setTimeout(() => { el.style.background = ""; }, 1200);
 }
 
 function handleRealtimeMessage() {
