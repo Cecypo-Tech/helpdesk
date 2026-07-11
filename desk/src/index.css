@@ -27,3 +27,43 @@ body {
 .list-rows .h-px.border-t {
   border-color: var(--outline-gray-2) !important;
 }
+
+/* Pin a subtree to light mode regardless of the app's data-theme.
+   frappe-ui always keeps the raw --gray-N palette at its light values
+   (only the semantic ink/surface/outline tokens get swapped by
+   [data-theme="dark"]), so re-pointing the semantic tokens back at
+   --gray-N here survives future palette changes. Declaring these on
+   the subtree root overrides the inherited dark values for every
+   descendant that uses the semantic classes. */
+.force-light-mode {
+  background-color: #fff;
+  color: var(--ink-gray-8);
+
+  --ink-white: #fff;
+  --ink-gray-1: var(--gray-200);
+  --ink-gray-2: var(--gray-300);
+  --ink-gray-3: var(--gray-400);
+  --ink-gray-4: var(--gray-500);
+  --ink-gray-5: var(--gray-600);
+  --ink-gray-6: var(--gray-700);
+  --ink-gray-7: var(--gray-700);
+  --ink-gray-8: var(--gray-800);
+  --ink-gray-9: var(--gray-900);
+
+  --surface-white: #fff;
+  --surface-gray-1: var(--gray-50);
+  --surface-gray-2: var(--gray-100);
+  --surface-gray-3: var(--gray-200);
+  --surface-gray-4: var(--gray-300);
+  --surface-gray-5: var(--gray-700);
+  --surface-gray-6: var(--gray-800);
+  --surface-gray-7: var(--gray-900);
+
+  --outline-white: #fff;
+  --outline-gray-1: var(--gray-200);
+  --outline-gray-2: var(--gray-300);
+  --outline-gray-3: var(--gray-400);
+  --outline-gray-4: var(--gray-500);
+  --outline-gray-5: var(--gray-800);
+  --outline-gray-modals: var(--gray-200);
+}

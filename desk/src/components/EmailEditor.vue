@@ -121,10 +121,7 @@
                   :loading="uploading"
                 >
                   <template #icon>
-                    <AttachmentIcon
-                      class="h-4"
-                      style="color: #000000; stroke-width: 1.5 !important"
-                    />
+                    <AttachmentIcon class="h-4 text-ink-gray-7" />
                   </template>
                 </Button>
               </template>

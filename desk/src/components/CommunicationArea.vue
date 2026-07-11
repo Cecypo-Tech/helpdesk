@@ -31,7 +31,7 @@
     <div
       ref="emailBoxRef"
       v-show="showEmailBox"
-      class="flex gap-1.5 flex-1"
+      class="force-light-mode flex gap-1.5 flex-1"
       @keydown.ctrl.enter.capture.stop="submitEmail"
       @keydown.meta.enter.capture.stop="submitEmail"
     >
