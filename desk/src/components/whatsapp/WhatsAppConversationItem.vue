@@ -30,12 +30,29 @@
           class="ml-1 h-2 w-2 shrink-0 rounded-full bg-green-500"
         />
       </div>
+      <div
+        v-if="ticketStatus || company || ticketPriority"
+        class="mt-0.5 flex items-center gap-1 text-[11px] text-ink-gray-4"
+      >
+        <IndicatorIcon
+          v-if="ticketStatus"
+          class="size-2 shrink-0"
+          :class="ticketStatusStore.getStatus(ticketStatus)?.parsed_color"
+        />
+        <span v-if="company" class="truncate">{{ company }}</span>
+        <span v-if="company && ticketPriority">·</span>
+        <span v-if="ticketPriority" class="shrink-0 truncate">{{ ticketPriority }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { IndicatorIcon } from "@/components/icons";
+import { useTicketStatusStore } from "@/stores/ticketStatus";
+
+const ticketStatusStore = useTicketStatusStore();
 
 const props = defineProps<{
   phone: string;
@@ -45,6 +62,9 @@ const props = defineProps<{
   lastDirection: string;
   hasUnread: boolean;
   selected: boolean;
+  ticketStatus?: string | null;
+  ticketPriority?: string | null;
+  company?: string | null;
 }>();
 
 defineEmits<{

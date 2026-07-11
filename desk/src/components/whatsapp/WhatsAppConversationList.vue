@@ -33,6 +33,9 @@
         :lastDirection="conv.last_direction"
         :hasUnread="isUnread(conv)"
         :selected="conv.phone === selectedPhone"
+        :ticketStatus="conv.ticket_status"
+        :ticketPriority="conv.ticket_priority"
+        :company="conv.company"
         @select="(phone, name) => $emit('select', phone, name)"
       />
     </div>

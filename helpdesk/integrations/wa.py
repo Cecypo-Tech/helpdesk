@@ -2080,17 +2080,47 @@ def get_whatsapp_conversations() -> list[dict]:
 	WM = frappe.qb.DocType("WhatsApp Message")
 	rows = (
 		frappe.qb.from_(WM)
-		.select(WM["from"], WM["to"], WM.type, WM.message, WM.content_type, WM.creation, WM.profile_name)
+		.select(
+			WM["from"],
+			WM["to"],
+			WM.type,
+			WM.message,
+			WM.content_type,
+			WM.creation,
+			WM.profile_name,
+			WM.reference_doctype,
+			WM.reference_name,
+		)
 		.orderby(WM.creation, order=frappe.qb.desc)
 		.run(as_dict=True)
 	)
 
 	latest: dict[str, dict] = {}
+	# Most recent *ticket-linked* message per phone, tracked separately from
+	# `latest` since the newest message overall may predate any ticket link.
+	# HD Ticket autonames with an integer primary key, but reference_name is
+	# stored as a string on WhatsApp Message — cast here so this dict's
+	# values line up with ticket_info's keys (frappe.get_all returns "name"
+	# as int for this doctype) and with the "in" filter below.
+	phone_to_ticket: dict[str, int] = {}
 	for r in rows:
 		phone = _normalize_phone(r["from"] if r["type"] == "Incoming" else r["to"])
-		if not phone or phone in latest:
+		if not phone:
 			continue
-		latest[phone] = r
+		if phone not in latest:
+			latest[phone] = r
+		if phone not in phone_to_ticket and r.reference_doctype == "HD Ticket" and r.reference_name:
+			phone_to_ticket[phone] = int(r.reference_name)
+
+	ticket_info: dict[int, dict] = {}
+	ticket_names = list(set(phone_to_ticket.values()))
+	if ticket_names:
+		for t in frappe.get_all(
+			"HD Ticket",
+			filters={"name": ["in", ticket_names]},
+			fields=["name", "status", "priority", "customer"],
+		):
+			ticket_info[t.name] = t
 
 	# Build normalized-phone → Contact name/first_name once, instead of the
 	# per-call full-table scan match_phone_to_contact() does.
@@ -2115,12 +2145,16 @@ def get_whatsapp_conversations() -> list[dict]:
 	for phone, r in latest.items():
 		contact = phone_to_contact.get(phone)
 		display_name = (contact and contact.get("first_name")) or r.get("profile_name") or phone
+		ticket = ticket_info.get(phone_to_ticket.get(phone))
 		result.append({
 			"phone": phone,
 			"display_name": display_name,
 			"last_message": r["message"] or f"[{r['content_type']}]",
 			"last_message_time": str(r["creation"]),
 			"last_direction": r["type"],
+			"ticket_status": ticket.status if ticket else None,
+			"ticket_priority": ticket.priority if ticket else None,
+			"company": ticket.customer if ticket else None,
 		})
 	return result
 
