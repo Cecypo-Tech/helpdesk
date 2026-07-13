@@ -267,6 +267,8 @@ def send_manager_task_digest() -> None:
 
 	for recipient in settings.digest_recipients:
 		try:
+			if recipient.agent and not _is_agent_active(recipient.agent):
+				continue
 			phone = recipient.phone
 			if not phone and recipient.agent:
 				phone = _get_agent_phone(recipient.agent)
@@ -283,6 +285,16 @@ def send_manager_task_digest() -> None:
 				frappe.get_traceback(),
 				f"Manager task digest failed for recipient: {recipient.agent or recipient.phone}",
 			)
+
+
+def _is_agent_active(agent: str) -> bool:
+	"""False if the HD Agent (or their linked User) is inactive/disabled."""
+	agent_doc = frappe.db.get_value("HD Agent", agent, ["is_active", "user"], as_dict=True)
+	if not agent_doc or not agent_doc.is_active:
+		return False
+	if agent_doc.user and not frappe.db.get_value("User", agent_doc.user, "enabled"):
+		return False
+	return True
 
 
 def _get_agent_first_name(assigned_to: str) -> str:

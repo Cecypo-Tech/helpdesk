@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { createResource } from "frappe-ui";
 import WhatsAppConversationList from "@/components/whatsapp/WhatsAppConversationList.vue";
 import WhatsAppBusinessChat from "@/components/whatsapp/WhatsAppBusinessChat.vue";
@@ -108,6 +108,17 @@ provide(TicketContactSymbol, computed(() => ticketComposable.value?.contact));
 provide(RecentSimilarTicketsSymbol, computed(() => ticketComposable.value?.recentSimilarTickets));
 provide(ActivitiesSymbol, computed(() => ticketComposable.value?.activities));
 provide(CustomizationSymbol, computed(() => customizations));
+
+// Ticket Details/status can be edited from the sidebar (e.g. status dropdown).
+// Refresh the conversation list so its status-color border stays in sync.
+watch(
+  () => ticketComposable.value?.ticket?.doc?.status,
+  (newStatus, oldStatus) => {
+    if (oldStatus !== undefined && newStatus && newStatus !== oldStatus) {
+      convListRef.value?.reload();
+    }
+  }
+);
 
 // ── Mobile detection ──────────────────────────────────────────────────────────
 const isMobile = ref(window.innerWidth < 768);

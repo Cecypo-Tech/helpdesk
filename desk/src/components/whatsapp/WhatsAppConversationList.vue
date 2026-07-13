@@ -36,6 +36,8 @@
         :ticketStatus="conv.ticket_status"
         :ticketPriority="conv.ticket_priority"
         :company="conv.company"
+        :assignedTo="conv.assigned_to"
+        :openTaskCount="conv.open_task_count || 0"
         @select="(phone, name) => $emit('select', phone, name)"
       />
     </div>

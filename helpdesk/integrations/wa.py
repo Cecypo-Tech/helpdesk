@@ -1625,12 +1625,18 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
     for row in unread_fw:
         if not row.message_id:
             continue
+        retry_backoff_key = f"wa_read_receipt_retry:{row.name}"
+        if frappe.cache().get_value(retry_backoff_key):
+            continue
         try:
             msg_doc = frappe.get_doc("WhatsApp Message", row.name)
             msg_doc.send_read_receipt()
-            count += 1
+            if msg_doc.status == "marked as read":
+                count += 1
+            else:
+                frappe.cache().set_value(retry_backoff_key, 1, expires_in_sec=900)
         except Exception:
-            pass
+            frappe.cache().set_value(retry_backoff_key, 1, expires_in_sec=900)
     return count
 
 
@@ -2118,9 +2124,41 @@ def get_whatsapp_conversations() -> list[dict]:
 		for t in frappe.get_all(
 			"HD Ticket",
 			filters={"name": ["in", ticket_names]},
-			fields=["name", "status", "priority", "customer"],
+			fields=["name", "status", "priority", "customer", "_assign"],
 		):
+			assignees = frappe.parse_json(t._assign or "[]") or []
+			t["assigned_to"] = assignees[0] if assignees else None
 			ticket_info[t.name] = t
+
+	# Non-Done task counts per ticket — a task counts toward a conversation's
+	# badge if it's linked to that ticket directly, or if it shares the same
+	# customer/company (so company-wide tasks show up on every contact from
+	# that company, not just the one the task was originally filed under).
+	task_count: dict[int, int] = {}
+	if ticket_names:
+		company_names = list({t.customer for t in ticket_info.values() if t.customer})
+		conditions = ["ticket IN %(tickets)s"]
+		values: dict = {"tickets": tuple(str(n) for n in ticket_names)}
+		if company_names:
+			conditions.append("customer IN %(companies)s")
+			values["companies"] = tuple(company_names)
+		task_rows = frappe.db.sql(
+			f"""
+			SELECT ticket, customer
+			FROM `tabHD Task`
+			WHERE status != 'Done' AND ({" OR ".join(conditions)})
+			""",
+			values,
+			as_dict=True,
+		)
+		for ticket_id, info in ticket_info.items():
+			customer = info.customer
+			count = 0
+			for row in task_rows:
+				row_ticket = int(row.ticket) if row.ticket else None
+				if row_ticket == ticket_id or (customer and row.customer == customer):
+					count += 1
+			task_count[ticket_id] = count
 
 	# Build normalized-phone → Contact name/first_name once, instead of the
 	# per-call full-table scan match_phone_to_contact() does.
@@ -2155,6 +2193,8 @@ def get_whatsapp_conversations() -> list[dict]:
 			"ticket_status": ticket.status if ticket else None,
 			"ticket_priority": ticket.priority if ticket else None,
 			"company": ticket.customer if ticket else None,
+			"assigned_to": ticket.assigned_to if ticket else None,
+			"open_task_count": task_count.get(phone_to_ticket.get(phone), 0),
 		})
 	return result
 

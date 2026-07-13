@@ -111,6 +111,7 @@
 <script setup lang="ts">
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
@@ -193,6 +194,8 @@ const sendReactionResource = createResource({
 function markAsRead() {
   markReadResource.submit({ ticket: props.ticketId });
 }
+
+const markAsReadDebounced = useDebounceFn(markAsRead, 2500);
 
 const pickUpResource = createResource({
   url: "helpdesk.integrations.wa.pickup_whatsapp_ticket",
@@ -308,7 +311,7 @@ function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
     messages.reload();
     ticketInfo.reload();
     scrollToBottom();
-    markAsRead();
+    markAsReadDebounced();
   }
 }
 

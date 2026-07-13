@@ -1,7 +1,7 @@
 <template>
   <div
-    class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
-    :class="selected ? 'bg-surface-gray-2' : ''"
+    class="flex cursor-pointer items-center gap-2.5 border-b border-l-2 border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
+    :class="[selected ? 'bg-surface-gray-2' : '', statusBorderClass]"
     @click="$emit('select', phone, displayName)"
   >
     <!-- Avatar -->
@@ -12,6 +12,11 @@
       >
         {{ avatarLetter }}
       </div>
+      <!-- Open task count badge -->
+      <span
+        v-if="openTaskCount > 0"
+        class="absolute -top-1.5 -right-1.5 flex min-w-[14px] h-3.5 items-center justify-center rounded-full bg-blue-600 px-0.5 text-[8px] font-bold text-white ring-1 ring-surface-white leading-none"
+      >{{ openTaskCount }}</span>
     </div>
 
     <div class="min-w-0 flex-1">
@@ -31,7 +36,7 @@
         />
       </div>
       <div
-        v-if="ticketStatus || company || ticketPriority"
+        v-if="ticketStatus || company || ticketPriority || assignedTo"
         class="mt-0.5 flex items-center gap-1 text-[11px] text-ink-gray-4"
       >
         <IndicatorIcon
@@ -42,6 +47,12 @@
         <span v-if="company" class="truncate">{{ company }}</span>
         <span v-if="company && ticketPriority">·</span>
         <span v-if="ticketPriority" class="shrink-0 truncate">{{ ticketPriority }}</span>
+        <UserAvatar
+          v-if="assignedTo"
+          class="ml-auto shrink-0"
+          :name="assignedTo"
+          size="xs"
+        />
       </div>
     </div>
   </div>
@@ -51,6 +62,7 @@
 import { computed } from "vue";
 import { IndicatorIcon } from "@/components/icons";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
+import UserAvatar from "@/components/UserAvatar.vue";
 
 const ticketStatusStore = useTicketStatusStore();
 
@@ -65,11 +77,35 @@ const props = defineProps<{
   ticketStatus?: string | null;
   ticketPriority?: string | null;
   company?: string | null;
+  assignedTo?: string | null;
+  openTaskCount?: number;
 }>();
 
 defineEmits<{
   (e: "select", phone: string, displayName: string): void;
 }>();
+
+const STATUS_BORDER: Record<string, string> = {
+  Green: "border-l-green-700",
+  Black: "border-l-black",
+  Gray: "border-l-gray-700",
+  Blue: "border-l-blue-700",
+  Red: "border-l-red-500",
+  Pink: "border-l-pink-500",
+  Orange: "border-l-orange-600",
+  Amber: "border-l-amber-600",
+  Yellow: "border-l-yellow-700",
+  Cyan: "border-l-cyan-700",
+  Teal: "border-l-teal-700",
+  Violet: "border-l-violet-700",
+  Purple: "border-l-purple-700",
+};
+
+const statusBorderClass = computed(() => {
+  if (!props.ticketStatus) return "border-l-transparent";
+  const status = ticketStatusStore.getStatus(props.ticketStatus);
+  return STATUS_BORDER[status?.color] ?? "border-l-transparent";
+});
 
 const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());
 
