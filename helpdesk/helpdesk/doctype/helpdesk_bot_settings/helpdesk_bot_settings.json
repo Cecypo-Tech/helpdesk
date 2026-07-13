@@ -16,6 +16,8 @@
   "col_break_behavior",
   "min_message_words",
   "kb_search_limit",
+  "kb_access_section",
+  "allowed_categories",
   "escalation_section",
   "clarification_message_enabled",
   "clarification_message",
@@ -98,6 +100,18 @@
    "label": "KB Articles to Fetch"
   },
   {
+   "fieldname": "kb_access_section",
+   "fieldtype": "Section Break",
+   "label": "KB Access"
+  },
+  {
+   "description": "Leave empty to allow all published, non-internal articles. When set, the bot only uses articles in these categories.",
+   "fieldname": "allowed_categories",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Categories",
+   "options": "HD Bot Allowed Category"
+  },
+  {
    "fieldname": "escalation_section",
    "fieldtype": "Section Break",
    "label": "Escalation"
@@ -167,7 +181,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-06-01 00:00:00.000000",
+ "modified": "2026-07-14 01:40:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "Helpdesk Bot Settings",
