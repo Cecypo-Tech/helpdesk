@@ -249,8 +249,19 @@
                 >{{ avatarInitials(item.card.assigned_to) }}</span>
               </div>
 
-              <!-- Ticket ref -->
-              <div v-if="item.card.ticket" class="mt-1.5 text-xs text-ink-gray-4">#{{ item.card.ticket }}</div>
+              <!-- Ticket ref + customer -->
+              <div
+                v-if="item.card.ticket || item.card.customer"
+                class="mt-1.5 flex items-center justify-between gap-2 text-xs text-ink-gray-4"
+              >
+                <span v-if="item.card.ticket" class="shrink-0">#{{ item.card.ticket }}</span>
+                <span v-else />
+                <span
+                  v-if="item.card.customer"
+                  class="truncate"
+                  :title="item.card.customer"
+                >{{ truncate(item.card.customer, 12) }}</span>
+              </div>
             </div>
           </template>
 
@@ -406,7 +417,7 @@ const activeColumns = computed(() =>
 // ── Task list ────────────────────────────────────────────────
 const tasks = createListResource({
   doctype: "HD Task",
-  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket", "_user_tags", "modified"],
+  fields: ["name", "title", "status", "priority", "due_date", "assigned_to", "ticket", "customer", "_user_tags", "modified"],
   filters: [],
   orderBy: "modified desc",
   pageLength: 999,
@@ -692,5 +703,9 @@ function tagColor(tag: string): string {
 function cardTags(card: any): string[] {
   if (!card._user_tags) return [];
   return card._user_tags.split(",").map((t: string) => t.trim()).filter(Boolean);
+}
+
+function truncate(text: string, maxLen: number): string {
+  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
 }
 </script>
