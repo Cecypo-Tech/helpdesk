@@ -12,6 +12,12 @@ except Exception:
 # conversation history to the LLM to prevent the model from mimicking the suffix.
 _AGENT_SUFFIX_RE = re.compile(r"\n\^[A-Z]{1,5}\s*$")
 
+# How many messages from the customer's PREVIOUS conversations to include as
+# context (repeat-issue detection). Tune here.
+_PRIOR_CONTEXT_MESSAGES = 15
+_PRIOR_CONTEXT_MSG_CHARS = 200
+_PRIOR_CONTEXT_TOTAL_CHARS = 2500
+
 
 def _strip_agent_suffix(text: str) -> str:
 	return _AGENT_SUFFIX_RE.sub("", text)
@@ -29,37 +35,40 @@ def _is_short_message(text: str | None, min_words: int) -> bool:
 	return len((text or "").split()) < min_words
 
 
-_SEARCH_STOPWORDS = {
-	"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of",
-	"is", "are", "was", "were", "be", "been", "have", "has", "had", "do", "does",
-	"i", "me", "you", "we", "it", "its", "my", "your",
-	"give", "tell", "show", "get", "find", "need", "want", "know", "help",
-	"can", "please", "some", "more", "about", "with", "what", "how", "where",
-	"when", "who", "which", "that", "this", "these", "those", "information",
-	"details", "info",
-}
+def _get_allowed_categories() -> list[str]:
+	"""Return HD Article Category docnames the bot may use. Empty list = no restriction."""
+	try:
+		settings = _bot_settings()
+		return [row.category for row in (settings.allowed_categories or []) if row.category]
+	except Exception:
+		return []
 
 
-def _search_kb(query: str, limit: int) -> list[dict]:
-	"""Full-text search against published, non-internal HD Article records.
+def _search_kb(query: str, limit: int, allowed_categories: list[str] | None = None) -> list[dict]:
+	"""Semantic search against published, non-internal HD Article records.
+
+	Falls back to a single whole-query LIKE when no embeddings are available
+	(index not built yet, or the embedding API failed).
 
 	Returns a list of dicts with keys: name, title, content, outline_doc_id.
 	"""
 	if not query:
 		return []
 
-	terms = {query}
-	for word in query.split():
-		clean = word.strip(".,!?;:\"'").lower()
-		if len(clean) >= 3 and clean not in _SEARCH_STOPWORDS:
-			terms.add(clean)
+	try:
+		from helpdesk.integrations.embeddings import search_articles
 
-	conditions = " OR ".join(
-		f"(title LIKE %(t{i})s OR content LIKE %(t{i})s)"
-		for i in range(len(terms))
-	)
-	params = {f"t{i}": f"%{term}%" for i, term in enumerate(sorted(terms))}
-	params["limit"] = limit
+		results = search_articles(query, top_k=limit, allowed_categories=allowed_categories)
+		if results:
+			return results
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: semantic KB search failed")
+
+	category_condition = ""
+	params = {"q": f"%{query}%", "limit": limit}
+	if allowed_categories:
+		category_condition = "AND category IN %(categories)s"
+		params["categories"] = tuple(allowed_categories)
 
 	return frappe.db.sql(
 		f"""
@@ -67,7 +76,8 @@ def _search_kb(query: str, limit: int) -> list[dict]:
 		FROM `tabHD Article`
 		WHERE status = 'Published'
 		  AND (internal = 0 OR internal IS NULL)
-		  AND ({conditions})
+		  {category_condition}
+		  AND (title LIKE %(q)s OR content LIKE %(q)s)
 		LIMIT %(limit)s
 		""",
 		params,
@@ -75,18 +85,42 @@ def _search_kb(query: str, limit: int) -> list[dict]:
 	)
 
 
+def _filter_outline_by_category(results: list[dict], allowed_categories: list[str]) -> list[dict]:
+	"""Keep only Outline results whose synced HD Article is in an allowed category.
+
+	Conservative by design: results that can't be mapped to a local article are
+	dropped — when a restriction is configured, unknown documents must never
+	reach the LLM.
+	"""
+	doc_ids = [r["outline_doc_id"] for r in results if r.get("outline_doc_id")]
+	if not doc_ids:
+		return []
+
+	rows = frappe.db.get_all(
+		"HD Article",
+		filters={"outline_doc_id": ["in", doc_ids], "category": ["in", allowed_categories]},
+		fields=["outline_doc_id"],
+	)
+	allowed_ids = {r.outline_doc_id for r in rows}
+	return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+
+
 def _combined_kb_search(query: str, limit: int) -> list[dict]:
 	"""Query both local HD Articles and Outline directly, merge and deduplicate.
 
 	Outline results take precedence for documents that exist in both (fresher content).
+	Both paths respect the Allowed Categories list in Helpdesk Bot Settings.
 	"""
-	hd_articles = _search_kb(query, limit)
+	allowed_categories = _get_allowed_categories()
+	hd_articles = _search_kb(query, limit, allowed_categories=allowed_categories)
 
 	outline_results: list[dict] = []
 	try:
 		from helpdesk.integrations.outline import search as _outline_search
 
 		outline_results = _outline_search(query, limit=limit, exclude_internal=True)
+		if allowed_categories:
+			outline_results = _filter_outline_by_category(outline_results, allowed_categories)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: Outline search failed")
 
@@ -234,6 +268,101 @@ def _get_conversation_history(
 		}
 		for r in rows
 	]
+
+
+def _format_prior_context(rows: list[tuple[str, str]]) -> str:
+	"""rows: (speaker, text) oldest first → compact block capped for prompt budget."""
+	lines = []
+	total = 0
+	for speaker, text in rows:
+		text = _strip_agent_suffix(text or "").strip()
+		if not text:
+			continue
+		line = f"{speaker}: {text[:_PRIOR_CONTEXT_MSG_CHARS]}"
+		total += len(line)
+		if total > _PRIOR_CONTEXT_TOTAL_CHARS:
+			break
+		lines.append(line)
+	return "\n".join(lines)
+
+
+def _get_prior_customer_context(
+	channel: str,
+	jid: str | None,
+	line_name: str | None,
+	ticket_name: str | None,
+) -> str:
+	"""Return a compact transcript of the customer's PREVIOUS conversations.
+
+	Excludes the current ticket's thread (already provided as conversation
+	history). Best-effort: returns "" on any failure — this must never break
+	message processing (custom-field queries can raise OperationalError on
+	unmigrated sites).
+	"""
+	try:
+		rows: list[tuple[str, str]] = []
+
+		if channel == "wa_line" and jid:
+			filters: dict = {"jid": jid}
+			if line_name:
+				filters["line"] = line_name
+			messages = frappe.db.get_all(
+				"WA Message",
+				filters=filters,
+				fields=["direction", "message", "reference_name", "creation"],
+				order_by="creation desc",
+				limit=_PRIOR_CONTEXT_MESSAGES + 25,
+			)
+			prior = [
+				m for m in messages
+				if not (ticket_name and m.reference_name == ticket_name)
+			][:_PRIOR_CONTEXT_MESSAGES]
+			rows = [
+				("Customer" if m.direction == "Incoming" else "Agent", m.message)
+				for m in reversed(prior)
+			]
+
+		elif channel == "waba" and ticket_name:
+			contact, raised_by = frappe.db.get_value(
+				"HD Ticket", ticket_name, ["contact", "raised_by"]
+			)
+			ticket_filters = {"name": ["!=", ticket_name]}
+			if contact:
+				ticket_filters["contact"] = contact
+			elif raised_by:
+				ticket_filters["raised_by"] = raised_by
+			else:
+				return ""
+			prior_tickets = frappe.db.get_all(
+				"HD Ticket",
+				filters=ticket_filters,
+				pluck="name",
+				order_by="creation desc",
+				limit=3,
+			)
+			if not prior_tickets:
+				return ""
+			messages = frappe.db.get_all(
+				"WhatsApp Message",
+				filters={
+					"reference_doctype": "HD Ticket",
+					"reference_name": ["in", prior_tickets],
+				},
+				fields=["type", "message", "creation"],
+				order_by="creation desc",
+				limit=_PRIOR_CONTEXT_MESSAGES,
+			)
+			rows = [
+				("Customer" if m.type == "Incoming" else "Agent", m.message)
+				for m in reversed(messages)
+			]
+
+		if not rows:
+			return ""
+		return _format_prior_context(rows)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: prior customer context failed")
+		return ""
 
 
 # ── Image download ─────────────────────────────────────────────────────────────
@@ -489,6 +618,13 @@ def process_message(msg_name: str, channel: str) -> None:
 	if resolved_context:
 		system_content += f"\n\nResolved past tickets (use as reference, do not quote directly):\n{resolved_context}"
 
+	prior_context = _get_prior_customer_context(channel, jid, line_name, ticket_name)
+	if prior_context:
+		system_content += (
+			"\n\nEarlier conversations with this customer (may be a repeat issue — "
+			f"use for context, do not quote verbatim):\n{prior_context}"
+		)
+
 	history = _get_conversation_history(ticket_name, channel, jid=jid)
 	prior_turns = history[:-1]
 	if prior_turns:
@@ -578,6 +714,19 @@ def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
 		system += f"\n\nRelevant knowledge base:\n{kb_context}"
 	if resolved_context:
 		system += f"\n\nHow similar past issues were resolved:\n{resolved_context}"
+
+	line_name = None
+	if channel == "wa_line":
+		try:
+			line_name = frappe.db.get_value("HD Ticket", ticket, "baileys_line")
+		except Exception:
+			pass
+	prior_context = _get_prior_customer_context(channel, jid, line_name, ticket)
+	if prior_context:
+		system += (
+			"\n\nEarlier conversations with this customer (may be a repeat issue — "
+			f"use for context, do not quote verbatim):\n{prior_context}"
+		)
 
 	from helpdesk.integrations.llm import chat as llm_chat
 

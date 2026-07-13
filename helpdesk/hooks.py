@@ -46,6 +46,7 @@ scheduler_events = {
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",
         "helpdesk.integrations.wa.enqueue_wa_sync",
         "helpdesk.integrations.embeddings.embed_resolved_tickets",
+        "helpdesk.integrations.embeddings.embed_articles",
         "helpdesk.integrations.kb_autofill.promote_gaps_to_draft_articles",
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_manager_task_digest",
     ],
@@ -84,6 +85,9 @@ doc_events = {
     },
     "WA Message": {
         "after_insert": "helpdesk.integrations.bot.handle_wa_message",
+    },
+    "HD Article": {
+        "on_update": "helpdesk.integrations.embeddings.on_article_update",
     },
     "Notification Log": {
         "before_insert": "helpdesk.extends.notification_log.before_insert",
