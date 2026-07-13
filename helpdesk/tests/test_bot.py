@@ -2,6 +2,19 @@ import unittest
 
 import frappe
 
+from helpdesk.tests.settings_guard import restore_bot_settings, snapshot_bot_settings
+
+_settings_snapshot = None
+
+
+def setUpModule():
+	global _settings_snapshot
+	_settings_snapshot = snapshot_bot_settings()
+
+
+def tearDownModule():
+	restore_bot_settings(_settings_snapshot)
+
 
 class TestWordFilter(unittest.TestCase):
 	def test_empty_string_is_short(self):
@@ -52,12 +65,16 @@ class TestKBSearch(unittest.TestCase):
 			return
 		frappe.db.delete("HD Article", {"title": "Bot Test Reset Password"})
 
-	def test_search_returns_matching_article(self):
+	def test_search_falls_back_to_like_when_no_embeddings(self):
+		# Semantic path returns nothing (e.g. index not built) → whole-query LIKE fallback.
 		if not frappe.db.table_exists("HD Article"):
 			self.skipTest("HD Article table not present")
+		from unittest.mock import patch
+
 		from helpdesk.integrations.bot import _search_kb
 
-		results = _search_kb("reset password", limit=3)
+		with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]):
+			results = _search_kb("Reset Password", limit=3)
 		self.assertIsInstance(results, list)
 		titles = [r["title"] for r in results]
 		self.assertIn("Bot Test Reset Password", titles)
@@ -65,10 +82,67 @@ class TestKBSearch(unittest.TestCase):
 	def test_search_returns_empty_on_no_match(self):
 		if not frappe.db.table_exists("HD Article"):
 			self.skipTest("HD Article table not present")
+		from unittest.mock import patch
+
 		from helpdesk.integrations.bot import _search_kb
 
-		results = _search_kb("xyzzy_nonexistent_query_12345", limit=3)
+		with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]):
+			results = _search_kb("xyzzy_nonexistent_query_12345", limit=3)
 		self.assertEqual(results, [])
+
+	def test_search_prefers_semantic_results(self):
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import _search_kb
+
+		semantic = [{"name": "a1", "title": "Semantic Hit", "content": "x", "outline_doc_id": None}]
+		with patch("helpdesk.integrations.embeddings.search_articles", return_value=semantic):
+			results = _search_kb("anything at all", limit=3)
+		self.assertEqual(results, semantic)
+
+	def test_fallback_respects_category_allowlist(self):
+		if not frappe.db.table_exists("HD Article"):
+			self.skipTest("HD Article table not present")
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import _search_kb
+
+		category = frappe.db.get_value("HD Article", {"title": "Bot Test Reset Password"}, "category")
+		other = frappe.get_doc(
+			{"doctype": "HD Article Category", "category_name": "Bot Test Other Category"}
+		).insert(ignore_permissions=True)
+		try:
+			with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]):
+				allowed = _search_kb("Reset Password", limit=3, allowed_categories=[category] if category else None)
+				blocked = _search_kb("Reset Password", limit=3, allowed_categories=[other.name])
+			if category:
+				self.assertIn("Bot Test Reset Password", [r["title"] for r in allowed])
+			self.assertNotIn("Bot Test Reset Password", [r["title"] for r in blocked])
+		finally:
+			frappe.delete_doc("HD Article Category", other.name, ignore_permissions=True, force=True)
+
+
+class TestPriorCustomerContext(unittest.TestCase):
+	def test_returns_empty_for_ticket_without_history(self):
+		from helpdesk.integrations.bot import _get_prior_customer_context
+
+		ticket = frappe.get_doc(
+			{
+				"doctype": "HD Ticket",
+				"subject": "Prior context test ticket",
+				"raised_by": "prior-context-test@example.com",
+			}
+		).insert(ignore_permissions=True)
+		try:
+			self.assertEqual(_get_prior_customer_context("waba", None, None, ticket.name), "")
+		finally:
+			frappe.delete_doc("HD Ticket", ticket.name, ignore_permissions=True, force=True)
+
+	def test_returns_empty_on_bad_args(self):
+		from helpdesk.integrations.bot import _get_prior_customer_context
+
+		self.assertEqual(_get_prior_customer_context("wa_line", None, None, None), "")
+		self.assertEqual(_get_prior_customer_context("waba", None, None, None), "")
 
 
 class TestGapTracking(unittest.TestCase):
@@ -143,10 +217,10 @@ class TestEscalation(unittest.TestCase):
 		settings.escalation_message_enabled = 0
 		settings.save(ignore_permissions=True)
 
-		from helpdesk.integrations.bot import _escalate
+		from helpdesk.integrations.bot import _BotState, _escalate
 
 		with patch("helpdesk.integrations.bot.send_wa_reply"):
-			_escalate(self.ticket.name)
+			_escalate(_BotState(self.ticket.name, None, None))
 
 		val = frappe.db.get_value("HD Ticket", self.ticket.name, "bot_escalated")
 		self.assertEqual(val, 1)
@@ -162,10 +236,10 @@ class TestEscalation(unittest.TestCase):
 		# Reset bot_escalated
 		frappe.db.set_value("HD Ticket", self.ticket.name, "bot_escalated", 0)
 
-		from helpdesk.integrations.bot import _escalate
+		from helpdesk.integrations.bot import _BotState, _escalate
 
 		with patch("helpdesk.integrations.bot.send_wa_reply") as mock_send:
-			_escalate(self.ticket.name)
+			_escalate(_BotState(self.ticket.name, None, None))
 			mock_send.assert_called_once_with(
 				ticket=self.ticket.name, message="Test escalation message"
 			)

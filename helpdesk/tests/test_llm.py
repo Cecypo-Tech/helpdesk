@@ -4,6 +4,19 @@ from unittest.mock import patch
 
 import frappe
 
+from helpdesk.tests.settings_guard import restore_bot_settings, snapshot_bot_settings
+
+_settings_snapshot = None
+
+
+def setUpModule():
+	global _settings_snapshot
+	_settings_snapshot = snapshot_bot_settings()
+
+
+def tearDownModule():
+	restore_bot_settings(_settings_snapshot)
+
 
 class TestLLMRouting(unittest.TestCase):
 	@classmethod
@@ -16,7 +29,7 @@ class TestLLMRouting(unittest.TestCase):
 		settings.save(ignore_permissions=True)
 
 	def test_routes_to_gemini(self):
-		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "Gemini Flash 2.0")
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "gemini-3.1-flash-lite")
 		frappe.clear_cache()
 		from helpdesk.integrations import llm
 		importlib.reload(llm)
@@ -27,7 +40,7 @@ class TestLLMRouting(unittest.TestCase):
 			self.assertEqual(result, "gemini reply")
 
 	def test_routes_to_haiku(self):
-		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "Claude Haiku 4.5")
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "claude-haiku-4-5")
 		frappe.clear_cache()
 		from helpdesk.integrations import llm
 		importlib.reload(llm)
@@ -38,7 +51,7 @@ class TestLLMRouting(unittest.TestCase):
 			self.assertEqual(result, "haiku reply")
 
 	def test_images_passed_to_provider(self):
-		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "Gemini Flash 2.0")
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_provider", "gemini-3.1-flash-lite")
 		frappe.clear_cache()
 		from helpdesk.integrations import llm
 		importlib.reload(llm)
