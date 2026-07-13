@@ -5,6 +5,7 @@ from frappe.utils import now_datetime
 ALLOWED_FIELDS = {
 	"title", "status", "priority", "assigned_to",
 	"due_date", "due_time", "ticket", "team", "description", "_user_tags",
+	"customer",
 }
 
 

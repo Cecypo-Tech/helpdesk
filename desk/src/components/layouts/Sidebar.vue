@@ -766,6 +766,7 @@ function linkBadge(link: any): number | null {
   const routeName = typeof to === "string" ? to : to?.name;
   if (routeName === "TicketsAgent") return openCounts.data?.tickets || null;
   if (routeName === "TasksAgent") return openCounts.data?.tasks || null;
+  if (routeName === "WhatsAppBusinessChat") return openCounts.data?.whatsapp || null;
   return null;
 }
 

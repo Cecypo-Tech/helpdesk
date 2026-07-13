@@ -138,7 +138,7 @@
             doctype="HD Ticket"
             :placeholder="__('—')"
             class="form-control"
-            @change="(val) => { form.ticket = val; saveField('ticket', val || null); }"
+            @change="(val) => { form.ticket = val; saveField('ticket', val || null); syncCustomerFromTicket(val); }"
           />
         </div>
         <div class="flex flex-col gap-1">
@@ -321,6 +321,7 @@ const form = reactive({
   description: "",
   user_tags: "",   // mirrors _user_tags (underscore-prefixed fields can't be reactive keys)
   subtasks: [] as Subtask[],
+  customer: "",
 });
 
 const task = createDocumentResource({
@@ -355,6 +356,7 @@ watch(
       status: s.status ?? "Backlog",
       due_date: s.due_date ?? "",
     }));
+    form.customer = doc.customer ?? "";
     nextTick(() => { isFormLoaded.value = true; });
     loadLinkedChat(doc.ticket ?? "");
   },
@@ -379,6 +381,28 @@ function flashSaved() {
   savedIndicator.value = true;
   if (savedTimer) clearTimeout(savedTimer);
   savedTimer = setTimeout(() => { savedIndicator.value = false; }, 1500);
+}
+
+// Customer isn't a user-facing field here — it's derived from the linked
+// ticket so company-wide task matching (e.g. WhatsApp Business task counts)
+// works even when the ticket is (re)linked from this panel.
+async function syncCustomerFromTicket(ticketId: string) {
+  if (!ticketId) {
+    form.customer = "";
+    saveField("customer", null);
+    return;
+  }
+  try {
+    const result = await call("frappe.client.get_value", {
+      doctype: "HD Ticket",
+      filters: ticketId,
+      fieldname: "customer",
+    });
+    form.customer = result?.customer || "";
+    saveField("customer", form.customer || null);
+  } catch {
+    // non-critical
+  }
 }
 
 async function saveField(fieldname: string, value: any) {

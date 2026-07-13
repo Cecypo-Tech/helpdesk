@@ -124,7 +124,7 @@ import { LayoutHeader } from "@/components";
 import { __ } from "@/translation";
 import Link from "@/components/frappe-ui/Link.vue";
 import { Breadcrumbs, Button, call, dayjs, FormControl, TextEditor, toast, usePageMeta } from "frappe-ui";
-import { reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 const router = useRouter();
@@ -150,7 +150,28 @@ const form = reactive({
   assigned_to: (window as any).frappe?.session?.user ?? "",
   due_date: dayjs().format("YYYY-MM-DD"),
   ticket: "",
+  customer: "",
   description: "",
+});
+
+// Customer isn't a user-facing field here — it's derived from the linked
+// ticket so company-wide task matching (e.g. WhatsApp Business task counts)
+// works regardless of which flow created the task.
+watch(() => form.ticket, async (ticketId) => {
+  if (!ticketId) {
+    form.customer = "";
+    return;
+  }
+  try {
+    const result = await call("frappe.client.get_value", {
+      doctype: "HD Ticket",
+      filters: ticketId,
+      fieldname: "customer",
+    });
+    form.customer = result?.customer || "";
+  } catch {
+    form.customer = "";
+  }
 });
 
 async function createTask() {
@@ -166,6 +187,7 @@ async function createTask() {
         assigned_to: form.assigned_to || null,
         due_date: form.due_date || null,
         ticket: form.ticket || null,
+        customer: form.customer || null,
         description: form.description || null,
       },
     });

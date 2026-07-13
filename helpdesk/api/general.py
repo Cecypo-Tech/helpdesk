@@ -4,7 +4,9 @@ from frappe.translate import get_all_translations
 
 @frappe.whitelist()
 def get_my_open_counts():
-	"""Return open ticket and task counts assigned to the current user."""
+	"""Return open ticket and task counts assigned to the current user,
+	plus the total open ticket count for the WhatsApp Business channel
+	(unlike tickets/tasks, that page is a shared inbox, not per-agent)."""
 	user = frappe.session.user
 
 	tickets = frappe.db.count(
@@ -23,7 +25,19 @@ def get_my_open_counts():
 		},
 	)
 
-	return {"tickets": tickets, "tasks": tasks}
+	whatsapp = 0
+	if frappe.db.exists("DocType", "WhatsApp Message"):
+		whatsapp = frappe.db.sql(
+			"""
+			SELECT COUNT(DISTINCT t.name)
+			FROM `tabHD Ticket` t
+			INNER JOIN `tabWhatsApp Message` wm
+				ON wm.reference_doctype = 'HD Ticket' AND wm.reference_name = t.name
+			WHERE t.status NOT IN ('Resolved', 'Closed')
+			"""
+		)[0][0]
+
+	return {"tickets": tickets, "tasks": tasks, "whatsapp": whatsapp}
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])

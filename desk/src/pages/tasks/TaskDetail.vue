@@ -333,6 +333,7 @@ const form = reactive({
   description: "",
   user_tags: "",
   subtasks: [] as Subtask[],
+  customer: "",
 });
 
 const task = createDocumentResource({
@@ -361,6 +362,7 @@ watch(
       status: s.status ?? "Backlog",
       due_date: s.due_date ?? "",
     }));
+    form.customer = doc.customer ?? "";
     isDirty.value = false;
     nextTick(() => {
       isFormLoaded.value = true;
@@ -368,6 +370,29 @@ watch(
   },
   { immediate: true }
 );
+
+// Customer isn't a user-facing field here — it's derived from the linked
+// ticket so company-wide task matching (e.g. WhatsApp Business task counts)
+// works even when a task is (re)linked to a ticket from this page, not just
+// via the ticket sidebar's quick-add flow. Guarded by isFormLoaded so it
+// doesn't run (and mark the form dirty) during initial hydration above.
+watch(() => form.ticket, async (ticketId) => {
+  if (!isFormLoaded.value) return;
+  if (!ticketId) {
+    form.customer = "";
+    return;
+  }
+  try {
+    const result = await call("frappe.client.get_value", {
+      doctype: "HD Ticket",
+      filters: ticketId,
+      fieldname: "customer",
+    });
+    form.customer = result?.customer || "";
+  } catch {
+    form.customer = "";
+  }
+});
 
 // Re-fetch when navigating between tasks without unmounting.
 // immediate:true also acts as a safety-net for the initial load in case
@@ -432,6 +457,7 @@ async function saveTask() {
         team: form.team || null,
         description: form.description || null,
         _user_tags: form.user_tags || null,
+        customer: form.customer || null,
       }),
       subtasks: JSON.stringify(
         form.subtasks.map((s) => ({
