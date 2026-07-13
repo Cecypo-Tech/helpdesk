@@ -72,17 +72,30 @@
         </div>
       </div>
 
-      <!-- Ticket (optional) -->
-      <div class="flex flex-col gap-1.5">
-        <label class="block text-sm font-medium text-ink-gray-7">
-          {{ __("Linked Ticket") }}
-        </label>
-        <Link
-          v-model="form.ticket"
-          doctype="HD Ticket"
-          :placeholder="__('Link to a ticket (optional)')"
-          class="form-control"
-        />
+      <!-- Ticket + Customer row -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="block text-sm font-medium text-ink-gray-7">
+            {{ __("Linked Ticket") }}
+          </label>
+          <Link
+            v-model="form.ticket"
+            doctype="HD Ticket"
+            :placeholder="__('Link to a ticket (optional)')"
+            class="form-control"
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="block text-sm font-medium text-ink-gray-7">
+            {{ __("Customer") }}
+          </label>
+          <Link
+            v-model="form.customer"
+            doctype="HD Customer"
+            :placeholder="__('Select a customer (optional)')"
+            class="form-control"
+          />
+        </div>
       </div>
 
       <!-- Description -->

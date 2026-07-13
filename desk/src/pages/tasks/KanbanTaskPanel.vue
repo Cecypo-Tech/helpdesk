@@ -153,6 +153,18 @@
         </div>
       </div>
 
+      <!-- Customer -->
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Customer') }}</label>
+        <Link
+          :value="form.customer"
+          doctype="HD Customer"
+          :placeholder="__('—')"
+          class="form-control"
+          @change="(val) => { form.customer = val; saveField('customer', val || null); }"
+        />
+      </div>
+
       <!-- Tags -->
       <div class="flex flex-col gap-1">
         <label class="text-xs font-semibold text-ink-gray-5 uppercase tracking-wide">{{ __('Tags') }}</label>

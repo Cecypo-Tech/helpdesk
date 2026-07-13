@@ -141,6 +141,19 @@
         </div>
       </div>
 
+      <!-- Customer -->
+      <div class="flex flex-col gap-1.5">
+        <label class="block text-sm font-medium text-ink-gray-7">
+          {{ __("Customer") }}
+        </label>
+        <Link
+          v-model="form.customer"
+          doctype="HD Customer"
+          :placeholder="__('Select a customer')"
+          class="form-control"
+        />
+      </div>
+
       <!-- Tags -->
       <div class="flex flex-col gap-1.5">
         <label class="block text-sm font-medium text-ink-gray-7">
