@@ -108,6 +108,7 @@
           :editable="true"
           editor-class="min-h-[8rem] prose-f p-2 rounded border border-outline-gray-2 focus-within:border-outline-gray-4"
           :placeholder="__('Add a description...')"
+          @change="(val) => (form.description = val)"
         />
       </div>
 
