@@ -17,6 +17,7 @@
   "content_type",
   "col_break_media",
   "media_url",
+  "thumbnail_url",
   "message_id",
   "reply_to_message_id",
   "raw_message",
@@ -42,7 +43,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "JID",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "col_break_jid",
@@ -99,6 +101,12 @@
    "fieldname": "media_url",
    "fieldtype": "Small Text",
    "label": "Media URL"
+  },
+  {
+   "description": "Downscaled preview for images, and the poster frame for videos. Empty for media that predates the thumbnail backfill or whose thumbnail could not be generated — consumers fall back to media_url.",
+   "fieldname": "thumbnail_url",
+   "fieldtype": "Small Text",
+   "label": "Thumbnail URL"
   },
   {
    "fieldname": "message_id",

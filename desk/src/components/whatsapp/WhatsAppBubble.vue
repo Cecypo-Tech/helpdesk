@@ -133,7 +133,12 @@
                 Photo
               </div>
             </div>
-            <img :src="replyToMessage.attach" class="h-14 w-14 shrink-0 object-cover" />
+            <img
+              :src="replyToMessage.thumbnail_url || replyToMessage.attach"
+              loading="lazy"
+              decoding="async"
+              class="h-14 w-14 shrink-0 object-cover"
+            />
           </div>
           <!-- Default: text preview -->
           <div v-else class="px-2 py-1">
@@ -156,10 +161,12 @@
           </div>
           <img
             v-else
-            :src="mediaSrc"
+            :src="thumbSrc"
+            loading="lazy"
+            decoding="async"
             class="max-h-60 max-w-full cursor-pointer rounded"
             @click="openLightbox(mediaSrc, 'image')"
-            @error="handleMediaError"
+            @error="handleImageError"
           />
         </div>
 
@@ -220,7 +227,9 @@
           <video
             v-else
             :src="mediaSrc"
+            :poster="thumbnailUrl || undefined"
             controls
+            preload="none"
             class="max-h-60 max-w-full cursor-pointer rounded"
             @click.stop="openLightbox(mediaSrc, 'video')"
             @error="handleMediaError"
@@ -721,6 +730,25 @@ watch(() => props.message.attach, (v) => {
     mediaBroken.value = false;  // reset if media_url was updated externally
   }
 });
+
+// Downscaled preview generated on ingest. Absent for media that predates the
+// thumbnail backfill, and for anything whose thumb failed to generate — both are
+// normal, so every consumer falls back to the full-size original.
+const thumbnailUrl = computed<string>(() => props.message.thumbnail_url || "");
+const thumbFailed = ref(false);
+const thumbSrc = computed<string>(() =>
+  !thumbFailed.value && thumbnailUrl.value ? thumbnailUrl.value : mediaSrc.value
+);
+
+// A broken thumbnail means the preview is missing, not that the original is gone,
+// so retry with the original before falling through to the media-refetch path.
+function handleImageError() {
+  if (!thumbFailed.value && thumbnailUrl.value) {
+    thumbFailed.value = true;
+    return;
+  }
+  handleMediaError();
+}
 
 const mediaBroken = ref(false);
 const mediaRefetching = ref(false);

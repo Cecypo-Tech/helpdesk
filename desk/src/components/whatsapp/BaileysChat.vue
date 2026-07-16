@@ -249,7 +249,7 @@
     </div>
 
     <div ref="messagesContainer" class="flex-1 overflow-y-auto bg-[#e5ddd5] dark:bg-surface-gray-2 px-5 py-4">
-      <div v-if="messages.loading && !messages.data" class="flex justify-center py-10">
+      <div v-if="messages.loading && !loadedMessages.length" class="flex justify-center py-10">
         <LoadingIndicator :scale="6" class="text-ink-gray-5" />
       </div>
 
@@ -308,7 +308,7 @@
 </template>
 
 <script setup lang="ts">
-import { createResource, LoadingIndicator, toast } from "frappe-ui";
+import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -475,14 +475,44 @@ function clearCustomer() {
 }
 
 const PAGE_SIZE = 40;
-const visibleCount = ref(PAGE_SIZE);
 const loadingMore = ref(false);
 
+// Pages accumulate here rather than living in `messages.data`, because a chat's
+// history is fetched a page at a time and each refresh only re-fetches the
+// newest page. Kept sorted oldest → newest.
+const loadedMessages = ref<Record<string, any>[]>([]);
+// Messages quoted by a reply whose target sits outside the loaded pages. Needed
+// to render the quoted preview, but never rendered as bubbles themselves.
+const replyTargets = ref<Record<string, any>[]>([]);
+const hasMore = ref(false);
 
 const messages = createResource({
   url: "helpdesk.integrations.wa.get_whatsapp_messages",
   auto: false,
 });
+
+// Cross-line duplicates share a message_id, so key on that where present.
+function messageKey(m: Record<string, any>) {
+  return m.message_id || m.name;
+}
+
+// Refreshes re-send the same targets, so dedupe rather than growing forever.
+function mergeReplyTargets(existing: Record<string, any>[], incoming: Record<string, any>[]) {
+  const byId = new Map<string, Record<string, any>>();
+  for (const m of [...existing, ...incoming]) byId.set(messageKey(m), m);
+  return [...byId.values()];
+}
+
+function mergeMessages(incoming: Record<string, any>[]) {
+  const byKey = new Map<string, Record<string, any>>();
+  for (const m of loadedMessages.value) byKey.set(messageKey(m), m);
+  // Re-fetched rows win so refreshes pick up status changes and edits.
+  for (const m of incoming) byKey.set(messageKey(m), m);
+  loadedMessages.value = [...byKey.values()].sort((a, b) => {
+    if (a.creation === b.creation) return a.name < b.name ? -1 : 1;
+    return a.creation < b.creation ? -1 : 1;
+  });
+}
 
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
@@ -517,19 +547,36 @@ const teamsResource = createResource({
   auto: true,
 });
 
-function loadMore() {
-  if (loadingMore.value || !hasMore.value) return;
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value || !props.jid) return;
   loadingMore.value = true;
   const container = messagesContainer.value;
   const prevScrollHeight = container?.scrollHeight ?? 0;
-  visibleCount.value += PAGE_SIZE;
-  nextTick(() => {
-    loadingMore.value = false;
+  // Page back from the oldest real message. Reactions are excluded because the
+  // server pages over real messages only, so a reaction is never the boundary.
+  const oldest = loadedMessages.value.find((m) => m.content_type !== "reaction");
+  try {
+    const data = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
+      jid: props.jid,
+      limit: PAGE_SIZE,
+      before: oldest?.creation,
+      before_name: oldest?.name,
+    });
+    mergeMessages(data?.messages || []);
+    replyTargets.value = mergeReplyTargets(replyTargets.value, data?.reply_targets || []);
+    hasMore.value = !!data?.has_more;
+    await nextTick();
     if (container) {
       // Keep scroll position so user stays at where they were
       container.scrollTop = container.scrollHeight - prevScrollHeight;
     }
-  });
+  } catch {
+    toast.error("Could not load older messages");
+  } finally {
+    // Released only after the scroll is restored — the messageList watcher skips
+    // its jump-to-bottom while this is set.
+    loadingMore.value = false;
+  }
 }
 
 function openEdit() {
@@ -555,12 +602,23 @@ function saveContact() {
   });
 }
 
-function loadMessages() {
-  if (props.jid) {
-    messages.submit({ jid: props.jid });
-    markReadResource.submit({ jid: props.jid });
-    localStorage.setItem(`baileys_last_read_${props.jid}`, new Date().toISOString());
-  }
+// `fresh` marks a conversation switch (as opposed to a refresh triggered by an
+// incoming/sent message). Only a fresh load may reset `hasMore`: a refresh
+// re-fetches the newest page, whose has_more says nothing about how far back the
+// user has already paged.
+async function loadMessages({ fresh = false } = {}) {
+  if (!props.jid) return;
+  const jid = props.jid;
+  const data = await messages.submit({ jid, limit: PAGE_SIZE });
+  // Ignore a response that landed after the user moved to another conversation.
+  if (jid !== props.jid || !data) return;
+  mergeMessages(data.messages || []);
+  replyTargets.value = fresh
+    ? data.reply_targets || []
+    : mergeReplyTargets(replyTargets.value, data.reply_targets || []);
+  if (fresh) hasMore.value = !!data.has_more;
+  markReadResource.submit({ jid });
+  localStorage.setItem(`baileys_last_read_${jid}`, new Date().toISOString());
 }
 
 watch(
@@ -568,28 +626,30 @@ watch(
   (newJid) => {
     if (newJid) {
       replyingTo.value = null;
-      visibleCount.value = PAGE_SIZE;
-      loadMessages();
+      // Drop the previous conversation before fetching. createResource keeps
+      // `.data` until the new request resolves, so without this the old chat
+      // stays rendered (and the loading spinner can't show) until it lands.
+      messages.reset();
+      loadedMessages.value = [];
+      replyTargets.value = [];
+      hasMore.value = false;
+      loadMessages({ fresh: true });
     }
   },
   { immediate: true }
 );
 
-const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
 
-const allNonReactions = computed(() =>
-  allMessages.value.filter((m) => m.content_type !== "reaction")
-);
-
-const hasMore = computed(() => visibleCount.value < allNonReactions.value.length);
-
+// The server pages history, so everything loaded is meant to be on screen.
 const messageList = computed(() =>
-  allNonReactions.value.slice(-visibleCount.value)
+  allMessages.value.filter((m) => m.content_type !== "reaction")
 );
 
 const messageByMsgId = computed(() => {
   const map: Record<string, Record<string, any>> = {};
-  for (const m of allMessages.value) {
+  // Reply targets first, so a loaded message always wins over its stub copy.
+  for (const m of [...replyTargets.value, ...allMessages.value]) {
     if (m.message_id) map[m.message_id] = m;
   }
   return map;
@@ -662,7 +722,9 @@ function onMessageSent() {
   scrollToBottom();
 }
 
-watch(messageList, () => { scrollToBottom(); });
+// Prepending older messages also grows messageList — don't yank the user to the
+// bottom when that happens; loadMore restores their scroll position itself.
+watch(messageList, () => { if (!loadingMore.value) scrollToBottom(); });
 
 function handleBaileysMessage(data: { jid?: string }) {
   if (data.jid && props.jid && data.jid === props.jid) {
@@ -689,8 +751,7 @@ defineExpose({
     scrollToBottom();
   },
   patchMessageStatus(messageId: string, status: string) {
-    const list: Record<string, any>[] = messages.data || [];
-    const msg = list.find((m) => m.message_id === messageId);
+    const msg = loadedMessages.value.find((m) => m.message_id === messageId);
     if (msg) msg.status = status;
   },
 });

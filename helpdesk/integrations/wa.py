@@ -5,7 +5,7 @@ from urllib.parse import quote as _urlquote
 import frappe
 import requests as _requests
 from frappe import _
-from frappe.utils import now_datetime, time_diff_in_hours
+from frappe.utils import cint, now_datetime, time_diff_in_hours
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -336,6 +336,138 @@ def _save_base64_media(b64: str, mime: str) -> str:
         return ""
 
 
+# 2× the 240px (max-h-60) the bubble renders at, so it stays sharp on retina.
+_THUMB_MAX_PX = 480
+_THUMB_QUALITY = 75
+
+
+def _buffer_to_bytes(value) -> bytes | None:
+	"""Decode a JS Buffer as it survives JSON.
+
+	The provider serialises binary as an object of numeric keys
+	({"0": 255, "1": 216, ...}); other shapes show up depending on the
+	serialiser, so handle the common ones and give up quietly otherwise.
+	"""
+	try:
+		if isinstance(value, str):
+			import base64 as _base64
+
+			return _base64.b64decode(value)
+		if isinstance(value, list):
+			return bytes(value)
+		if isinstance(value, dict):
+			if isinstance(value.get("data"), list):  # {"type": "Buffer", "data": [...]}
+				return bytes(value["data"])
+			indexed = {int(k): v for k, v in value.items() if str(k).isdigit()}
+			if not indexed:
+				return None
+			return bytes(indexed[i] for i in sorted(indexed))
+	except Exception:
+		return None
+	return None
+
+
+def _downscale_image(content: bytes, ext: str) -> bytes | None:
+	"""Shrink image bytes to a chat-sized preview. None when not worth storing.
+
+	Pillow is used directly rather than frappe.utils.image.optimize_image because
+	that helper msgprints on failure (wrong for a webhook) and clamps the target
+	to 80% of the source, which barely shrinks large photos.
+	"""
+	if ext == "gif":
+		return None  # a static JPEG of frame 1 would silently kill the animation
+	try:
+		import io
+
+		from PIL import Image
+
+		img = Image.open(io.BytesIO(content))
+		img.thumbnail((_THUMB_MAX_PX, _THUMB_MAX_PX), Image.Resampling.LANCZOS)
+		if img.mode not in ("RGB", "L"):
+			img = img.convert("RGB")
+		out = io.BytesIO()
+		img.save(out, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
+		small = out.getvalue()
+		# A second file only pays for itself if it's meaningfully smaller.
+		return small if len(small) < len(content) * 0.9 else None
+	except Exception:
+		frappe.logger().warning("WA thumbnail generation failed", exc_info=True)
+		return None
+
+
+def _save_thumbnail_file(content: bytes) -> str:
+	"""Store thumbnail bytes as a public File, returning its file_url ("" on failure)."""
+	try:
+		file_doc = frappe.get_doc({
+			"doctype": "File",
+			"file_name": f"wa_media_{frappe.generate_hash(length=8)}_thumb.jpg",
+			"content": content,
+			"is_private": 0,
+		})
+		file_doc.insert(ignore_permissions=True)
+		return file_doc.file_url
+	except Exception:
+		frappe.logger().warning("WA thumbnail save failed", exc_info=True)
+		return ""
+
+
+def _read_media_content(media_url: str) -> bytes | None:
+	"""Read back a stored media File by its file_url."""
+	try:
+		name = frappe.db.get_value("File", {"file_url": media_url}, "name")
+		if not name:
+			return None
+		return frappe.get_doc("File", name).get_content()
+	except Exception:
+		return None
+
+
+def thumbnail_for_media_url(media_url: str) -> str:
+	"""Build and store an image preview for an already-saved media File.
+
+	Shared by webhook ingest and the backfill job so both produce identical
+	thumbnails. Returns "" when the media isn't an image, can't be read, or
+	wouldn't meaningfully shrink — callers fall back to the original.
+	"""
+	if not media_url:
+		return ""
+	ext = media_url.rsplit(".", 1)[-1].lower() if "." in media_url else ""
+	if ext not in ("jpg", "jpeg", "png", "webp"):
+		return ""
+	content = _read_media_content(media_url)
+	if not content:
+		return ""
+	small = _downscale_image(content, ext)
+	if not small:
+		return ""
+	return _save_thumbnail_file(small)
+
+
+def _video_poster_from_raw(raw_msg: dict) -> str:
+	"""Save the provider's bundled preview frame as a video poster.
+
+	Only works while the webhook payload is still in memory: the preview is
+	stripped before raw_message is stored, so it can't be recovered later.
+	"""
+	node = raw_msg.get("videoMessage") or {}
+	content = _buffer_to_bytes(node.get("jpegThumbnail"))
+	if not content:
+		return ""
+	return _save_thumbnail_file(content)
+
+
+def _build_wa_thumbnail(raw_msg: dict, media_url: str, content_type: str) -> str:
+	"""Preview for a message: downscaled image, or the poster frame for a video."""
+	try:
+		if content_type == "image":
+			return thumbnail_for_media_url(media_url)
+		if content_type == "video":
+			return _video_poster_from_raw(raw_msg)
+	except Exception:
+		frappe.logger().warning("WA thumbnail build failed", exc_info=True)
+	return ""
+
+
 def _strip_media_thumbnails(msg: dict) -> dict:
     """Strip large preview-only binary fields (jpegThumbnail, scansSidecar) from a raw message
     dict before storing it, keeping all fields needed for media re-decryption."""
@@ -404,6 +536,13 @@ def refetch_media_for_message(message_name: str) -> str:
     new_url = _download_media_via_wa(line, full_data)
     if new_url:
         frappe.db.set_value("WA Message", message_name, "media_url", new_url)
+        # Media that only lands now still needs its preview. Video posters can't
+        # be recovered at this point (the frame was stripped from raw_message),
+        # so those fall back to no poster.
+        if doc.content_type == "image":
+            thumb = thumbnail_for_media_url(new_url)
+            if thumb:
+                frappe.db.set_value("WA Message", message_name, "thumbnail_url", thumb)
         frappe.db.commit()
         return new_url
     return ""
@@ -440,6 +579,10 @@ def _retry_media_download(message_name: str) -> None:
     new_url = _download_media_via_wa(line, full_data)
     if new_url:
         frappe.db.set_value("WA Message", message_name, "media_url", new_url)
+        if doc.content_type == "image":
+            thumb = thumbnail_for_media_url(new_url)
+            if thumb:
+                frappe.db.set_value("WA Message", message_name, "thumbnail_url", thumb)
         frappe.db.commit()
         _publish_wa_event(doc.jid, is_incoming=doc.direction == "Incoming", line=doc.line)
 
@@ -781,6 +924,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
 	# Extract media URL for media messages — pass full `data` so Evolution can decrypt
 	media_url = ""
+	thumbnail_url = ""
 	raw_message_json = ""
 	if content_type in ("image", "video", "audio", "document", "sticker"):
 		# Store stripped payload so Evolution can re-decrypt later if the download fails now
@@ -793,6 +937,9 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		except Exception as exc:
 			frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
 			media_url = ""
+		# Must happen here, not in a background job: the video poster comes from
+		# raw_msg, which is about to be stripped of its preview frames.
+		thumbnail_url = _build_wa_thumbnail(raw_msg, media_url, content_type)
 
 	# Detect and handle incoming edit before dedup check
 	new_text, is_edit, original_id = _extract_edit(raw_msg)
@@ -841,6 +988,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 				"message": text,
 				"content_type": content_type or "text",
 				"media_url": media_url,
+				"thumbnail_url": thumbnail_url,
 				"message_id": stored_msg_id,
 				"reply_to_message_id": reply_to_message_id,
 				"raw_message": raw_message_json,
@@ -879,6 +1027,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			"message": text,
 			"content_type": content_type or "text",
 			"media_url": media_url,
+			"thumbnail_url": thumbnail_url,
 			"message_id": stored_msg_id,
 			"reply_to_message_id": reply_to_message_id,
 			"raw_message": raw_message_json,
@@ -2199,6 +2348,55 @@ def get_whatsapp_conversations() -> list[dict]:
 	return result
 
 
+def _dedupe_wa_rows(rows: list) -> list:
+	"""Keep one copy per message_id.
+
+	When several WA Lines are members of the same group, the same message is
+	stored once per line. Keep the first copy in creation order. Rows without a
+	message_id (old records) are always kept.
+	"""
+	seen: set = set()
+	out: list = []
+	for m in rows:
+		mid = m.get("message_id")
+		if mid:
+			if mid in seen:
+				continue
+			seen.add(mid)
+		out.append(m)
+	return out
+
+
+def _finalize_wa_rows(rows: list) -> None:
+	"""Normalise WA Message rows for the client and attach edit history, in place."""
+	for m in rows:
+		if m.get("creation") and not isinstance(m["creation"], str):
+			m["creation"] = str(m["creation"])
+		m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
+		m["attach"] = m.get("media_url") or ""
+		m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
+		m["edit_history"] = []
+
+	edited_names = [m["name"] for m in rows if m.get("is_edited")]
+	if not edited_names:
+		return
+
+	history_rows = frappe.db.get_all(
+		"WA Message Edit History",
+		filters={"parent": ["in", edited_names]},
+		fields=["parent", "old_message", "edited_at", "edited_by"],
+		order_by="edited_at asc",
+	)
+	history_map: dict = {}
+	for h in history_rows:
+		if h.get("edited_at") and not isinstance(h["edited_at"], str):
+			h["edited_at"] = str(h["edited_at"])
+		history_map.setdefault(h["parent"], []).append(h)
+	for m in rows:
+		if m.get("is_edited"):
+			m["edit_history"] = history_map.get(m["name"], [])
+
+
 @frappe.whitelist()
 def get_whatsapp_messages(
 	jid: str = None,
@@ -2206,6 +2404,7 @@ def get_whatsapp_messages(
 	phone: str = None,
 	limit: int = 0,
 	before: str = None,
+	before_name: str = None,
 ) -> list[dict] | dict:
 	"""Return messages for a conversation.
 
@@ -2233,63 +2432,95 @@ def get_whatsapp_messages(
 		User = DocType("User")
 		BC = DocType("WA Contact")
 
-		rows = (
-			frappe.qb.from_(BM)
-			.left_join(User).on(User.name == BM.owner)
-			.left_join(BC).on(BC.jid == BM.sender_jid)
-			.select(
-				BM.name, BM.creation, BM.direction, BM.jid, BM.message,
-				BM.content_type, BM.media_url, BM.sender_jid, BM.sender_name,
-				BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
-				User.full_name.as_("sender_full_name"),
-				BC.phone.as_("sender_phone"),
-				BM.is_edited,
+		def _select_messages():
+			return (
+				frappe.qb.from_(BM)
+				.left_join(User).on(User.name == BM.owner)
+				.left_join(BC).on(BC.jid == BM.sender_jid)
+				.select(
+					BM.name, BM.creation, BM.direction, BM.jid, BM.message,
+					BM.content_type, BM.media_url, BM.thumbnail_url, BM.sender_jid, BM.sender_name,
+					BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
+					User.full_name.as_("sender_full_name"),
+					BC.phone.as_("sender_phone"),
+					BM.is_edited,
+				)
+				.where(BM.jid == jid)
 			)
-			.where(BM.jid == jid)
-			.orderby(BM.creation)
-			.run(as_dict=True)
-		)
 
-		# Deduplicate by message_id: when multiple WA Lines are members of the same
-		# group, the same message is stored once per line. Keep only the first copy
-		# (by creation order) for each message_id so the chat shows each message once.
-		# Messages without a message_id (old records) are kept as-is.
-		seen_ids: set = set()
-		deduped: list = []
-		for m in rows:
-			mid = m.get("message_id")
-			if mid:
-				if mid in seen_ids:
-					continue
-				seen_ids.add(mid)
-			deduped.append(m)
-		rows = deduped
+		limit = cint(limit)
+		paginated = bool(limit)
+		has_more = False
+		reply_targets: list = []
 
-		for m in rows:
-			if m.get("creation") and not isinstance(m["creation"], str):
-				m["creation"] = str(m["creation"])
-			m["type"] = "Outgoing" if m["direction"] == "Outgoing" else "Incoming"
-			m["attach"] = m.get("media_url") or ""
-			m["is_reply"] = 1 if (m.get("reply_to_message_id") and m.get("content_type") != "reaction") else 0
-			m["edit_history"] = []
-
-		edited_names = [m["name"] for m in rows if m.get("is_edited")]
-		if edited_names:
-			history_rows = frappe.db.get_all(
-				"WA Message Edit History",
-				filters={"parent": ["in", edited_names]},
-				fields=["parent", "old_message", "edited_at", "edited_by"],
-				order_by="edited_at asc",
+		if paginated:
+			# Page over real messages only. Reaction rows are ~19% of the table, so
+			# counting them against `limit` would return far fewer bubbles than the
+			# client asked for. This page's reactions are fetched separately below.
+			query = _select_messages().where(BM.content_type != "reaction")
+			if before:
+				# `creation` is not unique (bulk-imported messages can share a
+				# timestamp to the microsecond), so a plain `creation < before`
+				# cursor silently drops the tied sibling at a page boundary. Break
+				# the tie on `name` to make paging lossless.
+				if before_name:
+					query = query.where(
+						(BM.creation < before)
+						| ((BM.creation == before) & (BM.name < before_name))
+					)
+				else:
+					query = query.where(BM.creation < before)
+			# Newest-first with one spare row, so a full page tells us older ones exist.
+			page = (
+				query.orderby(BM.creation, order=frappe.qb.desc)
+				.orderby(BM.name, order=frappe.qb.desc)
+				.limit(limit + 1)
+				.run(as_dict=True)
 			)
-			history_map: dict = {}
-			for h in history_rows:
-				if h.get("edited_at") and not isinstance(h["edited_at"], str):
-					h["edited_at"] = str(h["edited_at"])
-				history_map.setdefault(h["parent"], []).append(h)
-			for m in rows:
-				if m.get("is_edited"):
-					m["edit_history"] = history_map.get(m["name"], [])
+			has_more = len(page) > limit
+			rows = list(reversed(page[:limit]))  # hand back oldest → newest
+		else:
+			rows = _select_messages().orderby(BM.creation).run(as_dict=True)
 
+		rows = _dedupe_wa_rows(rows)
+
+		if paginated and rows:
+			page_ids = {m["message_id"] for m in rows if m.get("message_id")}
+
+			if page_ids:
+				# Reactions are stored as their own rows and can sit anywhere in the
+				# timeline relative to the message they target, so select them by
+				# target rather than by position. The client filters them out of the
+				# rendered list and folds them into its reactions map.
+				reactions = (
+					_select_messages()
+					.where(BM.content_type == "reaction")
+					.where(BM.reply_to_message_id.isin(list(page_ids)))
+					.orderby(BM.creation)
+					.run(as_dict=True)
+				)
+				rows.extend(_dedupe_wa_rows(reactions))
+
+			# A reply whose target scrolled out of the page still has to render its
+			# quoted preview. Return those targets separately so they resolve for the
+			# preview without appearing as bubbles of their own.
+			wanted = {
+				m["reply_to_message_id"] for m in rows
+				if m.get("reply_to_message_id") and m.get("content_type") != "reaction"
+			} - page_ids
+			if wanted:
+				reply_targets = _dedupe_wa_rows(
+					_select_messages()
+					.where(BM.message_id.isin(list(wanted)))
+					.orderby(BM.creation)
+					.run(as_dict=True)
+				)
+
+		_finalize_wa_rows(rows)
+		_finalize_wa_rows(reply_targets)
+
+		if paginated:
+			return {"messages": rows, "has_more": has_more, "reply_targets": reply_targets}
 		return rows
 
 	# ── frappe_whatsapp path ─────────────────────────────────────────────────

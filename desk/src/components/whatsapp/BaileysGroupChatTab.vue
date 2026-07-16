@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { createResource, LoadingIndicator, toast } from "frappe-ui";
+import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -15,17 +15,108 @@ const messagesContainer = ref<HTMLElement | null>(null);
 const pickingUp = ref(false);
 const replyingTo = ref<Record<string, any> | null>(null);
 
+const PAGE_SIZE = 40;
+const loadingMore = ref(false);
+// Pages accumulate here rather than in `messages.data` — each refresh only
+// re-fetches the newest page. Kept sorted oldest → newest.
+const loadedMessages = ref<Record<string, any>[]>([]);
+// Targets of replies that quote a message older than the loaded pages.
+const replyTargets = ref<Record<string, any>[]>([]);
+const hasMore = ref(false);
+// Once the user has paged back, a newest-page refresh must not clobber hasMore.
+const loadedOlder = ref(false);
+
 const messages = createResource({
   url: "helpdesk.integrations.wa.get_whatsapp_messages",
-  params: { ticket: props.ticketId },
+  params: { ticket: props.ticketId, limit: PAGE_SIZE },
   auto: true,
+  onSuccess(data: any) {
+    mergeMessages(data?.messages || []);
+    // This fires for refreshes too (new message, retry, edit), which only
+    // re-fetch the newest page. Once older pages are loaded their reply targets
+    // must survive, or previews on older replies silently go blank — and
+    // has_more from the newest page says nothing about how far back we've gone.
+    replyTargets.value = loadedOlder.value
+      ? mergeReplyTargets(replyTargets.value, data?.reply_targets || [])
+      : data?.reply_targets || [];
+    if (!loadedOlder.value) hasMore.value = !!data?.has_more;
+  },
 });
+
+// Cross-line duplicates share a message_id, so key on that where present.
+function messageKey(m: Record<string, any>) {
+  return m.message_id || m.name;
+}
+
+function mergeMessages(incoming: Record<string, any>[]) {
+  const byKey = new Map<string, Record<string, any>>();
+  for (const m of loadedMessages.value) byKey.set(messageKey(m), m);
+  // Re-fetched rows win so refreshes pick up status changes and edits.
+  for (const m of incoming) byKey.set(messageKey(m), m);
+  loadedMessages.value = [...byKey.values()].sort((a, b) => {
+    if (a.creation === b.creation) return a.name < b.name ? -1 : 1;
+    return a.creation < b.creation ? -1 : 1;
+  });
+}
+
+// Refreshes re-send the same targets, so dedupe rather than growing forever.
+function mergeReplyTargets(existing: Record<string, any>[], incoming: Record<string, any>[]) {
+  const byId = new Map<string, Record<string, any>>();
+  for (const m of [...existing, ...incoming]) byId.set(messageKey(m), m);
+  return [...byId.values()];
+}
+
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return;
+  loadingMore.value = true;
+  const container = messagesContainer.value;
+  const prevScrollHeight = container?.scrollHeight ?? 0;
+  const oldest = loadedMessages.value.find((m) => m.content_type !== "reaction");
+  try {
+    const data = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
+      ticket: props.ticketId,
+      limit: PAGE_SIZE,
+      before: oldest?.creation,
+      before_name: oldest?.name,
+    });
+    mergeMessages(data?.messages || []);
+    replyTargets.value = mergeReplyTargets(replyTargets.value, data?.reply_targets || []);
+    hasMore.value = !!data?.has_more;
+    loadedOlder.value = true;
+    await nextTick();
+    if (container) container.scrollTop = container.scrollHeight - prevScrollHeight;
+  } catch {
+    toast.error("Could not load older messages");
+  } finally {
+    loadingMore.value = false;
+  }
+}
 
 const tabInfo = createResource({
   url: "helpdesk.integrations.wa.get_whatsapp_ticket_info",
   params: { ticket: props.ticketId },
   auto: true,
 });
+
+// This component isn't keyed on the ticket, so it can be reused across tickets
+// with only the prop changing. `params` above is captured at setup, so without
+// this watcher a reused instance keeps showing the previous ticket's chat.
+// Resetting first also stops the old messages rendering while the new ones load.
+watch(
+  () => props.ticketId,
+  (ticketId) => {
+    if (!ticketId) return;
+    messages.reset();
+    loadedMessages.value = [];
+    replyTargets.value = [];
+    hasMore.value = false;
+    loadedOlder.value = false;
+    messages.update({ params: { ticket: ticketId, limit: PAGE_SIZE } });
+    messages.reload();
+    tabInfo.update({ params: { ticket: ticketId } });
+    tabInfo.reload();
+  }
+);
 
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
@@ -80,7 +171,7 @@ function handleEdit(messageName: string, newText: string) {
   editResource.submit({ message_name: messageName, new_text: newText });
 }
 
-const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
 
 const messageList = computed(() =>
   allMessages.value.filter((m) => m.content_type !== "reaction")
@@ -88,7 +179,8 @@ const messageList = computed(() =>
 
 const messageByMsgId = computed(() => {
   const map: Record<string, Record<string, any>> = {};
-  for (const m of allMessages.value) {
+  // Reply targets first, so a loaded message always wins over its stub copy.
+  for (const m of [...replyTargets.value, ...allMessages.value]) {
     if (m.message_id) map[m.message_id] = m;
   }
   return map;
@@ -173,8 +265,7 @@ function handleRealtimeMessage(data: { ticket?: string; jid?: string; is_incomin
 }
 
 function handleStatusUpdate(data: { message_id: string; status: string }) {
-  const list: Record<string, any>[] = messages.data || [];
-  const msg = list.find((m) => m.message_id === data.message_id);
+  const msg = loadedMessages.value.find((m) => m.message_id === data.message_id);
   if (msg) msg.status = data.status;
 }
 
@@ -210,7 +301,7 @@ defineExpose({ scrollToBottom });
   <div class="flex flex-1 flex-col overflow-hidden">
     <!-- Messages area -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto px-5 py-4">
-      <div v-if="messages.loading && !messages.data" class="flex justify-center py-10">
+      <div v-if="messages.loading && !loadedMessages.length" class="flex justify-center py-10">
         <LoadingIndicator :scale="6" class="text-ink-gray-5" />
       </div>
 
@@ -223,6 +314,15 @@ defineExpose({ scrollToBottom });
       </div>
 
       <div v-else class="space-y-3">
+        <!-- Load older messages -->
+        <div v-if="hasMore" class="flex justify-center pb-2">
+          <button
+            class="rounded-full bg-surface-white px-3 py-1 text-xs text-ink-gray-6 shadow-sm hover:bg-surface-gray-2"
+            :disabled="loadingMore"
+            @click="loadMore"
+          >{{ loadingMore ? "Loading…" : "Load older messages" }}</button>
+        </div>
+
         <template v-for="(group, dateKey) in groupedMessages" :key="dateKey">
           <div class="my-4 flex items-center gap-3">
             <div class="flex-1 border-t border-outline-gray-2" />
