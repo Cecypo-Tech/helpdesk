@@ -142,10 +142,10 @@
           </div>
           <!-- Default: text preview -->
           <div v-else class="px-2 py-1">
-            <div class="mb-0.5 font-medium" :class="isOutgoing ? 'text-green-700 dark:text-green-400' : 'text-blue-600'">
+            <div v-if="replyToSenderName" class="mb-0.5 font-medium" :class="isOutgoing ? 'text-green-700 dark:text-green-400' : 'text-blue-600'">
               {{ replyToSenderName }}
             </div>
-            <div class="truncate text-ink-gray-5">{{ replyPreview }}</div>
+            <div class="truncate text-ink-gray-5" :class="{ italic: !replyToMessage }">{{ replyPreview }}</div>
           </div>
         </div>
 
@@ -593,7 +593,8 @@ const aggregatedReactions = computed(() => {
 // Reply context helpers
 const replyToSenderName = computed(() => {
   const m = props.replyToMessage;
-  if (!m) return "…";
+  // No resolved target yet (still fetching, or genuinely not stored).
+  if (!m) return "";
   return m.type === "Outgoing"
     ? (m.sender_full_name || "You")
     : (m.profile_name || "Customer");
@@ -601,7 +602,7 @@ const replyToSenderName = computed(() => {
 
 const replyPreview = computed(() => {
   const m = props.replyToMessage;
-  if (!m) return "Original message not available";
+  if (!m) return "Replied to an earlier message";
   if (m.content_type === "image") return "📷 Photo";
   if (m.content_type === "video") return "🎥 Video";
   if (m.content_type === "audio") return "🎤 Audio";

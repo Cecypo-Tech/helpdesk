@@ -303,6 +303,9 @@
       :replyTo="replyingTo"
       @sent="onMessageSent"
       @clearReply="replyingTo = null"
+      @optimistic="addOptimistic"
+      @optimistic-resolve="resolveOptimistic"
+      @optimistic-remove="removeOptimistic"
     />
   </div>
 </template>
@@ -484,6 +487,9 @@ const loadedMessages = ref<Record<string, any>[]>([]);
 // Messages quoted by a reply whose target sits outside the loaded pages. Needed
 // to render the quoted preview, but never rendered as bubbles themselves.
 const replyTargets = ref<Record<string, any>[]>([]);
+// message_ids we've already tried to resolve on demand (declared here so the
+// immediate jid watcher below can clear it without hitting the TDZ).
+const attemptedReplyTargets = new Set<string>();
 const hasMore = ref(false);
 
 const messages = createResource({
@@ -633,6 +639,7 @@ watch(
       loadedMessages.value = [];
       replyTargets.value = [];
       hasMore.value = false;
+      attemptedReplyTargets.clear();
       loadMessages({ fresh: true });
     }
   },
@@ -721,6 +728,76 @@ function onMessageSent() {
   loadMessages();
   scrollToBottom();
 }
+
+// ── Optimistic send ─────────────────────────────────────────────────────────
+// The reply box inserts a pending bubble before its upload/send completes, then
+// resolves it to the real message_id (so the reload dedupes against it via
+// mergeMessages' message_id key) or removes it on a pre-send failure.
+function addOptimistic(msg: Record<string, any>) {
+  loadedMessages.value = [...loadedMessages.value, msg];
+  scrollToBottom();
+}
+
+function resolveOptimistic(payload: { name: string; realName: string; message_id: string; status: string }) {
+  const msg = loadedMessages.value.find((m) => m.name === payload.name);
+  if (!msg) return;
+  // If the real row already arrived via the reload, drop the pending bubble
+  // rather than stamping it (which would leave a duplicate). Match on message_id,
+  // or on the real docname when the send failed (empty message_id).
+  const dupExists = loadedMessages.value.some(
+    (m) =>
+      m !== msg &&
+      ((payload.message_id && m.message_id === payload.message_id) ||
+        (payload.realName && m.name === payload.realName))
+  );
+  if (dupExists) {
+    loadedMessages.value = loadedMessages.value.filter((m) => m !== msg);
+    return;
+  }
+  if (payload.message_id) msg.message_id = payload.message_id;
+  if (payload.realName) msg.name = payload.realName;
+  msg.status = payload.status;
+  delete msg._optimistic;
+}
+
+function removeOptimistic(name: string) {
+  loadedMessages.value = loadedMessages.value.filter((m) => m.name !== name);
+}
+
+// ── On-demand reply-target resolution ───────────────────────────────────────
+// A reply whose quoted target is outside the loaded page and wasn't returned in
+// reply_targets is fetched by message_id so its preview resolves instead of
+// falling back to the "earlier message" placeholder.
+// (`attemptedReplyTargets` is declared above, before the jid watcher that clears it.)
+
+async function resolveMissingReplyTargets() {
+  const jid = props.jid;
+  if (!jid) return;
+  const have = messageByMsgId.value;
+  const wanted: string[] = [];
+  for (const m of messageList.value) {
+    const rid = m.reply_to_message_id;
+    if (m.is_reply && rid && !have[rid] && !attemptedReplyTargets.has(rid)) {
+      attemptedReplyTargets.add(rid);
+      wanted.push(rid);
+    }
+  }
+  for (const rid of wanted) {
+    try {
+      const row = await call("helpdesk.integrations.wa.get_wa_message_by_message_id", {
+        message_id: rid,
+        jid,
+      });
+      if (row) replyTargets.value = mergeReplyTargets(replyTargets.value, [row]);
+    } catch {
+      // Leave it attempted; the bubble shows the graceful fallback.
+    }
+  }
+}
+
+watch(messageList, () => {
+  resolveMissingReplyTargets();
+});
 
 // Prepending older messages also grows messageList — don't yank the user to the
 // bottom when that happens; loadMore restores their scroll position itself.

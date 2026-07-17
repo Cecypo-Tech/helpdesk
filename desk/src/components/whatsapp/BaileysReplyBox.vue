@@ -23,30 +23,36 @@
       </button>
     </div>
 
-    <!-- Attachment preview -->
-    <div v-if="attachment" class="mb-2 flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-3 py-2">
-      <img
-        v-if="isImage"
-        :src="attachmentPreview"
-        class="h-12 w-12 rounded object-cover"
-        alt="preview"
-      />
-      <div v-else class="flex h-12 w-12 items-center justify-center rounded bg-surface-gray-2">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" class="text-ink-gray-5">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+    <!-- Attachment previews (one chip per file) -->
+    <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
+      <div
+        v-for="att in attachments"
+        :key="att.id"
+        class="flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-2 py-1.5"
+      >
+        <img
+          v-if="att.isImage"
+          :src="att.previewUrl"
+          class="h-10 w-10 rounded object-cover"
+          alt="preview"
+        />
+        <div v-else class="flex h-10 w-10 items-center justify-center rounded bg-surface-gray-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="text-ink-gray-5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="min-w-0 max-w-[140px]">
+          <p class="truncate text-xs font-medium text-ink-gray-7">{{ att.file.name }}</p>
+          <p class="text-[11px] text-ink-gray-5">{{ fileContentType(att.file) }}</p>
+        </div>
+        <button class="shrink-0 text-ink-gray-4 hover:text-ink-gray-7" title="Remove" @click="removeAttachment(att.id)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
       </div>
-      <div class="min-w-0 flex-1">
-        <p class="truncate text-xs font-medium text-ink-gray-7">{{ attachment.name }}</p>
-        <p class="text-[11px] text-ink-gray-5">{{ contentType }}</p>
-      </div>
-      <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="clearAttachment">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </button>
     </div>
 
     <!-- Reply-to preview -->
@@ -224,6 +230,7 @@
       <input
         ref="fileInput"
         type="file"
+        multiple
         class="hidden"
         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         @change="onFileSelected"
@@ -233,7 +240,7 @@
         ref="textareaRef"
         v-model="text"
         :disabled="sending"
-        :placeholder="attachment ? 'Add a caption (optional)...' : isGroup ? 'Type a message… use @ to mention' : 'Type a message...'"
+        :placeholder="attachments.length ? 'Add a caption (optional)...' : isGroup ? 'Type a message… use @ to mention' : 'Type a message...'"
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
         @input="onTextInput"
@@ -241,7 +248,7 @@
         @paste="onPaste"
       />
       <button
-        :disabled="(!text.trim() && !attachment) || sending"
+        :disabled="(!text.trim() && !attachments.length) || sending"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
         @click="send"
       >
@@ -253,7 +260,7 @@
         </svg>
       </button>
     </div>
-    <p v-if="dragging" class="mt-1 text-center text-xs text-blue-500">Drop file to attach</p>
+    <p v-if="dragging" class="mt-1 text-center text-xs text-blue-500">Drop files to attach</p>
   </div>
 </template>
 
@@ -278,6 +285,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "sent"): void;
   (e: "clearReply"): void;
+  // Optimistic-send lifecycle: parent renders a pending bubble immediately, then
+  // resolves it to the real message_id (so the realtime reload dedupes it) or
+  // removes it on a pre-send failure.
+  (e: "optimistic", msg: Record<string, any>): void;
+  (e: "optimistic-resolve", payload: { name: string; realName: string; message_id: string; status: string }): void;
+  (e: "optimistic-remove", name: string): void;
 }>();
 
 const text = ref("");
@@ -290,58 +303,127 @@ const fileInput = ref<HTMLInputElement | null>(null);
 watch(() => props.replyTo, (val) => {
   if (val) nextTick(() => textareaRef.value?.focus());
 });
-const attachment = ref<File | null>(null);
-const attachmentPreview = ref<string>("");
+interface Attachment {
+  id: string;
+  file: File;
+  previewUrl: string;
+  isImage: boolean;
+}
+
+const attachments = ref<Attachment[]>([]);
+// Every object URL we create is tracked here and revoked on unmount, so preview
+// URLs that back in-flight optimistic bubbles aren't freed while still on screen.
+const objectUrls = new Set<string>();
 
 const isGroup = computed(() => props.jid?.endsWith("@g.us") ?? false);
 
-const contentType = computed(() => {
-  if (!attachment.value) return "text";
-  const mime = attachment.value.type;
+function makeId() {
+  return (globalThis.crypto as any)?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function makeObjectUrl(file: File): string {
+  const url = URL.createObjectURL(file);
+  objectUrls.add(url);
+  return url;
+}
+
+function revokeObjectUrl(url: string) {
+  if (url && objectUrls.has(url)) {
+    URL.revokeObjectURL(url);
+    objectUrls.delete(url);
+  }
+}
+
+function fileContentType(file: File): "image" | "video" | "audio" | "document" {
+  const mime = file.type;
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   return "document";
-});
+}
 
-const isImage = computed(() => contentType.value === "image");
-
-function setFile(file: File) {
-  attachment.value = file;
-  if (file.type.startsWith("image/")) {
-    const reader = new FileReader();
-    reader.onload = (e) => { attachmentPreview.value = e.target?.result as string; };
-    reader.readAsDataURL(file);
-  } else {
-    attachmentPreview.value = "";
+function addFiles(files: FileList | File[] | null | undefined) {
+  if (!files) return;
+  for (const file of Array.from(files)) {
+    const isImage = file.type.startsWith("image/");
+    attachments.value.push({
+      id: makeId(),
+      file,
+      previewUrl: isImage ? makeObjectUrl(file) : "",
+      isImage,
+    });
   }
 }
 
-function clearAttachment() {
-  attachment.value = null;
-  attachmentPreview.value = "";
+function removeAttachment(id: string) {
+  const idx = attachments.value.findIndex((a) => a.id === id);
+  if (idx === -1) return;
+  const [removed] = attachments.value.splice(idx, 1);
+  if (removed?.previewUrl) revokeObjectUrl(removed.previewUrl);
+}
+
+function clearAttachments() {
+  for (const a of attachments.value) revokeObjectUrl(a.previewUrl);
+  attachments.value = [];
   if (fileInput.value) fileInput.value.value = "";
 }
 
 function onFileSelected(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) setFile(file);
+  addFiles((e.target as HTMLInputElement).files);
+  // Allow re-selecting the same file(s) again later.
+  if (fileInput.value) fileInput.value.value = "";
 }
 
 function onDrop(e: DragEvent) {
   dragging.value = false;
-  const file = e.dataTransfer?.files?.[0];
-  if (file) setFile(file);
+  addFiles(e.dataTransfer?.files);
 }
 
 function onPaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items;
   if (!items) return;
+  const pasted: File[] = [];
   for (const item of items) {
     if (item.kind === "file") {
       const file = item.getAsFile();
-      if (file) { e.preventDefault(); setFile(file); return; }
+      if (file) pasted.push(file);
     }
+  }
+  if (pasted.length) {
+    e.preventDefault();
+    addFiles(pasted);
+  }
+}
+
+// Downscale large images before upload to cut both the Frappe upload and the
+// Evolution send. Non-images, GIFs, small images, or any failure fall through to
+// the original file unchanged.
+async function downscaleImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  const MAX_EDGE = 1600;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longEdge = Math.max(bitmap.width, bitmap.height);
+    if (longEdge <= MAX_EDGE) { bitmap.close?.(); return file; }
+    const scale = MAX_EDGE / longEdge;
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { bitmap.close?.(); return file; }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.8)
+    );
+    // Only accept the re-encode if it actually shrank the payload.
+    if (!blob || blob.size >= file.size) return file;
+    const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], newName, { type: "image/jpeg" });
+  } catch {
+    return file;
   }
 }
 
@@ -507,7 +589,11 @@ function onDocClick(e: MouseEvent) {
 }
 
 onMounted(() => document.addEventListener("click", onDocClick));
-onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
+  for (const url of objectUrls) URL.revokeObjectURL(url);
+  objectUrls.clear();
+});
 
 watch(showReplies, (v) => { if (!v) repliesSearch.value = ""; });
 
@@ -635,8 +721,30 @@ const sendReply = createResource({
   url: "helpdesk.integrations.wa.send_wa_reply",
 });
 
+// Upload one file to Frappe storage (with client-side downscale for images) and
+// return its file_url. Throws on a pre-send hard failure.
+async function uploadOne(file: File): Promise<string> {
+  const toUpload = await downscaleImage(file);
+  const uploadData = new FormData();
+  uploadData.append("file", toUpload, toUpload.name);
+  uploadData.append("is_private", "0");
+  const csrfToken = (window as any).frappe?.csrf_token || (window as any).csrf_token || "";
+  const uploadResp = await fetch("/api/method/upload_file", {
+    method: "POST",
+    headers: { "X-Frappe-CSRF-Token": csrfToken },
+    body: uploadData,
+  });
+  if (!uploadResp.ok) {
+    const errData = await uploadResp.json().catch(() => ({}));
+    throw new Error(errData?.exc_type || "File upload failed");
+  }
+  const fileUrl = (await uploadResp.json())?.message?.file_url || "";
+  if (!fileUrl) throw new Error("File upload returned no URL");
+  return fileUrl;
+}
+
 async function send() {
-  if ((!text.value.trim() && !attachment.value) || sending.value) return;
+  if ((!text.value.trim() && attachments.value.length === 0) || sending.value) return;
   bannerError.value = "";
 
   // Snapshot props immediately — before any await — so navigation to another
@@ -649,69 +757,147 @@ async function send() {
   const replyToId = props.replyTo?.message_id || "";
   const replyToText = props.replyTo?.message || "";
   const replyToFromMe = props.replyTo?.direction === "Outgoing";
-  const file = attachment.value;
-  const ct = contentType.value;
+  const items = [...attachments.value];
   const jidsToMention = [...mentionedJids.value];
 
-  // Restore the composer exactly as it was — used only when a *pre-send* hard error
-  // (upload failed, line down, API disabled) means the message never left.
-  const restore = () => {
-    text.value = caption;
-    if (file) setFile(file);
-    mentionedJids.value = jidsToMention;
+  // Put the composer back after a *pre-send* hard failure. `keepFirst` restores the
+  // caption + mentions too (only meaningful when the first item — which carries
+  // them — never made it out).
+  const restore = (remaining: Attachment[], keepFirst: boolean) => {
+    if (keepFirst) {
+      text.value = caption;
+      mentionedJids.value = jidsToMention;
+    }
+    attachments.value = remaining;
     autoResize();
   };
 
   // Optimistic clear (textarea is disabled while sending, so nothing is typed mid-send).
+  // Detach the attachment list without revoking preview URLs — they back the pending
+  // bubbles until each item's real message arrives.
   text.value = "";
-  clearAttachment();
+  attachments.value = [];
   mentionedJids.value = [];
+  if (fileInput.value) fileInput.value.value = "";
   if (textareaRef.value) textareaRef.value.style.height = "auto";
   sending.value = true;
 
-  try {
-    let fileUrl = "";
-    if (file) {
-      // Step 1: upload the attachment to Frappe storage
-      const uploadData = new FormData();
-      uploadData.append("file", file, file.name);
-      uploadData.append("is_private", "0");
-      const csrfToken = (window as any).frappe?.csrf_token || (window as any).csrf_token || "";
-      const uploadResp = await fetch("/api/method/upload_file", {
-        method: "POST",
-        headers: { "X-Frappe-CSRF-Token": csrfToken },
-        body: uploadData,
-      });
-      if (!uploadResp.ok) {
-        const errData = await uploadResp.json().catch(() => ({}));
-        throw new Error(errData?.exc_type || "File upload failed");
-      }
-      fileUrl = (await uploadResp.json())?.message?.file_url || "";
-      if (!fileUrl) throw new Error("File upload returned no URL");
-    }
+  const nowIso = () => new Date().toISOString();
 
-    // Step 2: hand off to the WA API. A *send* failure (vs. pre-send) comes back as a
-    // saved message with status "Failed" — the chat then shows a red ! bubble with a
-    // Retry button, so we deliberately do NOT raise a banner for that case.
-    await sendReply.submit({
+  // Send one unit of work: emit its pending bubble, upload if it has a file, hand
+  // off to the WA API, then resolve the bubble to the real message_id. A *send*
+  // failure (vs. pre-send) comes back as a saved "Failed" message that renders via
+  // the realtime reload with a Retry button, so we do NOT banner that case.
+  const sendUnit = async (opts: {
+    tempName: string;
+    content_type: string;
+    message: string;
+    previewUrl: string;
+    replyId: string;
+    replyText: string;
+    replyFromMe: boolean;
+    mentions: string[];
+    file?: File;
+  }) => {
+    emit("optimistic", {
+      name: opts.tempName,
+      _optimistic: true,
+      type: "Outgoing",
+      direction: "Outgoing",
+      content_type: opts.content_type,
+      message: opts.message,
+      attach: opts.previewUrl,
+      media_url: opts.previewUrl,
+      status: "Pending",
+      message_id: "",
+      creation: nowIso(),
+      is_reply: opts.replyId ? 1 : 0,
+      reply_to_message_id: opts.replyId,
+      sender_name: "",
+      profile_name: "",
+    });
+    let fileUrl = "";
+    if (opts.file) fileUrl = await uploadOne(opts.file);
+    const resp: any = await sendReply.submit({
       ...(jid ? { jid } : { ticket: ticketId }),
       ...(line ? { line } : {}),
-      message: caption,
-      content_type: file ? ct : "text",
+      message: opts.message,
+      content_type: opts.content_type,
       ...(fileUrl ? { media_url: fileUrl } : {}),
-      reply_to_message_id: replyToId,
-      reply_to_text: replyToText,
-      reply_to_from_me: replyToFromMe,
-      ...(jidsToMention.length ? { mentioned_jids: JSON.stringify(jidsToMention) } : {}),
+      reply_to_message_id: opts.replyId,
+      reply_to_text: opts.replyText,
+      reply_to_from_me: opts.replyFromMe,
+      ...(opts.mentions.length ? { mentioned_jids: JSON.stringify(opts.mentions) } : {}),
     });
-    emit("sent");
-  } catch (err: any) {
-    // Pre-send hard failure: put the message back and tell the agent why.
-    restore();
-    bannerError.value =
-      err?.messages?.[0] ||
-      err?.message ||
-      "Message couldn't be sent. Check the WhatsApp connection and try again.";
+    // Stamp the real identity so the realtime reload dedupes against this bubble
+    // instead of appending a duplicate. A rejected send returns an empty
+    // message_id but still persists a "Failed" row, so we also carry its docname.
+    emit("optimistic-resolve", {
+      name: opts.tempName,
+      realName: resp?.name || "",
+      message_id: resp?.message_id || "",
+      status: resp?.status || "Sent",
+    });
+  };
+
+  try {
+    if (items.length === 0) {
+      const tempName = `temp-${makeId()}`;
+      try {
+        await sendUnit({
+          tempName,
+          content_type: "text",
+          message: caption,
+          previewUrl: "",
+          replyId: replyToId,
+          replyText: replyToText,
+          replyFromMe: replyToFromMe,
+          mentions: jidsToMention,
+        });
+      } catch (err: any) {
+        emit("optimistic-remove", tempName);
+        restore([], true);
+        bannerError.value =
+          err?.messages?.[0] || err?.message ||
+          "Message couldn't be sent. Check the WhatsApp connection and try again.";
+        return;
+      }
+      emit("sent");
+      return;
+    }
+
+    // One WA Message per file, sequentially. Caption + reply + mentions ride on the
+    // first file only; the rest go out bare.
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const first = i === 0;
+      const tempName = `temp-${makeId()}-${i}`;
+      try {
+        await sendUnit({
+          tempName,
+          content_type: fileContentType(item.file),
+          message: first ? caption : "",
+          previewUrl: item.previewUrl,
+          replyId: first ? replyToId : "",
+          replyText: first ? replyToText : "",
+          replyFromMe: first ? replyToFromMe : false,
+          mentions: first ? jidsToMention : [],
+          file: item.file,
+        });
+      } catch (err: any) {
+        // Pre-send failure on this file: drop its pending bubble, restore the
+        // remaining (unsent) files + caption, banner, and stop.
+        emit("optimistic-remove", tempName);
+        restore(items.slice(i), first);
+        bannerError.value =
+          err?.messages?.[0] || err?.message ||
+          "Message couldn't be sent. Check the WhatsApp connection and try again.";
+        return;
+      }
+      // The item's real message is on its way in via the realtime reload; its
+      // preview URL stays valid until unmount so the resolved bubble doesn't flash.
+      emit("sent");
+    }
   } finally {
     sending.value = false;
   }
