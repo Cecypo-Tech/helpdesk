@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
@@ -43,7 +45,8 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.0.2",
     "vite": "^4.4.9",
-    "vite-plugin-pwa": "0.15.0"
+    "vite-plugin-pwa": "0.15.0",
+    "vitest": "^0.34.6"
   },
   "resolutions": {
     "cheerio": "1.0.0-rc.12",

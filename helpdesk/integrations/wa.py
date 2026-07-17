@@ -139,6 +139,15 @@ def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) ->
     )
 
 
+def _publish_wa_delete(jid: str, message_id: str, line_name: str) -> None:
+    """Tell open chats a message was removed, so the bubble flips without a reload."""
+    frappe.publish_realtime(
+        "helpdesk:whatsapp-message-delete",
+        message={"message_id": message_id, "jid": jid, "line": line_name},
+        after_commit=True,
+    )
+
+
 def _set_ticket_status(ticket_name: str, status_name: str) -> None:
     if not status_name or not frappe.db.exists("HD Ticket Status", status_name):
         return
@@ -1131,15 +1140,21 @@ def _handle_delete(data: dict, line) -> dict:
     for message_id in ids:
         if not message_id:
             continue
-        msg_name = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
-        if not msg_name:
+        msg = frappe.db.get_value(
+            "WA Message", {"message_id": message_id}, ["name", "jid"], as_dict=True
+        )
+        if not msg:
             continue
         try:
-            frappe.db.set_value("WA Message", msg_name, "status", "Failed", update_modified=False)
+            # `status` tracks delivery, not existence — writing "Failed" here would
+            # both corrupt delivery analytics and offer the agent a Retry button
+            # for a message the sender deliberately removed.
+            frappe.db.set_value("WA Message", msg.name, "is_deleted", 1, update_modified=False)
             frappe.db.commit()
             deleted += 1
+            _publish_wa_delete(msg.jid, message_id, line.name)
         except Exception as e:
-            frappe.log_error(f"Failed to mark WA Message {msg_name} as deleted: {e}", "WA Message Delete")
+            frappe.log_error(f"Failed to mark WA Message {msg.name} as deleted: {e}", "WA Message Delete")
     return {"status": "ok", "deleted": deleted}
 
 
@@ -1392,8 +1407,10 @@ def send_wa_reaction(
     settings = _settings()
     if not settings.enabled:
         frappe.throw(_("WA API is not enabled."))
-    if not jid or not target_message_id or not emoji:
-        frappe.throw(_("jid, target_message_id and emoji are required."))
+    # An empty emoji is a clear, not a missing argument: WhatsApp removes a
+    # reaction when it receives one with an empty body.
+    if not jid or not target_message_id:
+        frappe.throw(_("jid and target_message_id are required."))
 
     line_name = (
         frappe.db.get_value("HD Ticket", ticket, "baileys_line") if ticket
@@ -1474,8 +1491,8 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
     line = frappe.get_doc("WA Line", doc.line)
 
     try:
-        resp = _evo_session.put(
-            _url("message/updateMessage", line.instance_name),
+        resp = _evo_session.post(
+            _url("chat/updateMessage", line.instance_name),
             json={
                 "number": doc.jid,
                 "key": {
@@ -1497,6 +1514,52 @@ def edit_wa_message(message_name: str, new_text: str) -> dict:
 
     agent_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
     _apply_edit(doc.name, new_text, edited_by=agent_name, jid=doc.jid, line=line)
+
+    return {"status": "ok", "name": doc.name}
+
+
+@frappe.whitelist()
+def delete_wa_message(message_name: str) -> dict:
+    """Delete an outgoing message for everyone via WA API and mark the local record."""
+    settings = _settings()
+    if not settings.enabled:
+        frappe.throw(_("WA API is not enabled."))
+
+    doc = frappe.get_doc("WA Message", message_name)
+
+    # WhatsApp only lets you delete-for-everyone what you sent.
+    if doc.direction != "Outgoing":
+        frappe.throw(_("Only outgoing messages can be deleted."))
+    if doc.owner != frappe.session.user and "System Manager" not in frappe.get_roles():
+        frappe.throw(_("You can only delete your own messages."))
+    if doc.is_deleted:
+        return {"status": "ok", "name": doc.name, "already_deleted": True}
+    if not doc.message_id:
+        frappe.throw(_("This message has no WhatsApp ID yet."))
+
+    line = frappe.get_doc("WA Line", doc.line)
+
+    try:
+        resp = _evo_session.delete(
+            _url("chat/deleteMessageForEveryone", line.instance_name),
+            json={
+                "id": doc.message_id,
+                "fromMe": True,
+                "remoteJid": doc.jid,
+            },
+            headers=_headers(line),
+            timeout=15,
+        )
+        if not resp.ok:
+            frappe.log_error(f"WA delete {resp.status_code}: {resp.text[:500]}", "WA Delete Message")
+        resp.raise_for_status()
+    except Exception as e:
+        frappe.log_error(f"WA delete failed for message {message_name}: {e}", "WA Delete Message")
+        frappe.throw(_("WA API delete failed: {0}").format(str(e)))
+
+    frappe.db.set_value("WA Message", doc.name, "is_deleted", 1, update_modified=False)
+    frappe.db.commit()
+    _publish_wa_delete(doc.jid, doc.message_id, line.name)
 
     return {"status": "ok", "name": doc.name}
 
@@ -1562,6 +1625,8 @@ def retry_wa_message(message_name: str) -> dict:
         frappe.throw(_("Only outgoing messages can be retried."))
     if doc.content_type == "reaction":
         frappe.throw(_("Reactions cannot be retried."))
+    if doc.is_deleted:
+        frappe.throw(_("Deleted messages cannot be retried."))
     if doc.owner != frappe.session.user and "System Manager" not in frappe.get_roles():
         frappe.throw(_("You can only retry your own messages."))
     if not doc.line:
@@ -2444,6 +2509,7 @@ def get_whatsapp_messages(
 					User.full_name.as_("sender_full_name"),
 					BC.phone.as_("sender_phone"),
 					BM.is_edited,
+					BM.is_deleted,
 				)
 				.where(BM.jid == jid)
 			)
@@ -2596,6 +2662,8 @@ def get_whatsapp_messages(
 		m["media_url"] = m.get("attach") or ""
 		m["edit_history"] = []
 		m["is_edited"] = 0
+		# Meta's API has no unsend-for-everyone equivalent on this path.
+		m["is_deleted"] = 0
 
 	if paginated:
 		return {"messages": rows, "has_more": has_more}
@@ -2630,6 +2698,7 @@ def get_wa_message_by_message_id(message_id: str = None, jid: str = None) -> dic
 				User.full_name.as_("sender_full_name"),
 				BC.phone.as_("sender_phone"),
 				BM.is_edited,
+				BM.is_deleted,
 			)
 			.where(BM.jid == jid)
 			.where(BM.message_id == message_id)

@@ -84,6 +84,29 @@ The `frappe_whatsapp` controller (`WhatsAppMessage.before_insert → send_outgoi
 | **Settings** | `WA API Settings` singleton + `WA Line` per-instance docs |
 | **Realtime events** | `helpdesk:baileys-message`, `helpdesk:baileys-status-update` |
 
+#### Evolution API routes (verified against v2.3.7)
+
+Getting these wrong fails silently-ish: an unmatched route returns Express's
+`Cannot <METHOD> /path` 404, which surfaces only as a generic send failure.
+
+| Action | Route | Method |
+|--------|-------|--------|
+| React / clear reaction | `message/sendReaction/{instance}` | POST |
+| Edit message | `chat/updateMessage/{instance}` | **POST** (not `message/updateMessage`, which does not exist) |
+| Delete for everyone | `chat/deleteMessageForEveryone/{instance}` | **DELETE** |
+
+Reactions and deletes follow WhatsApp's own semantics, not ours:
+- **Clearing a reaction is an empty emoji** (`"reaction": ""`) — Evolution's schema
+  declares `reaction` as a plain string with no non-empty constraint. It is a
+  removal, not a missing argument, so never guard against it.
+- **One reaction per sender per message, latest wins.** Rows are append-only
+  (a replace and a clear are both new rows), so the rendered state is only
+  correct after folding history per `(target, sender)` — see
+  `desk/src/utils/waReactions.ts`.
+- **Deleting sets `WA Message.is_deleted`**, never `status` (which means
+  delivery). Writing `status="Failed"` here would offer a Retry that re-sends a
+  deliberately removed message.
+
 Custom fields on `HD Ticket` (added via fixtures):
 - `baileys_jid` — the WhatsApp JID (e.g. `2547XXXXXXXX@s.whatsapp.net`)
 - `baileys_line` — the `WA Line` name that owns this conversation
@@ -123,6 +146,7 @@ frappe-ui's preset already defines `[data-theme='dark']` CSS variable overrides 
 | `helpdesk:baileys-message` | server → all | WA Line | New incoming/outgoing Evolution API (WA Line) message |
 | `helpdesk:baileys-status-update` | server → all | WA Line | WA Line delivery status change |
 | `helpdesk:whatsapp-message-edit` | server → all | WA Line | Message text edited |
+| `helpdesk:whatsapp-message-delete` | server → all | WA Line | Message deleted for everyone (either side) |
 | `helpdesk:comment-reaction-update` | server → all | both | Bell reload |
 
 All events are broadcast to the `"all"` room. Room-based routing was avoided because socket.io clients lose room membership on reconnect.

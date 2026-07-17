@@ -27,6 +27,7 @@
   "is_read",
   "profile_name",
   "is_edited",
+  "is_deleted",
   "edit_history"
  ],
  "fields": [
@@ -162,6 +163,13 @@
    "fieldname": "is_edited",
    "fieldtype": "Check",
    "label": "Is Edited",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_deleted",
+   "fieldtype": "Check",
+   "label": "Is Deleted",
    "read_only": 1
   },
   {

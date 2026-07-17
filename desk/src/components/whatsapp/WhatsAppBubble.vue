@@ -5,6 +5,7 @@
 
       <!-- Action bar — shown on hover or while emoji picker is open -->
       <div
+        v-if="!isDeleted"
         class="pointer-events-none absolute top-0 z-10 flex items-center gap-1 transition-opacity duration-100"
         :class="[
           isOutgoing ? 'right-full mr-2' : 'left-full ml-2',
@@ -55,6 +56,18 @@
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+          </svg>
+        </button>
+        <!-- Delete button (own outgoing only — WhatsApp only deletes what you sent) -->
+        <button
+          v-if="allowDelete && isOutgoing && message.message_id"
+          class="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full border border-outline-gray-2 bg-surface-white text-ink-gray-5 shadow-sm hover:bg-surface-gray-1 hover:text-red-600"
+          title="Delete for everyone"
+          @click.stop="$emit('delete', message.name)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
           </svg>
         </button>
       </div>
@@ -113,6 +126,18 @@
           {{ message.sender_full_name }}
         </div>
 
+        <!-- Deleted for everyone: the content is gone, so nothing below renders -->
+        <div
+          v-if="isDeleted"
+          class="flex items-center gap-1.5 text-sm italic text-ink-gray-5"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+          </svg>
+          <span>{{ isOutgoing ? "You deleted this message" : "This message was deleted" }}</span>
+        </div>
+
+        <template v-else>
         <!-- Reply context block -->
         <div
           v-if="message.is_reply"
@@ -291,13 +316,14 @@
           </div>
         </template>
         <div v-else-if="message.message" class="whitespace-pre-wrap break-words" v-html="formattedMessage" />
+        </template>
 
         <!-- Footer: time + status -->
         <div class="mt-1 flex items-center justify-end gap-1">
           <span class="text-[10px] text-ink-gray-5">{{ formattedTime }}</span>
           <!-- Edited badge + history tooltip -->
           <span
-            v-if="message.is_edited"
+            v-if="message.is_edited && !isDeleted"
             class="relative text-[10px] italic text-ink-gray-4 cursor-default select-none"
             @mouseenter="showEditHistory = true"
             @mouseleave="showEditHistory = false"
@@ -318,7 +344,9 @@
               </div>
             </div>
           </span>
-          <span v-if="isOutgoing" class="flex items-center gap-1 text-[10px] leading-none">
+          <!-- Delivery state is meaningless once a message is deleted, and Retry
+               would re-send something the sender deliberately removed. -->
+          <span v-if="isOutgoing && !isDeleted" class="flex items-center gap-1 text-[10px] leading-none">
             <!-- pending: clock -->
             <svg v-if="statusKind === 'pending'" class="text-ink-gray-4" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>Sending…</title><circle cx="12" cy="12" r="9"/><polyline points="12 7.5 12 12 15 13.5"/></svg>
             <!-- sent: single grey tick -->
@@ -342,20 +370,22 @@
 
       <!-- Reaction badges (below bubble) — z-20 so they paint above the next message's action bar (z-10) -->
       <div
-        v-if="aggregatedReactions.length"
+        v-if="aggregatedReactions.length && !isDeleted"
         class="relative z-20 mt-0.5 flex flex-wrap gap-1"
         :class="isOutgoing ? 'justify-end' : 'justify-start'"
       >
-        <span
+        <button
           v-for="r in aggregatedReactions"
           :key="r.emoji"
-          class="relative flex cursor-default items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm"
+          class="relative flex cursor-pointer items-center gap-0.5 rounded-full border border-outline-gray-2 bg-surface-white px-1.5 py-0.5 text-xs shadow-sm hover:border-outline-gray-3"
           :class="r.hasOwn ? 'border-blue-300 bg-blue-50' : ''"
+          :title="r.hasOwn ? 'Remove your reaction' : `React with ${r.emoji}`"
+          @click.stop="toggleReaction(r)"
           @mouseenter="(e) => showTooltip(e, r.senders)"
           @mouseleave="hideTooltip"
         >
           {{ r.emoji }}<span v-if="r.count > 1" class="ml-0.5 text-ink-gray-5">{{ r.count }}</span>
-        </span>
+        </button>
       </div>
 
     </div>
@@ -508,7 +538,8 @@ const props = withDefaults(defineProps<{
   mentionMap?: Record<string, string>;
   allowRetry?: boolean;
   allowEdit?: boolean;
-}>(), { isGroup: false, mentionMap: () => ({}), allowRetry: false, allowEdit: false });
+  allowDelete?: boolean;
+}>(), { isGroup: false, mentionMap: () => ({}), allowRetry: false, allowEdit: false, allowDelete: false });
 
 const emit = defineEmits<{
   (e: "reply", message: Record<string, any>): void;
@@ -516,7 +547,12 @@ const emit = defineEmits<{
   (e: "scrollToReply", messageId: string): void;
   (e: "edit", messageName: string, newText: string): void;
   (e: "retry", messageName: string): void;
+  (e: "delete", messageName: string): void;
 }>();
+
+// A message the sender removed for everyone. Its content is gone: no text, media,
+// reactions or actions survive it.
+const isDeleted = computed(() => !!props.message.is_deleted);
 
 const isOutgoing = computed(() => props.message.type === "Outgoing");
 
@@ -572,10 +608,22 @@ function toggleEmojiPicker() {
   showEmojiPicker.value = !showEmojiPicker.value;
 }
 
+// WhatsApp sends an empty reaction to remove one, and picking the emoji you
+// already reacted with is a removal rather than a no-op.
 function pickEmoji(emoji: string) {
   showEmojiPicker.value = false;
-  emit("react", emoji, props.message.message_id || "");
+  const alreadyMine = aggregatedReactions.value.some(
+    (r) => r.hasOwn && r.emoji === emoji
+  );
+  emit("react", alreadyMine ? "" : emoji, props.message.message_id || "");
 }
+
+// Clicking a badge you're part of removes your reaction; clicking anyone else's
+// adds yours with that emoji (replacing whatever you had).
+function toggleReaction(r: { emoji: string; hasOwn: boolean }) {
+  emit("react", r.hasOwn ? "" : r.emoji, props.message.message_id || "");
+}
+
 
 // Aggregate reactions: {emoji → {emoji, count, hasOwn, senders[]}}
 const aggregatedReactions = computed(() => {

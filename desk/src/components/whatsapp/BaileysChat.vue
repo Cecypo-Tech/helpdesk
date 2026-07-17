@@ -288,9 +288,15 @@
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="isGroup"
             :mentionMap="mentionMap"
+            :allowRetry="true"
+            :allowEdit="true"
+            :allowDelete="true"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
+            @retry="retryMessage"
+            @edit="handleEdit"
+            @delete="handleDelete"
           />
         </template>
       </div>
@@ -307,6 +313,15 @@
       @optimistic-resolve="resolveOptimistic"
       @optimistic-remove="removeOptimistic"
     />
+
+    <ConfirmDialog
+      v-if="showDeleteConfirm"
+      v-model="showDeleteConfirm"
+      title="Delete message"
+      message="Delete this message for everyone? It will be removed from the recipient's WhatsApp too. This cannot be undone."
+      :onConfirm="confirmDelete"
+      :onCancel="() => (showDeleteConfirm = false)"
+    />
   </div>
 </template>
 
@@ -314,6 +329,8 @@
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { foldReactions } from "@/utils/waReactions";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import BaileysReplyBox from "./BaileysReplyBox.vue";
@@ -662,19 +679,7 @@ const messageByMsgId = computed(() => {
   return map;
 });
 
-const reactionsMap = computed(() => {
-  const map: Record<string, Array<{ emoji: string; type: string; sender: string }>> = {};
-  for (const m of allMessages.value) {
-    if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
-      if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
-      const sender = m.type === "Outgoing"
-        ? (m.sender_full_name || m.sender_name || "You")
-        : (m.profile_name || m.sender_name || "Customer");
-      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type, sender });
-    }
-  }
-  return map;
-});
+const reactionsMap = computed(() => foldReactions(allMessages.value));
 
 const groupedMessages = computed(() => {
   const groups: Record<string, any[]> = {};
@@ -727,6 +732,61 @@ function onMessageSent() {
   replyingTo.value = null;
   loadMessages();
   scrollToBottom();
+}
+
+const retryResource = createResource({
+  url: "helpdesk.integrations.wa.retry_wa_message",
+  onSuccess() {
+    loadMessages();
+    toast.success("Message sent");
+  },
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Retry failed");
+  },
+});
+
+function retryMessage(messageName: string) {
+  retryResource.submit({ message_name: messageName });
+}
+
+const editResource = createResource({
+  url: "helpdesk.integrations.wa.edit_wa_message",
+  onSuccess() {
+    loadMessages();
+  },
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to edit message");
+  },
+});
+
+function handleEdit(messageName: string, newText: string) {
+  editResource.submit({ message_name: messageName, new_text: newText });
+}
+
+const deleteResource = createResource({
+  url: "helpdesk.integrations.wa.delete_wa_message",
+  onSuccess() {
+    loadMessages();
+  },
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to delete message");
+  },
+});
+
+// Deleting also removes the message from the recipient's phone, so confirm first.
+const pendingDeleteName = ref("");
+const showDeleteConfirm = ref(false);
+
+function handleDelete(messageName: string) {
+  pendingDeleteName.value = messageName;
+  showDeleteConfirm.value = true;
+}
+
+function confirmDelete() {
+  const name = pendingDeleteName.value;
+  showDeleteConfirm.value = false;
+  pendingDeleteName.value = "";
+  if (name) deleteResource.submit({ message_name: name });
 }
 
 // ── Optimistic send ─────────────────────────────────────────────────────────
@@ -809,9 +869,28 @@ function handleBaileysMessage(data: { jid?: string }) {
   }
 }
 
+function handleEditUpdate(data: { message_id: string; new_text: string; name: string }) {
+  const msg = loadedMessages.value.find(
+    (m) => m.message_id === data.message_id || m.name === data.name
+  );
+  if (msg) {
+    msg.message = data.new_text;
+    msg.is_edited = 1;
+  }
+}
+
+// Looking the message up in the rendered list is what scopes this to the open
+// chat: an id we aren't showing simply isn't found.
+function handleDeleteUpdate(data: { message_id: string }) {
+  const msg = loadedMessages.value.find((m) => m.message_id === data.message_id);
+  if (msg) msg.is_deleted = 1;
+}
+
 onMounted(() => {
   const { $socket } = globalStore();
   $socket.on("helpdesk:baileys-message", handleBaileysMessage);
+  $socket.on("helpdesk:whatsapp-message-edit", handleEditUpdate);
+  $socket.on("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
   if (props.jid?.endsWith("@g.us") && props.line && !participantsResource.data) {
     participantsResource.submit({ jid: props.jid, line: props.line });
   }
@@ -820,6 +899,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
   $socket.off("helpdesk:baileys-message", handleBaileysMessage);
+  $socket.off("helpdesk:whatsapp-message-edit", handleEditUpdate);
+  $socket.off("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
 });
 
 defineExpose({

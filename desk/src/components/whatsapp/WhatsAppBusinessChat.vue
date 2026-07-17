@@ -117,6 +117,7 @@
 import { call, createResource, Dropdown, LoadingIndicator, toast } from "frappe-ui";
 import { computed, h, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { foldReactions } from "@/utils/waReactions";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
 import { TicketSymbol } from "@/types";
 import { HDTicketStatus } from "@/types/doctypes";
@@ -271,16 +272,7 @@ const messageByMsgId = computed(() => {
 });
 
 // Map WhatsApp message_id → array of reactions
-const reactionsMap = computed(() => {
-  const map: Record<string, Array<{ emoji: string; type: string }>> = {};
-  for (const m of allMessages.value) {
-    if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
-      if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
-      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type });
-    }
-  }
-  return map;
-});
+const reactionsMap = computed(() => foldReactions(allMessages.value));
 
 const groupedMessages = computed(() => {
   const groups: Record<string, any[]> = {};

@@ -2,6 +2,8 @@
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { foldReactions } from "@/utils/waReactions";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import BaileysReplyBox from "./BaileysReplyBox.vue";
@@ -175,6 +177,32 @@ function handleEdit(messageName: string, newText: string) {
   editResource.submit({ message_name: messageName, new_text: newText });
 }
 
+const deleteResource = createResource({
+  url: "helpdesk.integrations.wa.delete_wa_message",
+  onSuccess() {
+    messages.reload();
+  },
+  onError(e: any) {
+    toast.error(e?.messages?.[0] || "Failed to delete message");
+  },
+});
+
+// Deleting also removes the message from the recipient's phone, so confirm first.
+const pendingDeleteName = ref("");
+const showDeleteConfirm = ref(false);
+
+function handleDelete(messageName: string) {
+  pendingDeleteName.value = messageName;
+  showDeleteConfirm.value = true;
+}
+
+function confirmDelete() {
+  const name = pendingDeleteName.value;
+  showDeleteConfirm.value = false;
+  pendingDeleteName.value = "";
+  if (name) deleteResource.submit({ message_name: name });
+}
+
 const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
 
 const messageList = computed(() =>
@@ -190,16 +218,7 @@ const messageByMsgId = computed(() => {
   return map;
 });
 
-const reactionsMap = computed(() => {
-  const map: Record<string, Array<{ emoji: string; type: string }>> = {};
-  for (const m of allMessages.value) {
-    if (m.content_type === "reaction" && m.reply_to_message_id && m.message) {
-      if (!map[m.reply_to_message_id]) map[m.reply_to_message_id] = [];
-      map[m.reply_to_message_id].push({ emoji: m.message, type: m.type });
-    }
-  }
-  return map;
-});
+const reactionsMap = computed(() => foldReactions(allMessages.value));
 
 const groupedMessages = computed(() => {
   const groups: Record<string, any[]> = {};
@@ -352,12 +371,20 @@ function handleEditUpdate(data: { message_id: string; new_text: string; name: st
   }
 }
 
+// Looking the message up in the rendered list is what scopes this to the open
+// chat: an id we aren't showing simply isn't found.
+function handleDeleteUpdate(data: { message_id: string }) {
+  const msg = loadedMessages.value.find((m) => m.message_id === data.message_id);
+  if (msg) msg.is_deleted = 1;
+}
+
 watch(messageList, () => { scrollToBottom(); });
 
 onMounted(() => {
   $socket.on("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.on("helpdesk:baileys-status-update", handleStatusUpdate);
   $socket.on("helpdesk:whatsapp-message-edit", handleEditUpdate);
+  $socket.on("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
   scrollToBottom();
   markAsRead();
 });
@@ -366,6 +393,7 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-message", handleRealtimeMessage);
   $socket.off("helpdesk:baileys-status-update", handleStatusUpdate);
   $socket.off("helpdesk:whatsapp-message-edit", handleEditUpdate);
+  $socket.off("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
 });
 
 defineExpose({ scrollToBottom });
@@ -413,11 +441,13 @@ defineExpose({ scrollToBottom });
             :isGroup="true"
             :allowRetry="true"
             :allowEdit="true"
+            :allowDelete="true"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
             @retry="retryMessage"
             @edit="handleEdit"
+            @delete="handleDelete"
           />
         </template>
       </div>
@@ -455,5 +485,14 @@ defineExpose({ scrollToBottom });
     >
       This ticket is not linked to a WhatsApp chat.
     </div>
+
+    <ConfirmDialog
+      v-if="showDeleteConfirm"
+      v-model="showDeleteConfirm"
+      title="Delete message"
+      message="Delete this message for everyone? It will be removed from the recipient's WhatsApp too. This cannot be undone."
+      :onConfirm="confirmDelete"
+      :onCancel="() => (showDeleteConfirm = false)"
+    />
   </div>
 </template>
