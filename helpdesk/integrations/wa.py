@@ -2602,6 +2602,51 @@ def get_whatsapp_messages(
 	return rows
 
 
+@frappe.whitelist()
+def get_wa_message_by_message_id(message_id: str = None, jid: str = None) -> dict | None:
+	"""Return one finalized WA Message row by its WhatsApp message_id, scoped to a jid.
+
+	Used by the chat UI to resolve a reply's quoted target on demand when it falls
+	outside the loaded page and was not returned in `reply_targets` (e.g. after a
+	realtime refresh). Returns None when the target is not stored.
+	"""
+	if not message_id or not jid:
+		return None
+
+	from frappe.query_builder import DocType
+
+	try:
+		BM = DocType("WA Message")
+		User = DocType("User")
+		BC = DocType("WA Contact")
+		rows = (
+			frappe.qb.from_(BM)
+			.left_join(User).on(User.name == BM.owner)
+			.left_join(BC).on(BC.jid == BM.sender_jid)
+			.select(
+				BM.name, BM.creation, BM.direction, BM.jid, BM.message,
+				BM.content_type, BM.media_url, BM.thumbnail_url, BM.sender_jid, BM.sender_name,
+				BM.profile_name, BM.message_id, BM.reply_to_message_id, BM.status, BM.owner,
+				User.full_name.as_("sender_full_name"),
+				BC.phone.as_("sender_phone"),
+				BM.is_edited,
+			)
+			.where(BM.jid == jid)
+			.where(BM.message_id == message_id)
+			.orderby(BM.creation)
+			.limit(1)
+			.run(as_dict=True)
+		)
+	except Exception:
+		return None
+
+	rows = _dedupe_wa_rows(rows)
+	if not rows:
+		return None
+	_finalize_wa_rows(rows)
+	return rows[0]
+
+
 # ── frappe_whatsapp integration handlers ──────────────────────────────────────
 
 def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None, reply_to_message_id: str | None = None) -> dict:
