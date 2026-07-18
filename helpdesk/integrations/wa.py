@@ -112,6 +112,31 @@ def _extract_edit(raw_msg: dict) -> tuple[str, bool, str]:
     return "", False, ""
 
 
+def _extract_reply_target(data: dict, raw_msg: dict, content_type: str) -> str:
+    """Return the message_id this message quotes/replies to, or ''.
+
+    The quote context (`contextInfo.stanzaId`) lives in different places depending
+    on the message shape:
+      - reactions: `reactionMessage.key.id`
+      - media replies: nested in the media sub-message (`imageMessage.contextInfo` …)
+      - plain-text replies: Evolution v2 delivers these as a bare `conversation`
+        and puts the quote at the TOP-LEVEL `data.contextInfo`, not inside `message`.
+        Missing this last case is why text-reply quote boxes never rendered.
+    """
+    if content_type == "reaction":
+        return ((raw_msg.get("reactionMessage") or {}).get("key") or {}).get("id") or ""
+
+    ctx_info = raw_msg.get("extendedTextMessage", {}).get("contextInfo") or {}
+    if not ctx_info:
+        for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
+            ctx_info = raw_msg.get(media_key, {}).get("contextInfo") or {}
+            if ctx_info:
+                break
+    if not ctx_info:
+        ctx_info = data.get("contextInfo") or {}
+    return ctx_info.get("stanzaId") or ""
+
+
 def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) -> None:
     """Append old text to history, update message, publish realtime edit event."""
     doc = frappe.get_doc("WA Message", msg_name)
@@ -915,21 +940,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 
 	raw_msg = data.get("message") or {}
 	text, content_type = _extract_text(raw_msg)
-
-	# For reactions, capture the ID of the message being reacted to
-	reply_to_message_id = ""
-	if content_type == "reaction":
-		reply_to_message_id = ((raw_msg.get("reactionMessage") or {}).get("key") or {}).get("id") or ""
-
-	# Extract reply-to ID from quoted context message
-	if not reply_to_message_id:
-		ctx_info = raw_msg.get("extendedTextMessage", {}).get("contextInfo") or {}
-		if not ctx_info:
-			for media_key in ("imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"):
-				ctx_info = raw_msg.get(media_key, {}).get("contextInfo") or {}
-				if ctx_info:
-					break
-		reply_to_message_id = ctx_info.get("stanzaId") or ctx_info.get("quotedMessage", {}) and ctx_info.get("stanzaId") or ""
+	reply_to_message_id = _extract_reply_target(data, raw_msg, content_type)
 
 	# Extract media URL for media messages — pass full `data` so Evolution can decrypt
 	media_url = ""
