@@ -34,30 +34,36 @@
       </button>
     </div>
 
-    <!-- Attachment preview -->
-    <div v-if="attachment" class="mb-2 flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-3 py-2">
-      <img
-        v-if="isImage"
-        :src="attachmentPreview"
-        class="h-12 w-12 rounded object-cover"
-        alt="preview"
-      />
-      <div v-else class="flex h-12 w-12 items-center justify-center rounded bg-surface-gray-2">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-ink-gray-5">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+    <!-- Attachment previews (one chip per file) -->
+    <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
+      <div
+        v-for="att in attachments"
+        :key="att.id"
+        class="flex items-center gap-2 rounded-lg border border-outline-gray-3 bg-surface-gray-1 px-2 py-1.5"
+      >
+        <img
+          v-if="att.isImage"
+          :src="att.previewUrl"
+          class="h-10 w-10 rounded object-cover"
+          alt="preview"
+        />
+        <div v-else class="flex h-10 w-10 items-center justify-center rounded bg-surface-gray-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-ink-gray-5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="min-w-0 max-w-[140px]">
+          <p class="truncate text-xs font-medium text-ink-gray-7">{{ att.file.name }}</p>
+          <p class="text-[11px] text-ink-gray-5">{{ fileContentType(att.file) }}</p>
+        </div>
+        <button class="shrink-0 text-ink-gray-4 hover:text-ink-gray-7" title="Remove" @click="removeAttachment(att.id)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
       </div>
-      <div class="min-w-0 flex-1">
-        <p class="truncate text-xs font-medium text-ink-gray-7">{{ attachmentName }}</p>
-        <p class="text-[11px] text-ink-gray-5">{{ contentType }}</p>
-      </div>
-      <button class="text-ink-gray-4 hover:text-ink-gray-7" @click="clearAttachment">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </button>
     </div>
 
     <div class="flex items-end gap-2">
@@ -74,6 +80,7 @@
       <input
         ref="fileInput"
         type="file"
+        multiple
         class="hidden"
         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         @change="onFileSelected"
@@ -144,7 +151,7 @@
         ref="textareaRef"
         v-model="text"
         :disabled="sending"
-        :placeholder="attachment ? 'Add a caption (optional)...' : 'Type a message...'"
+        :placeholder="attachments.length ? 'Add a caption (optional)...' : 'Type a message...'"
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-gray-2 px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
         @input="autoResize"
@@ -152,7 +159,7 @@
         @paste="onPaste"
       />
       <button
-        :disabled="(!text.trim() && !attachment) || sending"
+        :disabled="(!text.trim() && !attachments.length) || sending"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
         @click="send"
       >
@@ -164,7 +171,7 @@
         </svg>
       </button>
     </div>
-    <p v-if="dragging" class="mt-1 text-center text-xs text-blue-500">Drop file to attach</p>
+    <p v-if="dragging" class="mt-1 text-center text-xs text-blue-500">Drop files to attach</p>
   </div>
 
   <SavedRepliesSelectorModal
@@ -200,20 +207,34 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 // Attachment state
-const attachment = ref<File | null>(null);
-const attachmentPreview = ref<string>("");
-const attachmentName = computed(() => attachment.value?.name ?? "");
+interface Attachment {
+  id: string;
+  file: File;
+  previewUrl: string;
+  isImage: boolean;
+}
 
-const contentType = computed(() => {
-  if (!attachment.value) return "text";
-  const mime = attachment.value.type;
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  return "document";
-});
+const attachments = ref<Attachment[]>([]);
+// Every object URL we create is tracked here and revoked on unmount, so we
+// never leak preview URLs for files that get removed or sent.
+const objectUrls = new Set<string>();
 
-const isImage = computed(() => contentType.value === "image");
+function makeId() {
+  return (globalThis.crypto as any)?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function makeObjectUrl(file: File): string {
+  const url = URL.createObjectURL(file);
+  objectUrls.add(url);
+  return url;
+}
+
+function revokeObjectUrl(url: string) {
+  if (url && objectUrls.has(url)) {
+    URL.revokeObjectURL(url);
+    objectUrls.delete(url);
+  }
+}
 
 // Preview of the message being replied to
 const replyPreview = computed(() => {
@@ -281,51 +302,71 @@ function onDocClick(e: MouseEvent) {
 }
 
 onMounted(() => document.addEventListener("click", onDocClick));
-onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
+  for (const url of objectUrls) URL.revokeObjectURL(url);
+  objectUrls.clear();
+});
 
 // ── File handling ─────────────────────────────────────────────────────────────
-function setFile(file: File) {
-  attachment.value = file;
-  if (file.type.startsWith("image/")) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      attachmentPreview.value = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  } else {
-    attachmentPreview.value = "";
+function fileContentType(file: File): "image" | "video" | "audio" | "document" {
+  const mime = file.type;
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function addFiles(files: FileList | File[] | null | undefined) {
+  if (!files) return;
+  for (const file of Array.from(files)) {
+    const isImage = file.type.startsWith("image/");
+    attachments.value.push({
+      id: makeId(),
+      file,
+      previewUrl: isImage ? makeObjectUrl(file) : "",
+      isImage,
+    });
   }
 }
 
-function clearAttachment() {
-  attachment.value = null;
-  attachmentPreview.value = "";
+function removeAttachment(id: string) {
+  const idx = attachments.value.findIndex((a) => a.id === id);
+  if (idx === -1) return;
+  const [removed] = attachments.value.splice(idx, 1);
+  if (removed?.previewUrl) revokeObjectUrl(removed.previewUrl);
+}
+
+function clearAttachments() {
+  for (const a of attachments.value) revokeObjectUrl(a.previewUrl);
+  attachments.value = [];
   if (fileInput.value) fileInput.value.value = "";
 }
 
 function onFileSelected(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) setFile(file);
+  addFiles((e.target as HTMLInputElement).files);
+  // Allow re-selecting the same file(s) again later.
+  if (fileInput.value) fileInput.value.value = "";
 }
 
 function onDrop(e: DragEvent) {
   dragging.value = false;
-  const file = e.dataTransfer?.files?.[0];
-  if (file) setFile(file);
+  addFiles(e.dataTransfer?.files);
 }
 
 function onPaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items;
   if (!items) return;
+  const pasted: File[] = [];
   for (const item of items) {
     if (item.kind === "file") {
       const file = item.getAsFile();
-      if (file) {
-        e.preventDefault();
-        setFile(file);
-        return;
-      }
+      if (file) pasted.push(file);
     }
+  }
+  if (pasted.length) {
+    e.preventDefault();
+    addFiles(pasted);
   }
 }
 
@@ -336,58 +377,69 @@ const sendReply = createResource({
   },
 });
 
-async function send() {
-  if ((!text.value.trim() && !attachment.value) || sending.value) return;
+// Upload+send one attachment via send_wa_media. Caption + reply target ride on
+// the first file only; the rest go out bare, one WhatsApp Message per file.
+async function sendMediaUnit(item: Attachment, caption: string, replyToMsgId: string): Promise<boolean> {
+  const formData = new FormData();
+  formData.append("file", item.file, item.file.name);
+  formData.append("ticket", props.ticketId);
+  formData.append("message", caption);
+  formData.append("content_type", fileContentType(item.file));
+  if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
 
-  const replyToMsgId = props.replyTo?.message_id || "";
-
-  if (attachment.value) {
-    // For media: show a brief "uploading" lock only until the request is fired,
-    // then restore the input so the agent can keep typing.
-    sending.value = true;
-    const formData = new FormData();
-    formData.append("file", attachment.value, attachment.value.name);
-    formData.append("ticket", props.ticketId);
-    formData.append("message", text.value.trim());
-    formData.append("content_type", contentType.value);
-    if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
-
-    // Clear input immediately so agent can start typing next message
-    text.value = "";
-    clearAttachment();
-    if (textareaRef.value) textareaRef.value.style.height = "auto";
-    sending.value = false;
-    emit("sent");
-
-    // Fire upload in background
-    fetch("/api/method/helpdesk.integrations.wa.send_wa_media", {
+  try {
+    const response = await fetch("/api/method/helpdesk.integrations.wa.send_wa_media", {
       method: "POST",
       headers: { "X-Frappe-CSRF-Token": (window as any).csrf_token ?? "" },
       body: formData,
-    }).then(async (response) => {
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err?.exc_type || "Media send failed");
-      }
-    }).catch(() => {
-      toast.error("Media send failed");
     });
-  } else {
-    // Text: clear immediately, fire API in background
-    const msgText = text.value.trim();
-    const args: Record<string, any> = {
-      ticket: props.ticketId,
-      message: msgText,
-      content_type: "text",
-    };
-    if (replyToMsgId) args.reply_to_message_id = replyToMsgId;
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      toast.error(err?.exc_type || "Media send failed");
+      return false;
+    }
+    return true;
+  } catch {
+    toast.error("Media send failed");
+    return false;
+  } finally {
+    revokeObjectUrl(item.previewUrl);
+  }
+}
 
-    text.value = "";
-    if (textareaRef.value) textareaRef.value.style.height = "auto";
-    emit("sent");
+async function send() {
+  if ((!text.value.trim() && attachments.value.length === 0) || sending.value) return;
 
+  const replyToMsgId = props.replyTo?.message_id || "";
+  const caption = text.value.trim();
+  const items = [...attachments.value];
+
+  // Clear input immediately so the agent can start typing the next message.
+  text.value = "";
+  attachments.value = [];
+  if (fileInput.value) fileInput.value.value = "";
+  if (textareaRef.value) textareaRef.value.style.height = "auto";
+  emit("sent");
+
+  if (items.length === 0) {
     // Submit without awaiting — errors surface via onError toast
-    sendReply.submit(args);
+    sendReply.submit({
+      ticket: props.ticketId,
+      message: caption,
+      content_type: "text",
+      ...(replyToMsgId ? { reply_to_message_id: replyToMsgId } : {}),
+    });
+    return;
+  }
+
+  sending.value = true;
+  try {
+    for (let i = 0; i < items.length; i++) {
+      const ok = await sendMediaUnit(items[i], i === 0 ? caption : "", i === 0 ? replyToMsgId : "");
+      if (!ok) break;
+    }
+  } finally {
+    sending.value = false;
   }
 }
 
