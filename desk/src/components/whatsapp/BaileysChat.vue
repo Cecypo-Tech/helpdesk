@@ -706,10 +706,27 @@ function scrollToBottom() {
   });
 }
 
-function scrollToMessage(messageId: string) {
+function findMessageEl(messageId: string): HTMLElement | null {
+  return (
+    (messagesContainer.value?.querySelector(`[data-msg-id="${messageId}"]`) as HTMLElement | null) ||
+    null
+  );
+}
+
+// The quoted preview can resolve a message that isn't loaded yet (it's paginated
+// in from an older page), so it has no bubble and no data-msg-id to scroll to.
+// Page back until it appears or history runs out.
+async function scrollToMessage(messageId: string) {
   if (!messageId || !messagesContainer.value) return;
-  const el = messagesContainer.value.querySelector(`[data-msg-id="${messageId}"]`) as HTMLElement | null;
-  if (!el) return;
+  let el = findMessageEl(messageId);
+  while (!el && hasMore.value) {
+    await loadMore();
+    el = findMessageEl(messageId);
+  }
+  if (!el) {
+    toast.error("Could not find the original message");
+    return;
+  }
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.style.transition = "background 0.2s";
   el.style.background = "rgba(99,178,115,0.25)";

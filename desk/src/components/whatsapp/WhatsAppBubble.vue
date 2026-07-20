@@ -1,5 +1,5 @@
 <template>
-  <div class="flex" :class="isOutgoing ? 'justify-end' : 'justify-start'">
+  <div class="flex" :class="isOutgoing ? 'justify-end' : 'justify-start'" v-bind="$attrs">
     <!-- Inner wrapper: limits width, anchors the action bar + emoji picker -->
     <div class="group relative max-w-[70%]">
 
