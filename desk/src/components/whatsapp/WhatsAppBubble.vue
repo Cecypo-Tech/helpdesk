@@ -91,11 +91,14 @@
       <!-- Bubble -->
       <div
         class="rounded-lg px-3 py-2 text-sm shadow-sm transition-colors"
-        :class="
+        :class="[
           isOutgoing
             ? 'bg-green-100 dark:bg-green-900 text-ink-gray-9 group-hover:bg-green-200 dark:group-hover:bg-green-800'
-            : 'bg-surface-white text-ink-gray-9 border border-outline-gray-2 group-hover:bg-surface-gray-1'
-        "
+            : 'bg-surface-white text-ink-gray-9 group-hover:bg-surface-gray-1',
+          message.edit_unrecoverable
+            ? 'border-2 border-red-500 dark:border-red-500'
+            : (isOutgoing ? '' : 'border border-outline-gray-2'),
+        ]"
       >
         <!-- Profile name for incoming (color-coded per sender for group chats) -->
         <div

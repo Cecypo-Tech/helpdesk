@@ -164,6 +164,41 @@ def _apply_edit(msg_name: str, new_text: str, edited_by: str, jid: str, line) ->
     )
 
 
+_EDIT_UNRECOVERABLE_NOTE = " [edited on WhatsApp — new text unavailable]"
+
+
+def _flag_unrecoverable_edit(msg_name: str, jid: str, line) -> None:
+    """Mark a message as edited when WhatsApp's newer edit protocol (secretEncryptedMessage)
+    arrives — Evolution API/Baileys cannot decrypt this, so the new text is genuinely
+    unrecoverable here. Keep the original text (best info we have) and flag it instead
+    of silently losing the edit or inserting a stray empty message."""
+    doc = frappe.get_doc("WA Message", msg_name)
+    if doc.edit_unrecoverable:
+        return
+    doc.append("edit_history", {
+        "old_message": doc.message or "",
+        "edited_at": frappe.utils.now(),
+        "edited_by": "incoming (undecryptable)",
+    })
+    doc.message = (doc.message or "") + _EDIT_UNRECOVERABLE_NOTE
+    doc.is_edited = 1
+    doc.edit_unrecoverable = 1
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    frappe.publish_realtime(
+        "helpdesk:whatsapp-message-edit",
+        message={
+            "message_id": doc.message_id,
+            "new_text": doc.message,
+            "name": msg_name,
+            "jid": jid,
+            "line": line.name,
+            "edit_unrecoverable": True,
+        },
+        after_commit=True,
+    )
+
+
 def _publish_wa_delete(jid: str, message_id: str, line_name: str) -> None:
     """Tell open chats a message was removed, so the bubble flips without a reload."""
     frappe.publish_realtime(
@@ -975,6 +1010,23 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		frappe.logger().warning(f"Incoming WA edit: original not found target_id={target_id} wrapper_id={message_id}")
 		return {"status": "ok", "reason": "edit_original_not_found"}
 
+	# WhatsApp's newer edit protocol sends a Signal-encrypted node (secretEncryptedMessage)
+	# instead of a plain protocolMessage. Neither Evolution API nor the Baileys library it
+	# wraps decrypts this — it has no handling for it at all (confirmed: the key only
+	# appears in Baileys' protobuf schema, never in its message-processing code; Evolution's
+	# own message store also keeps the pre-edit text). The real new text is unrecoverable
+	# here, so just flag the original instead of falling through to a stray empty insert.
+	secret_edit = raw_msg.get("secretEncryptedMessage") or {}
+	if secret_edit:
+		target_id = (secret_edit.get("targetMessageKey") or {}).get("id") or ""
+		existing = frappe.db.get_value("WA Message", {"message_id": target_id}, "name") if target_id else None
+		if existing:
+			frappe.set_user("Administrator")
+			_flag_unrecoverable_edit(existing, jid=jid, line=line)
+			return {"status": "ok", "edited": "unrecoverable"}
+		frappe.logger().warning(f"Incoming WA edit (undecryptable): original not found target_id={target_id}")
+		return {"status": "ok", "reason": "edit_original_not_found"}
+
 	# Deduplicate via Redis atomic SET NX — prevents the race where two concurrent
 	# webhook deliveries for the SAME line both pass a DB-level exists() check before either inserts.
 	# Key is scoped per-line so that a group message legitimately received by multiple WA Lines
@@ -1109,7 +1161,8 @@ def _handle_update(updates: list, line) -> dict:
             continue
         key = item.get("key") or {}
         message_id = key.get("id") or ""
-        raw_status = (item.get("update") or {}).get("status")
+        update_body = item.get("update") or {}
+        raw_status = update_body.get("status")
         status = _STATUS_MAP.get(raw_status) if raw_status is not None else None
         if not message_id or not status:
             continue
@@ -2521,6 +2574,7 @@ def get_whatsapp_messages(
 					BC.phone.as_("sender_phone"),
 					BM.is_edited,
 					BM.is_deleted,
+					BM.edit_unrecoverable,
 				)
 				.where(BM.jid == jid)
 			)
@@ -2673,6 +2727,7 @@ def get_whatsapp_messages(
 		m["media_url"] = m.get("attach") or ""
 		m["edit_history"] = []
 		m["is_edited"] = 0
+		m["edit_unrecoverable"] = 0
 		# Meta's API has no unsend-for-everyone equivalent on this path.
 		m["is_deleted"] = 0
 
@@ -2710,6 +2765,7 @@ def get_wa_message_by_message_id(message_id: str = None, jid: str = None) -> dic
 				BC.phone.as_("sender_phone"),
 				BM.is_edited,
 				BM.is_deleted,
+				BM.edit_unrecoverable,
 			)
 			.where(BM.jid == jid)
 			.where(BM.message_id == message_id)

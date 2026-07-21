@@ -173,6 +173,13 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "fieldname": "edit_unrecoverable",
+   "fieldtype": "Check",
+   "label": "Edit Unrecoverable",
+   "read_only": 1
+  },
+  {
    "fieldname": "edit_history",
    "fieldtype": "Table",
    "label": "Edit History",
