@@ -119,6 +119,21 @@
       />
     </div>
 
+    <!-- Filter chips -->
+    <div class="flex items-center gap-1.5 border-b border-outline-gray-2 px-3 py-2">
+      <button
+        v-for="f in filterOptions"
+        :key="f.value"
+        class="rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
+        :class="
+          activeFilter === f.value
+            ? 'bg-green-600 text-white'
+            : 'bg-surface-gray-2 text-ink-gray-6 hover:bg-surface-gray-3'
+        "
+        @click="activeFilter = f.value"
+      >{{ f.label }}</button>
+    </div>
+
     <div class="flex-1 overflow-y-auto">
       <div v-if="conversations.loading && !conversations.data" class="flex justify-center py-8">
         <LoadingIndicator :scale="5" class="text-ink-gray-5" />
@@ -143,10 +158,12 @@
         :lastMessageTime="conv.last_message_time"
         :lastDirection="conv.last_direction"
         :contentType="conv.content_type"
-        :hasUnread="isUnread(conv)"
+        :unreadCount="conv.unread_count || 0"
+        :isFavourite="favouriteJids.has(conv.jid)"
         :selected="conv.jid === selectedJid"
         :openTaskCount="conv.open_task_count || 0"
         @select="(jid, name, company, team, phone) => $emit('select', jid, name, company, team, phone)"
+        @toggle-favourite="toggleFavourite"
       />
     </div>
   </div>
@@ -169,8 +186,41 @@ const router = useRouter();
 const waLinesStore = useWaLinesStore();
 
 const search = ref("");
-const lastReadMap = ref<Record<string, number>>({});
 const syncingContacts = ref(false);
+
+// ── Filter chips ─────────────────────────────────────────────────────────────
+
+type FilterValue = "all" | "unread" | "favourites" | "groups";
+const filterOptions: { value: FilterValue; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "unread", label: "Unread" },
+  { value: "favourites", label: "Favourites" },
+  { value: "groups", label: "Groups" },
+];
+const activeFilter = ref<FilterValue>("all");
+
+// ── Favourites (personal, per-browser) ──────────────────────────────────────
+
+const FAVOURITES_KEY = "wa_favourite_chats";
+const favouriteJids = ref<Set<string>>(new Set(loadFavourites()));
+
+function loadFavourites(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(FAVOURITES_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function toggleFavourite(jid: string) {
+  const next = new Set(favouriteJids.value);
+  if (next.has(jid)) next.delete(jid);
+  else next.add(jid);
+  favouriteJids.value = next;
+  try {
+    localStorage.setItem(FAVOURITES_KEY, JSON.stringify([...next]));
+  } catch {}
+}
 
 const syncResource = createResource({
   url: "helpdesk.integrations.wa.enqueue_wa_sync",
@@ -188,12 +238,16 @@ function syncContacts() {
   if (syncingContacts.value) return;
   syncingContacts.value = true;
   syncResource.submit({});
+  // Group sync re-resolves up to 50 groups per WA Line (~1s each via Evolution API),
+  // so this can legitimately take several minutes across multiple lines — the backend
+  // job itself is allowed up to 30 minutes. This is just a safety net for a lost
+  // socket event, not a realistic expectation of how long a healthy sync takes.
   setTimeout(() => {
     if (syncingContacts.value) {
       syncingContacts.value = false;
-      toast.error("Sync timed out — check server logs");
+      toast.error("Sync is taking unusually long — check server logs");
     }
-  }, 120_000);
+  }, 480_000);
 }
 
 function onSyncComplete(data: { contacts?: number; groups?: number; error?: string }) {
@@ -220,10 +274,6 @@ onBeforeUnmount(() => {
   const { $socket } = globalStore();
   $socket.off("helpdesk:wa-sync-complete", onSyncComplete);
   $socket.off("helpdesk:baileys-message", onBaileysMessage);
-});
-
-watch(() => props.selectedJid, (jid) => {
-  if (jid) lastReadMap.value[jid] = Date.now();
 });
 
 // ── New chat ────────────────────────────────────────────────────────────────
@@ -305,8 +355,32 @@ watch(() => props.line, () => {
   conversations.reload();
 });
 
+// Opening a conversation marks its messages read server-side (BaileysChat calls
+// mark_wa_messages_read), but this list's own fetched data never reflected that —
+// only the badge for the currently-selected row was faked via a template check,
+// so the count came back the moment you switched away, and "Unread" never
+// actually dropped the chat. Mutate the underlying data so both stay correct.
+watch(() => props.selectedJid, (jid) => {
+  if (!jid || !conversations.data) return;
+  const target = conversations.data.find((c: any) => c.jid === jid);
+  if (target && target.unread_count) {
+    conversations.data = conversations.data.map((c: any) =>
+      c.jid === jid ? { ...c, unread_count: 0 } : c
+    );
+  }
+});
+
 const filteredList = computed(() => {
-  const list: any[] = conversations.data || [];
+  let list: any[] = conversations.data || [];
+
+  if (activeFilter.value === "unread") {
+    list = list.filter((c) => (c.unread_count || 0) > 0);
+  } else if (activeFilter.value === "favourites") {
+    list = list.filter((c) => favouriteJids.value.has(c.jid));
+  } else if (activeFilter.value === "groups") {
+    list = list.filter((c) => c.is_group);
+  }
+
   if (!search.value.trim()) return list;
   const q = search.value.toLowerCase();
   return list.filter(
@@ -316,19 +390,8 @@ const filteredList = computed(() => {
   );
 });
 
-function isUnread(conv: any): boolean {
-  if (conv.last_direction !== "Incoming") return false;
-  if (conv.jid === props.selectedJid) return false;
-  const msgTime = new Date(conv.last_message_time).getTime();
-  const readTime = lastReadMap.value[conv.jid];
-  if (readTime) return msgTime > readTime;
-  const stored = localStorage.getItem(`baileys_last_read_${conv.jid}`);
-  if (!stored) return true;
-  return msgTime > new Date(stored).getTime();
-}
-
 const unreadCount = computed(() =>
-  (conversations.data || []).reduce((n: number, c: any) => n + (isUnread(c) ? 1 : 0), 0)
+  (conversations.data || []).reduce((n: number, c: any) => n + (c.unread_count || 0), 0)
 );
 
 const markAllReadResource = createResource({
@@ -336,22 +399,11 @@ const markAllReadResource = createResource({
   auto: false,
   onSuccess() {
     waLinesStore.reload();
+    conversations.reload();
   },
 });
 
 function markAllRead() {
-  // Update client-side read timestamps so isUnread() returns false immediately
-  const next: Record<string, number> = { ...lastReadMap.value };
-  for (const c of (conversations.data || [])) {
-    if (!c?.jid) continue;
-    const stamp = c.last_message_time || "";
-    const t = stamp ? new Date(stamp).getTime() : Date.now();
-    if (!Number.isFinite(t)) continue;
-    next[c.jid] = t;
-    try { localStorage.setItem(`baileys_last_read_${c.jid}`, stamp || new Date(t).toISOString()); } catch {}
-  }
-  lastReadMap.value = next;
-  // Persist to DB so the sidebar badge also clears
   markAllReadResource.submit({ line: props.line });
 }
 

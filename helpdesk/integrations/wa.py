@@ -1818,6 +1818,21 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         except Exception:
             pass
 
+    # Unread incoming message counts per JID, from the same is_read flag mark_wa_messages_read maintains.
+    unread_counts: dict[str, int] = {}
+    if jids:
+        for row in frappe.db.sql(
+            """
+            SELECT jid, COUNT(*) AS cnt
+            FROM `tabWA Message`
+            WHERE direction = 'Incoming' AND is_read = 0 AND jid IN %(jids)s
+            GROUP BY jid
+            """,
+            {"jids": tuple(jids)},
+            as_dict=True,
+        ):
+            unread_counts[row.jid] = row.cnt
+
     result = []
     for r in deduped:
         jid = r.jid
@@ -1861,6 +1876,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             "last_direction": r.get("direction", "Incoming"),
             "content_type": r.get("content_type", "text"),
             "open_task_count": task_counts.get(jid, 0),
+            "unread_count": unread_counts.get(jid, 0),
         })
 
     return result
@@ -1916,6 +1932,38 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
         except Exception:
             frappe.cache().set_value(retry_backoff_key, 1, expires_in_sec=900)
     return count
+
+
+@frappe.whitelist()
+def get_ticket_wa_unread_count(ticket: str) -> int:
+    """Return the unread incoming WhatsApp message count for a ticket's WA tab badge.
+
+    Branches the same way mark_wa_messages_read does: WA Line tickets track read
+    state via WA Message.is_read, WABA tickets via WhatsApp Message.status.
+    """
+    if not ticket:
+        return 0
+
+    try:
+        jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
+    except Exception:
+        jid = None
+
+    if jid:
+        return frappe.db.count("WA Message", {"jid": jid, "direction": "Incoming", "is_read": 0})
+
+    if not frappe.db.exists("DocType", "WhatsApp Message"):
+        return 0
+
+    return frappe.db.count(
+        "WhatsApp Message",
+        {
+            "reference_doctype": "HD Ticket",
+            "reference_name": ticket,
+            "type": "Incoming",
+            "status": ["!=", "marked as read"],
+        },
+    )
 
 
 @frappe.whitelist()
@@ -3865,13 +3913,12 @@ def sync_wa_groups() -> dict:
 		)
 		existing = {r.jid: r for r in existing_rows}
 
-		# Only fetch from API for JIDs with no name yet
-		need_resolve = [
-			jid for jid in candidate_jids
-			if jid not in existing or not existing[jid].group_name
-		]
-		if not need_resolve:
-			continue
+		# Always re-resolve every candidate — a group that already has a name may
+		# have been renamed on WhatsApp since. Skipping already-named groups here
+		# used to mean sync always reported 0 once every group had been seen once,
+		# and renames were never picked up. findGroupInfos is fast (~1s), so
+		# re-checking the top 50 per line is cheap relative to the 30-minute job budget.
+		need_resolve = candidate_jids
 
 		insert_rows = []
 		for jid in need_resolve:

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
+    class="group flex cursor-pointer items-center gap-2.5 border-b border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="selected ? 'bg-surface-gray-2' : ''"
     @click="$emit('select', jid, displayName, company || '', assignedTeam || '', phone || '')"
   >
@@ -28,7 +28,20 @@
     <div class="min-w-0 flex-1">
       <div class="flex items-center justify-between gap-1">
         <span class="truncate text-sm font-semibold text-ink-gray-9">{{ displayName }}</span>
-        <span class="shrink-0 text-[11px] text-ink-gray-5">{{ formattedTime }}</span>
+        <div class="flex shrink-0 items-center gap-1">
+          <!-- Favourite star — always visible once starred, otherwise only on hover -->
+          <button
+            class="flex h-4 w-4 items-center justify-center text-ink-gray-4 hover:text-yellow-500"
+            :class="isFavourite ? 'text-yellow-500' : 'opacity-0 group-hover:opacity-100'"
+            :title="isFavourite ? 'Remove from favourites' : 'Add to favourites'"
+            @click.stop="$emit('toggle-favourite', jid)"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" :fill="isFavourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+          </button>
+          <span class="text-[11px] text-ink-gray-5">{{ formattedTime }}</span>
+        </div>
       </div>
       <div class="flex items-center gap-1">
         <span v-if="company" class="truncate text-[11px] text-ink-gray-4">{{ company }}</span>
@@ -51,9 +64,9 @@
           <span v-else>{{ lastMessage }}</span>
         </span>
         <span
-          v-if="hasUnread"
-          class="ml-1 h-2 w-2 shrink-0 rounded-full bg-green-500"
-        />
+          v-if="unreadCount > 0"
+          class="ml-1 flex min-w-[18px] h-[18px] shrink-0 items-center justify-center rounded-full bg-green-500 px-1 text-[10px] font-bold leading-none text-white"
+        >{{ unreadCount > 99 ? "99+" : unreadCount }}</span>
       </div>
     </div>
   </div>
@@ -75,13 +88,15 @@ const props = defineProps<{
   lastMessageTime: string;
   lastDirection: string;
   contentType: string;
-  hasUnread: boolean;
+  unreadCount: number;
+  isFavourite: boolean;
   selected: boolean;
   openTaskCount?: number;
 }>();
 
 defineEmits<{
   (e: "select", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
+  (e: "toggle-favourite", jid: string): void;
 }>();
 
 const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());

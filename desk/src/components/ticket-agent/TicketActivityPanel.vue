@@ -5,6 +5,18 @@
     @update:modelValue="changeTabTo"
     class="[&_[role='tab']]:px-0 [&_[role='tablist']]:px-5 [&_[role='tablist']]:gap-7.5 [&_[role='tablist']]:flex-shrink-0"
   >
+    <template #tab-item="{ tab }">
+      <button
+        class="flex items-center gap-1.5 text-base text-ink-gray-5 duration-300 ease-in-out hover:text-ink-gray-9 data-[state=active]:text-ink-gray-9 py-2.5"
+      >
+        <component v-if="tab.icon" :is="tab.icon" class="size-4" />
+        {{ tab.label }}
+        <span
+          v-if="(tab.name === 'whatsapp' || tab.name === 'baileys') && waUnreadCount > 0"
+          class="flex min-w-[16px] h-4 items-center justify-center rounded-full bg-green-500 px-1 text-[10px] font-bold leading-none text-white"
+        >{{ waUnreadCount > 99 ? "99+" : waUnreadCount }}</span>
+      </button>
+    </template>
     <template #tab-panel="{ tab }">
       <WhatsAppChatTab
         v-if="tab.name === 'whatsapp'"
@@ -74,6 +86,7 @@ import WhatsAppChatTab from "@/components/whatsapp/WhatsAppChatTab.vue";
 import BaileysGroupChatTab from "@/components/whatsapp/BaileysGroupChatTab.vue";
 import { useActiveTabManager } from "@/composables/useActiveTabManager";
 import { useTelephonyStore } from "@/stores/telephony";
+import { globalStore } from "@/stores/globalStore";
 import {
   ActivitiesSymbol,
   FeedbackActivity,
@@ -83,7 +96,7 @@ import {
 } from "@/types";
 import { createResource, LoadingIndicator, Tabs } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, ComputedRef, defineAsyncComponent, inject, nextTick, ref, watch } from "vue";
+import { computed, ComputedRef, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import TicketAgentActivities from "../ticket/TicketAgentActivities.vue";
 
@@ -121,6 +134,42 @@ watch(
   },
   { immediate: true }
 );
+
+// Unread-count badge on the WhatsApp tab label (WABA or WA Line, whichever applies).
+const waUnreadCount = ref(0);
+const waUnreadResource = createResource({
+  url: "helpdesk.integrations.wa.get_ticket_wa_unread_count",
+  onSuccess: (count: number) => {
+    waUnreadCount.value = count || 0;
+  },
+});
+
+function reloadWaUnreadCount() {
+  const name = ticket.value?.doc?.name;
+  if (name) waUnreadResource.fetch({ ticket: String(name) });
+}
+
+watch(() => ticket.value?.doc?.name, reloadWaUnreadCount, { immediate: true });
+
+function onWaMessageForBadge() {
+  // Only refetch when the WhatsApp tab isn't the one currently open —
+  // if it's open, the chat component already marks messages read.
+  if (activeTabName.value !== "whatsapp" && activeTabName.value !== "baileys") {
+    reloadWaUnreadCount();
+  }
+}
+
+onMounted(() => {
+  const { $socket } = globalStore();
+  $socket.on("helpdesk:whatsapp-message", onWaMessageForBadge);
+  $socket.on("helpdesk:baileys-message", onWaMessageForBadge);
+});
+
+onBeforeUnmount(() => {
+  const { $socket } = globalStore();
+  $socket.off("helpdesk:whatsapp-message", onWaMessageForBadge);
+  $socket.off("helpdesk:baileys-message", onWaMessageForBadge);
+});
 
 const tabs: ComputedRef<TabObject[]> = computed(() => {
   const _tabs: TabObject[] = [
@@ -189,8 +238,10 @@ watch(tabIndex, (idx) => {
   const tabName = tabs.value[idx]?.name;
   if (tabName === "whatsapp") {
     nextTick(() => (whatsappTabRef.value as any)?.scrollToBottom?.());
+    waUnreadCount.value = 0;
   } else if (tabName === "baileys") {
     nextTick(() => (baileysTabRef.value as any)?.scrollToBottom?.());
+    waUnreadCount.value = 0;
   }
 });
 
