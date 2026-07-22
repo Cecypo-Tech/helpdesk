@@ -151,6 +151,7 @@ class TestWAUnreadState(FrappeTestCase):
 				return None  # simulate the stale read that lost the race
 			return original_get_value(doctype, filters, fieldname, *args, **kwargs)
 
+		message_log_len = len(frappe.message_log)
 		frappe.db.get_value = fake_get_value
 		try:
 			# Must not raise.
@@ -160,6 +161,10 @@ class TestWAUnreadState(FrappeTestCase):
 
 		rows = frappe.get_all("WA Conversation Read State", filters={"user": user, "jid": jid})
 		self.assertEqual(len(rows), 1)
+		# The losing insert queues a "must be unique" msgprint before raising;
+		# the fallback must scrub it so the agent never sees a spurious toast
+		# for a race that was otherwise handled transparently.
+		self.assertEqual(len(frappe.message_log), message_log_len)
 
 	def test_historical_sync_does_not_create_unread_for_anyone(self):
 		from helpdesk.integrations.wa import _mark_conversation_read_for_all_agents, get_wa_conversations

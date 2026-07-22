@@ -1778,12 +1778,18 @@ def _mark_conversation_read_for_user(jid: str, user: str | None = None, upto=Non
         "jid": jid,
         "last_read": upto,
     })
+    message_log_len = len(frappe.message_log)
     with savepoint(catch=frappe.exceptions.UniqueValidationError):
         doc.insert(ignore_permissions=True)
         return
 
-    # Lost the race: another request inserted the row first. Fall back to
-    # updating the row the winner created.
+    # Lost the race: another request inserted the row first. The failed
+    # insert queued a "must be unique" msgprint before raising — drop it so
+    # a losing race doesn't surface a confusing toast to the agent, since
+    # the fallback below makes the race invisible to the caller otherwise.
+    del frappe.message_log[message_log_len:]
+
+    # Fall back to updating the row the winner created.
     existing = frappe.db.get_value("WA Conversation Read State", {"user": user, "jid": jid}, "name")
     if existing:
         frappe.db.set_value("WA Conversation Read State", existing, "last_read", upto, update_modified=False)
@@ -3871,6 +3877,8 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 		# later than any back-dated historical import's.
 		for touched_jid, upto in touched_jids.items():
 			_mark_conversation_read_for_all_agents(touched_jid, upto=upto)
+		if touched_jids:
+			frappe.db.commit()
 
 		frappe.publish_realtime(
 			"helpdesk:wa-old-sync-complete",
