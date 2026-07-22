@@ -48,3 +48,4 @@ helpdesk.patches.reconfigure_wa_webhooks
 helpdesk.patches.add_wa_message_composite_index #2026-07-16
 helpdesk.patches.backfill_whatsapp_ticket_channel
 helpdesk.patches.backfill_wa_thumbnails
+helpdesk.patches.add_wa_conversation_read_state
