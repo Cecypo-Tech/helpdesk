@@ -1068,7 +1068,6 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 				"reference_doctype": "",
 				"reference_name": "",
 				"line": line.name,
-				"is_read": 1,
 			}).insert(ignore_permissions=True)
 		except frappe.exceptions.DuplicateEntryError:
 			return {"status": "duplicate"}
@@ -1107,7 +1106,6 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 			"reference_doctype": "HD Ticket" if _ticket_ref else "",
 			"reference_name": _ticket_ref,
 			"line": line.name,
-			"is_read": 0,
 		}).insert(ignore_permissions=True)
 	except frappe.exceptions.DuplicateEntryError:
 		return {"status": "duplicate"}
@@ -1426,7 +1424,6 @@ def send_wa_reply(
         "reference_doctype": "HD Ticket" if ticket else "",
         "reference_name": ticket or "",
         "line": line.name,
-        "is_read": 1,
     })
     msg_doc.insert(ignore_permissions=True)
 
@@ -1527,7 +1524,6 @@ def send_wa_reaction(
         "message_id": sent_id,
         "reply_to_message_id": target_message_id,
         "line": line.name,
-        "is_read": 1,
     }).insert(ignore_permissions=True)
     frappe.db.commit()
     _publish_wa_event(jid, is_incoming=False, line=line.name)

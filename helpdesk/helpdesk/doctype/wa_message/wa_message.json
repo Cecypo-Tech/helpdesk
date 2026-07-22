@@ -24,7 +24,6 @@
   "section_meta",
   "status",
   "line",
-  "is_read",
   "profile_name",
   "is_edited",
   "is_deleted",
@@ -145,13 +144,6 @@
    "in_list_view": 0,
    "read_only": 1,
    "search_index": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "is_read",
-   "fieldtype": "Check",
-   "label": "Is Read",
-   "read_only": 1
   },
   {
    "fieldname": "profile_name",
