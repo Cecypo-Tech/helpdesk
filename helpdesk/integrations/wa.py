@@ -1727,24 +1727,31 @@ def get_wa_lines() -> list[dict]:
         fields=["name", "label", "instance_name"],
         order_by="label asc",
     )
-    wa_msg_exists = frappe.db.exists("DocType", "WA Message")
+
+    # Per-line unread counts for the current agent in a single grouped query,
+    # rather than one query per line. Scoped to the same per-agent cursor
+    # (WA Conversation Read State) the conversation list uses.
+    unread_by_line: dict[str, int] = {}
+    if lines and frappe.db.exists("DocType", "WA Message"):
+        for row in frappe.db.sql(
+            """
+            SELECT m.line AS line, COUNT(*) AS cnt
+            FROM `tabWA Message` m
+            LEFT JOIN `tabWA Conversation Read State` r
+              ON r.jid = m.jid AND r.user = %(user)s
+            WHERE m.direction = 'Incoming'
+              AND (r.last_read IS NULL OR m.creation > r.last_read)
+            GROUP BY m.line
+            """,
+            {"user": frappe.session.user},
+            as_dict=True,
+        ):
+            if row.line:
+                unread_by_line[row.line] = row.cnt
+
     for line in lines:
         line["display_label"] = line["label"] or line["instance_name"]
-        line["unread"] = (
-            (frappe.db.sql(
-                """
-                SELECT COUNT(*)
-                FROM `tabWA Message` m
-                LEFT JOIN `tabWA Conversation Read State` r
-                  ON r.jid = m.jid AND r.user = %(user)s
-                WHERE m.direction = 'Incoming' AND m.line = %(line)s
-                  AND (r.last_read IS NULL OR m.creation > r.last_read)
-                """,
-                {"line": line["name"], "user": frappe.session.user},
-            ) or [[0]])[0][0]
-            if wa_msg_exists
-            else 0
-        )
+        line["unread"] = unread_by_line.get(line["name"], 0)
     return lines
 
 
