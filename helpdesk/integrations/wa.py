@@ -2006,7 +2006,9 @@ def get_ticket_wa_unread_count(ticket: str) -> int:
     """Return the unread incoming WhatsApp message count for a ticket's WA tab badge.
 
     Branches the same way mark_wa_messages_read does: WA Line tickets track read
-    state via WA Message.is_read, WABA tickets via WhatsApp Message.status.
+    state per-agent via the WA Conversation Read State cursor (see
+    _unread_counts_for_user), WABA tickets via the shared WhatsApp Message.status
+    field.
     """
     if not ticket:
         return 0

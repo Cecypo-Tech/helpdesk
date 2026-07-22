@@ -57,7 +57,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-msg-id-001",
             "status": "Sent",
             "line": line.name,
-            "is_read": 1,
         }).insert(ignore_permissions=True)
 
         _handle_update([{
@@ -92,7 +91,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-incoming-edit-001",
             "status": "Pending",
             "line": line.name,
-            "is_read": 0,
         }).insert(ignore_permissions=True)
 
         edit_data = {
@@ -164,7 +162,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-out-edit-001",
             "status": "Read",
             "line": line.name,
-            "is_read": 1,
         }).insert(ignore_permissions=True)
 
         mock_resp = MagicMock()
@@ -202,7 +199,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-in-reject-001",
             "status": "Pending",
             "line": line.name,
-            "is_read": 0,
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
@@ -220,7 +216,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-media-reject-001",
             "status": "Sent",
             "line": line.name,
-            "is_read": 1,
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
@@ -238,7 +233,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-empty-reject-001",
             "status": "Sent",
             "line": line.name,
-            "is_read": 1,
         }).insert(ignore_permissions=True)
 
         with self.assertRaises(frappe.ValidationError):
@@ -258,7 +252,6 @@ class TestWaWebhook(unittest.TestCase):
                 "message_id": f"_test-unread-{i}",
                 "status": "Pending",
                 "line": line.name,
-                "is_read": 0,
             }).insert(ignore_permissions=True)
 
         lines = get_wa_lines()
@@ -293,7 +286,6 @@ class TestWaWebhook(unittest.TestCase):
             "message_id": "_test-merge-lid-001",
             "status": "Delivered",
             "line": "_test-evo",
-            "is_read": 0,
         }).insert(ignore_permissions=True)
         frappe.db.commit()
 
@@ -523,7 +515,6 @@ class TestApplyEdit(unittest.TestCase):
             "message_id": "_test-apply-edit-001",
             "status": "Pending",
             "line": line.name,
-            "is_read": 0,
         }).insert(ignore_permissions=True)
 
         _apply_edit(msg.name, "edited text", "incoming", msg.jid, line)
@@ -547,7 +538,6 @@ class TestApplyEdit(unittest.TestCase):
             "message_id": "_test-apply-edit-002",
             "status": "Pending",
             "line": line.name,
-            "is_read": 0,
         }).insert(ignore_permissions=True)
 
         _apply_edit(msg.name, "v2", "incoming", msg.jid, line)
