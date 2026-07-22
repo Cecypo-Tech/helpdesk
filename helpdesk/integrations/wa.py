@@ -1744,6 +1744,42 @@ def get_wa_lines() -> list[dict]:
     return lines
 
 
+def _mark_conversation_read_for_user(jid: str, user: str | None = None, upto=None) -> None:
+    """Upsert one agent's read cursor for a JID to `upto` (default: now)."""
+    user = user or frappe.session.user
+    upto = upto or now_datetime()
+    existing = frappe.db.get_value("WA Conversation Read State", {"user": user, "jid": jid}, "name")
+    if existing:
+        frappe.db.set_value("WA Conversation Read State", existing, "last_read", upto, update_modified=False)
+    else:
+        frappe.get_doc({
+            "doctype": "WA Conversation Read State",
+            "user": user,
+            "jid": jid,
+            "last_read": upto,
+        }).insert(ignore_permissions=True)
+
+
+def _unread_counts_for_user(jids: list[str], user: str) -> dict[str, int]:
+    """{jid: unread incoming message count} for one agent, scoped to `jids`."""
+    if not jids:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT m.jid, COUNT(*) AS cnt
+        FROM `tabWA Message` m
+        LEFT JOIN `tabWA Conversation Read State` r
+          ON r.jid = m.jid AND r.user = %(user)s
+        WHERE m.direction = 'Incoming' AND m.jid IN %(jids)s
+          AND (r.last_read IS NULL OR m.creation > r.last_read)
+        GROUP BY m.jid
+        """,
+        {"jids": tuple(jids), "user": user},
+        as_dict=True,
+    )
+    return {row.jid: row.cnt for row in rows}
+
+
 @frappe.whitelist()
 def get_wa_conversations(line: str = "") -> list[dict]:
     """Return one entry per unique JID for the given line, sorted by most-recent first."""
@@ -1818,20 +1854,9 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         except Exception:
             pass
 
-    # Unread incoming message counts per JID, from the same is_read flag mark_wa_messages_read maintains.
-    unread_counts: dict[str, int] = {}
-    if jids:
-        for row in frappe.db.sql(
-            """
-            SELECT jid, COUNT(*) AS cnt
-            FROM `tabWA Message`
-            WHERE direction = 'Incoming' AND is_read = 0 AND jid IN %(jids)s
-            GROUP BY jid
-            """,
-            {"jids": tuple(jids)},
-            as_dict=True,
-        ):
-            unread_counts[row.jid] = row.cnt
+    # Unread incoming message counts per JID, scoped to the requesting agent
+    # via WA Conversation Read State (per-agent cursor, not a shared flag).
+    unread_counts = _unread_counts_for_user(jids, frappe.session.user)
 
     result = []
     for r in deduped:
@@ -1893,13 +1918,10 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
 
     if jid:
         # Baileys path
-        filters: dict = {"jid": jid, "direction": "Incoming", "is_read": 0}
-        unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
-        for row in unread:
-            frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
-        if unread:
-            frappe.db.commit()
-        return len(unread)
+        count = _unread_counts_for_user([jid], frappe.session.user).get(jid, 0)
+        _mark_conversation_read_for_user(jid)
+        frappe.db.commit()
+        return count
 
     if not ticket or not frappe.db.exists("DocType", "WhatsApp Message"):
         return 0
