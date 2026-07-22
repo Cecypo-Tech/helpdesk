@@ -1734,10 +1734,17 @@ def get_wa_lines() -> list[dict]:
     for line in lines:
         line["display_label"] = line["label"] or line["instance_name"]
         line["unread"] = (
-            frappe.db.count(
-                "WA Message",
-                {"line": line["name"], "direction": "Incoming", "is_read": 0},
-            )
+            (frappe.db.sql(
+                """
+                SELECT COUNT(*)
+                FROM `tabWA Message` m
+                LEFT JOIN `tabWA Conversation Read State` r
+                  ON r.jid = m.jid AND r.user = %(user)s
+                WHERE m.direction = 'Incoming' AND m.line = %(line)s
+                  AND (r.last_read IS NULL OR m.creation > r.last_read)
+                """,
+                {"line": line["name"], "user": frappe.session.user},
+            ) or [[0]])[0][0]
             if wa_msg_exists
             else 0
         )
@@ -1972,7 +1979,7 @@ def get_ticket_wa_unread_count(ticket: str) -> int:
         jid = None
 
     if jid:
-        return frappe.db.count("WA Message", {"jid": jid, "direction": "Incoming", "is_read": 0})
+        return _unread_counts_for_user([jid], frappe.session.user).get(jid, 0)
 
     if not frappe.db.exists("DocType", "WhatsApp Message"):
         return 0
@@ -1990,16 +1997,24 @@ def get_ticket_wa_unread_count(ticket: str) -> int:
 
 @frappe.whitelist()
 def mark_all_wa_messages_read(line: str) -> int:
-    """Mark all unread incoming Baileys Messages for an entire line as read."""
+    """Mark all unread incoming Baileys Messages for an entire line as read, for the current agent."""
     if not line:
         return 0
-    filters: dict = {"line": line, "direction": "Incoming", "is_read": 0}
-    unread = frappe.get_all("WA Message", filters=filters, fields=["name"])
-    for row in unread:
-        frappe.db.set_value("WA Message", row.name, "is_read", 1, update_modified=False)
-    if unread:
-        frappe.db.commit()
-    return len(unread)
+    jids = frappe.get_all(
+        "WA Message",
+        filters={"line": line, "direction": "Incoming"},
+        pluck="jid",
+        distinct=True,
+    )
+    if not jids:
+        return 0
+    counts = _unread_counts_for_user(jids, frappe.session.user)
+    total = sum(counts.values())
+    upto = now_datetime()
+    for jid in jids:
+        _mark_conversation_read_for_user(jid, upto=upto)
+    frappe.db.commit()
+    return total
 
 
 @frappe.whitelist()

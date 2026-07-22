@@ -72,3 +72,45 @@ class TestWAUnreadState(FrappeTestCase):
 
 		frappe.set_user(self.agent_b)
 		self.assertEqual(unread_count_for(jid), 2)
+
+	def test_ticket_badge_and_mark_all_are_per_agent(self):
+		from helpdesk.integrations.wa import (
+			get_ticket_wa_unread_count,
+			get_wa_lines,
+			mark_all_wa_messages_read,
+		)
+
+		line_name = "wa-unread-test-line"
+		if not frappe.db.exists("WA Line", line_name):
+			frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
+			self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
+
+		jid = "222unreadtest@s.whatsapp.net"
+		self._make_message(jid, "one", line=line_name)
+		self._make_message(jid, "two", line=line_name)
+		self._make_message(jid, "three", line=line_name)
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
+
+		ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": "WA unread test ticket",
+			"raised_by": "wa-unread-ticket-test@example.com",
+			"baileys_jid": jid,
+		}).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "HD Ticket", ticket.name, ignore_permissions=True, force=True)
+
+		def sidebar_unread():
+			rows = [l for l in get_wa_lines() if l["name"] == line_name]
+			return rows[0]["unread"] if rows else None
+
+		frappe.set_user(self.agent_a)
+		self.assertEqual(get_ticket_wa_unread_count(str(ticket.name)), 3)
+		self.assertEqual(sidebar_unread(), 3)
+		marked = mark_all_wa_messages_read(line=line_name)
+		self.assertEqual(marked, 3)
+		self.assertEqual(get_ticket_wa_unread_count(str(ticket.name)), 0)
+		self.assertEqual(sidebar_unread(), 0)
+
+		frappe.set_user(self.agent_b)
+		self.assertEqual(get_ticket_wa_unread_count(str(ticket.name)), 3)
+		self.assertEqual(sidebar_unread(), 3)
