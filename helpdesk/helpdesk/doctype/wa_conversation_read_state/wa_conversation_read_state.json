@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "creation": "2026-07-22 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "jid",
+  "last_read"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "jid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "JID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "last_read",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Read",
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-22 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "WA Conversation Read State",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "Agent",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
