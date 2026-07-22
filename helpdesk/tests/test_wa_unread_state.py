@@ -4,6 +4,12 @@ from frappe.tests.utils import FrappeTestCase
 
 class TestWAUnreadState(FrappeTestCase):
 	def setUp(self):
+		# mark_wa_messages_read() commits mid-test, permanently persisting the
+		# fixtures created below to the shared site database. Registering this
+		# commit first (LIFO execution order) makes it run *last*, after all
+		# the addCleanup deletes below have executed, so those deletes are
+		# actually committed instead of being rolled back at class teardown.
+		self.addCleanup(frappe.db.commit)
 		frappe.set_user("Administrator")
 		self.agent_a = self._make_agent("wa-unread-test-a@example.com")
 		self.agent_b = self._make_agent("wa-unread-test-b@example.com")
@@ -52,6 +58,7 @@ class TestWAUnreadState(FrappeTestCase):
 		jid = "111unreadtest@s.whatsapp.net"
 		self._make_message(jid, "first")
 		self._make_message(jid, "second")
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
 
 		frappe.set_user(self.agent_a)
 		mark_wa_messages_read(jid=jid)
