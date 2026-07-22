@@ -114,3 +114,17 @@ class TestWAUnreadState(FrappeTestCase):
 		frappe.set_user(self.agent_b)
 		self.assertEqual(get_ticket_wa_unread_count(str(ticket.name)), 3)
 		self.assertEqual(sidebar_unread(), 3)
+
+	def test_historical_sync_does_not_create_unread_for_anyone(self):
+		from helpdesk.integrations.wa import _mark_conversation_read_for_all_agents, get_wa_conversations
+
+		jid = "333unreadtest@g.us"
+		self._make_message(jid, "imported old message")
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
+		_mark_conversation_read_for_all_agents(jid, upto=frappe.utils.now_datetime())
+
+		for user in (self.agent_a, self.agent_b):
+			frappe.set_user(user)
+			convs = get_wa_conversations(line="")
+			match = [c for c in convs if c["jid"] == jid]
+			self.assertEqual(match[0]["unread_count"] if match else 0, 0)

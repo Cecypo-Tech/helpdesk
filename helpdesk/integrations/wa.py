@@ -1767,6 +1767,13 @@ def _mark_conversation_read_for_user(jid: str, user: str | None = None, upto=Non
         }).insert(ignore_permissions=True)
 
 
+def _mark_conversation_read_for_all_agents(jid: str, upto) -> None:
+    """Advance every agent's cursor for a JID — used for historical/backfilled imports
+    that shouldn't appear as unread for anyone."""
+    for agent_user in frappe.get_all("HD Agent", pluck="user"):
+        _mark_conversation_read_for_user(jid, user=agent_user, upto=upto)
+
+
 def _unread_counts_for_user(jids: list[str], user: str) -> dict[str, int]:
     """{jid: unread incoming message count} for one agent, scoped to `jids`."""
     if not jids:
@@ -3741,6 +3748,7 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 		line_doc = frappe.get_doc("WA Line", line)
 
 		imported = skipped = 0
+		touched_jids: set[str] = set()
 		current_page = 1
 		total_pages = 1
 
@@ -3792,7 +3800,6 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 						"message_id": message_id,
 						"status": "Read" if from_me else "Delivered",
 						"line": line_doc.name,
-						"is_read": 1,
 					})
 					doc.insert(ignore_permissions=True)
 					ts = msg.get("messageTimestamp") or 0
@@ -3800,6 +3807,7 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 						orig_creation = _dt.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
 						frappe.db.set_value("WA Message", doc.name, "creation", orig_creation, update_modified=False)
 					imported += 1
+					touched_jids.add(remote_jid)
 				except Exception as e:
 					frappe.log_error(f"Failed to insert WA Message (line={line}): {e}", "WA Old Message Sync")
 
@@ -3807,6 +3815,11 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 			current_page += 1
 			if imported + skipped >= total_limit:
 				break
+
+		if touched_jids:
+			now = now_datetime()
+			for touched_jid in touched_jids:
+				_mark_conversation_read_for_all_agents(touched_jid, upto=now)
 
 		frappe.publish_realtime(
 			"helpdesk:wa-old-sync-complete",
