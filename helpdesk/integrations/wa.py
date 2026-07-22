@@ -5,6 +5,7 @@ from urllib.parse import quote as _urlquote
 import frappe
 import requests as _requests
 from frappe import _
+from frappe.database import savepoint
 from frappe.utils import cint, now_datetime, time_diff_in_hours
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -1748,13 +1749,47 @@ def get_wa_lines() -> list[dict]:
 
 
 def _mark_conversation_read_for_user(jid: str, user: str | None = None, upto=None) -> None:
-    """Upsert one agent's read cursor for a JID to `upto` (default: now)."""
+    """Upsert one agent's read cursor for a JID to `upto` (default: now).
+
+    `(user, jid)` is enforced unique at the SQL level (see
+    add_wa_conversation_read_state_unique_index patch). The get-then-insert
+    below is not atomic, so two concurrent callers for the same agent+JID
+    (double-click, multiple tabs) can both miss the existing row and both
+    attempt an insert. The loser of that race gets a UniqueValidationError
+    from Frappe (wrapping the underlying MySQL 1062 duplicate-key error).
+
+    That insert is wrapped in a savepoint (not a full frappe.db.rollback())
+    so a losing race only unwinds its own failed insert, not any other
+    uncommitted work earlier in the same request/transaction — e.g. earlier
+    iterations of mark_all_wa_messages_read's per-JID loop. On a loss we fall
+    back to updating the row the winner created, so the race is invisible to
+    the caller.
+    """
     user = user or frappe.session.user
     upto = upto or now_datetime()
     existing = frappe.db.get_value("WA Conversation Read State", {"user": user, "jid": jid}, "name")
     if existing:
         frappe.db.set_value("WA Conversation Read State", existing, "last_read", upto, update_modified=False)
+        return
+
+    doc = frappe.get_doc({
+        "doctype": "WA Conversation Read State",
+        "user": user,
+        "jid": jid,
+        "last_read": upto,
+    })
+    with savepoint(catch=frappe.exceptions.UniqueValidationError):
+        doc.insert(ignore_permissions=True)
+        return
+
+    # Lost the race: another request inserted the row first. Fall back to
+    # updating the row the winner created.
+    existing = frappe.db.get_value("WA Conversation Read State", {"user": user, "jid": jid}, "name")
+    if existing:
+        frappe.db.set_value("WA Conversation Read State", existing, "last_read", upto, update_modified=False)
     else:
+        # Shouldn't happen (row vanished between the failed insert and this
+        # re-read) — retry once rather than silently dropping the write.
         frappe.get_doc({
             "doctype": "WA Conversation Read State",
             "user": user,

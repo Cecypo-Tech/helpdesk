@@ -115,6 +115,52 @@ class TestWAUnreadState(FrappeTestCase):
 		self.assertEqual(get_ticket_wa_unread_count(str(ticket.name)), 3)
 		self.assertEqual(sidebar_unread(), 3)
 
+	def test_mark_conversation_read_race_does_not_duplicate_or_raise(self):
+		"""Regression test for the (user, jid) unique-index race.
+
+		_mark_conversation_read_for_user does a get-then-insert-or-update that
+		isn't atomic: two concurrent callers can both see "no existing row" and
+		both attempt an insert. Simulate that by pre-creating the row a
+		"winning" concurrent request would have inserted, then forcing the
+		function under test to still believe no row exists (as it would have,
+		had it read a moment earlier) via a one-shot monkeypatch of
+		frappe.db.get_value. The (user, jid) unique index means the resulting
+		insert collides; the fix must catch that and fall back to an update
+		instead of raising or creating a duplicate row.
+		"""
+		from helpdesk.integrations.wa import _mark_conversation_read_for_user
+
+		jid = "444unreadtest@race.test"
+		user = self.agent_a
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
+
+		# The "winning" concurrent request's insert.
+		frappe.get_doc({
+			"doctype": "WA Conversation Read State",
+			"user": user,
+			"jid": jid,
+			"last_read": frappe.utils.now_datetime(),
+		}).insert(ignore_permissions=True)
+
+		original_get_value = frappe.db.get_value
+		state = {"called": False}
+
+		def fake_get_value(doctype, filters=None, fieldname=None, *args, **kwargs):
+			if doctype == "WA Conversation Read State" and not state["called"]:
+				state["called"] = True
+				return None  # simulate the stale read that lost the race
+			return original_get_value(doctype, filters, fieldname, *args, **kwargs)
+
+		frappe.db.get_value = fake_get_value
+		try:
+			# Must not raise.
+			_mark_conversation_read_for_user(jid, user=user, upto=frappe.utils.now_datetime())
+		finally:
+			frappe.db.get_value = original_get_value
+
+		rows = frappe.get_all("WA Conversation Read State", filters={"user": user, "jid": jid})
+		self.assertEqual(len(rows), 1)
+
 	def test_historical_sync_does_not_create_unread_for_anyone(self):
 		from helpdesk.integrations.wa import _mark_conversation_read_for_all_agents, get_wa_conversations
 
