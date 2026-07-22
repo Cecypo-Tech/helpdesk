@@ -6,7 +6,7 @@ import frappe
 import requests as _requests
 from frappe import _
 from frappe.database import savepoint
-from frappe.utils import cint, now_datetime, time_diff_in_hours
+from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_hours
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -3779,7 +3779,11 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 		line_doc = frappe.get_doc("WA Line", line)
 
 		imported = skipped = 0
-		touched_jids: set[str] = set()
+		# jid -> the max "effective creation" timestamp seen among the messages
+		# imported into that jid during this run, so cursors can be advanced to
+		# the newest *imported* message's time rather than wall-clock "now"
+		# (see _mark_conversation_read_for_all_agents call below).
+		touched_jids: dict = {}
 		current_page = 1
 		total_pages = 1
 
@@ -3837,8 +3841,15 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 					if ts:
 						orig_creation = _dt.datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
 						frappe.db.set_value("WA Message", doc.name, "creation", orig_creation, update_modified=False)
+						effective_creation = get_datetime(orig_creation)
+					else:
+						# No back-dated timestamp from the API: this message's
+						# creation is whatever the DB assigned at insert time.
+						effective_creation = get_datetime(doc.creation)
 					imported += 1
-					touched_jids.add(remote_jid)
+					prev_max = touched_jids.get(remote_jid)
+					if prev_max is None or effective_creation > prev_max:
+						touched_jids[remote_jid] = effective_creation
 				except Exception as e:
 					frappe.log_error(f"Failed to insert WA Message (line={line}): {e}", "WA Old Message Sync")
 
@@ -3847,10 +3858,17 @@ def _run_sync_old_messages_job(line: str, limit_per_chat: int = 50) -> None:
 			if imported + skipped >= total_limit:
 				break
 
-		if touched_jids:
-			now = now_datetime()
-			for touched_jid in touched_jids:
-				_mark_conversation_read_for_all_agents(touched_jid, upto=now)
+		# Advance each touched jid's cursor to the newest *imported* message's
+		# creation time, not wall-clock "now" — this job pages through
+		# potentially thousands of messages across many HTTP calls, and a
+		# genuinely new live message can be inserted (with a real, current
+		# creation) while it's still running. Advancing to "now" would advance
+		# past that live message's creation and silently mark it read for
+		# every agent; advancing to the newest imported message's own
+		# timestamp cannot do that, since a live message's creation is always
+		# later than any back-dated historical import's.
+		for touched_jid, upto in touched_jids.items():
+			_mark_conversation_read_for_all_agents(touched_jid, upto=upto)
 
 		frappe.publish_realtime(
 			"helpdesk:wa-old-sync-complete",
