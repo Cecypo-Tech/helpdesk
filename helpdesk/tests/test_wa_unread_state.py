@@ -64,7 +64,7 @@ class TestWAUnreadState(FrappeTestCase):
 		mark_wa_messages_read(jid=jid)
 
 		def unread_count_for(jid):
-			convs = get_wa_conversations(line="")
+			convs = get_wa_conversations(line="")["conversations"]
 			match = [c for c in convs if c["jid"] == jid]
 			return match[0]["unread_count"] if match else None
 
@@ -205,7 +205,7 @@ class TestWAUnreadState(FrappeTestCase):
 		)
 
 		def counts():
-			convs = get_wa_conversations(line=line_name)
+			convs = get_wa_conversations(line=line_name)["conversations"]
 			match = [c for c in convs if c["jid"] == jid]
 			lines = [l for l in get_wa_lines() if l["name"] == line_name]
 			return (
@@ -239,6 +239,6 @@ class TestWAUnreadState(FrappeTestCase):
 
 		for user in (self.agent_a, self.agent_b):
 			frappe.set_user(user)
-			convs = get_wa_conversations(line="")
+			convs = get_wa_conversations(line="")["conversations"]
 			match = [c for c in convs if c["jid"] == jid]
 			self.assertEqual(match[0]["unread_count"] if match else 0, 0)

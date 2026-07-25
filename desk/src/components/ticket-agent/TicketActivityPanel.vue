@@ -151,12 +151,23 @@ function reloadWaUnreadCount() {
 
 watch(() => ticket.value?.doc?.name, reloadWaUnreadCount, { immediate: true });
 
-function onWaMessageForBadge() {
+function onWaMessageForBadge(data?: { jid?: string; ticket?: string }) {
   // Only refetch when the WhatsApp tab isn't the one currently open —
   // if it's open, the chat component already marks messages read.
-  if (activeTabName.value !== "whatsapp" && activeTabName.value !== "baileys") {
-    reloadWaUnreadCount();
+  if (activeTabName.value === "whatsapp" || activeTabName.value === "baileys") return;
+
+  // Both events are broadcast to every client for every WhatsApp message, so
+  // without this check each agent with any ticket open refetched this badge on
+  // all WhatsApp traffic in the system. Only this ticket's own conversation can
+  // change its count: WA Line messages carry the JID, WABA messages the ticket.
+  const doc = ticket.value?.doc;
+  if (!doc) return;
+  if (doc.baileys_jid) {
+    if (data?.jid && data.jid !== doc.baileys_jid) return;
+  } else if (data?.ticket && String(data.ticket) !== String(doc.name)) {
+    return;
   }
+  reloadWaUnreadCount();
 }
 
 onMounted(() => {

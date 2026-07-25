@@ -1952,13 +1952,170 @@ def _unread_counts_for_user(jids: list[str], user: str) -> dict[str, int]:
     return {row.jid: row.cnt for row in rows}
 
 
+CONVERSATIONS_PAGE_SIZE = 50
+
+
+def _team_blocked_jids() -> list[str]:
+    """JIDs the current agent may not see under restrict_chats_by_team.
+
+    This used to be a post-filter in Python, which a LIMIT makes untenable —
+    dropping rows after the page is cut yields short and inconsistently sized
+    pages. Expressed as an exclusion list instead: WA Contact holds one row per
+    conversation (hundreds, not millions), so resolving it up front is cheap and
+    keeps the paged query itself simple. Chats with no team stay visible to
+    everyone, and an agent with no team of their own sees everything — both
+    match the previous behaviour.
+    """
+    if not _shared_settings().restrict_chats_by_team:
+        return []
+    user_teams = set(
+        frappe.get_all("HD Team Member", filters={"user": frappe.session.user}, pluck="parent")
+    )
+    if not user_teams:
+        return []
+    return frappe.db.sql_list(
+        """
+        SELECT jid FROM `tabWA Contact`
+        WHERE IFNULL(assigned_team, '') != '' AND assigned_team NOT IN %(teams)s
+        """,
+        {"teams": tuple(user_teams)},
+    )
+
+
+def _search_matched_jids(search: str, line: str) -> set[str]:
+    """JIDs whose contact details, or any message, match a search term.
+
+    Matching messages (rather than only the latest one, which is all the
+    client-side filter this replaces could see) means searching actually reaches
+    back through a conversation. The `message LIKE` scan it costs is
+    unindexable, but this only runs for a term an agent typed, debounced — not
+    on the automatic refresh path that made these endpoints expensive.
+    """
+    like = f"%{search}%"
+    matched = set(
+        frappe.db.sql_list(
+            """
+            SELECT jid FROM `tabWA Contact`
+            WHERE custom_name LIKE %(q)s OR company LIKE %(q)s OR phone LIKE %(q)s
+            """,
+            {"q": like},
+        )
+    )
+    message_scope = "AND line = %(line)s" if line else ""
+    matched.update(
+        frappe.db.sql_list(
+            f"""
+            SELECT DISTINCT jid FROM `tabWA Message`
+            WHERE message LIKE %(q)s {message_scope}
+            """,
+            {"q": like, "line": line},
+        )
+    )
+    if line:
+        try:
+            line_doc = frappe.get_doc("WA Line", line)
+            matched.update(
+                row.jid
+                for row in (line_doc.group_jids or [])
+                if search.lower() in (row.group_name or "").lower()
+            )
+        except frappe.DoesNotExistError:
+            pass
+    return {j for j in matched if j}
+
+
+def _unread_jids_for_user(line: str, user: str) -> list[str]:
+    """JIDs with at least one unread incoming message for this agent."""
+    floor = _unread_floor()
+    clauses = ["m.direction = 'Incoming'"]
+    if line:
+        clauses.append("m.line = %(line)s")
+    if floor:
+        clauses.append("m.creation > %(floor)s")
+    return frappe.db.sql_list(
+        f"""
+        SELECT DISTINCT m.jid
+        FROM `tabWA Message` m
+        LEFT JOIN `tabWA Conversation Read State` r
+          ON r.jid = m.jid AND r.user = %(user)s
+        WHERE {' AND '.join(clauses)}
+          AND (r.last_read IS NULL OR m.creation > r.last_read)
+        """,
+        {"line": line, "user": user, "floor": floor},
+    )
+
+
 @frappe.whitelist()
-def get_wa_conversations(line: str = "") -> list[dict]:
-    """Return one entry per unique JID for the given line, sorted by most-recent first."""
-    # Raw SQL — frappe.qb subquery join generates a derived table without an alias,
-    # which MySQL rejects with OperationalError 1248.
+def get_wa_conversations(
+    line: str = "",
+    search: str = "",
+    conv_filter: str = "all",
+    favourite_jids=None,
+    limit: int = CONVERSATIONS_PAGE_SIZE,
+    offset: int = 0,
+) -> dict:
+    """One entry per unique JID for a line, most-recent first, one page at a time.
+
+    Returns `{"conversations": [...], "has_more": bool}`.
+
+    This used to return every conversation on the line with no LIMIT, and the
+    client filtered and searched the result in the browser. Searching, filtering
+    and the team restriction all had to move here for a page to mean anything:
+    a filter applied after the cut would silently shrink pages.
+    """
+    limit = max(1, min(cint(limit) or CONVERSATIONS_PAGE_SIZE, 200))
+    offset = max(0, cint(offset))
+    search = (search or "").strip()
+    conv_filter = conv_filter or "all"
+    if isinstance(favourite_jids, str):
+        favourite_jids = frappe.parse_json(favourite_jids or "[]")
+    favourite_jids = [j for j in (favourite_jids or []) if j]
+
+    empty: dict = {"conversations": [], "has_more": False}
+
+    # Predicates on the grouped-by-JID subquery, so they apply before the page
+    # is cut. Raw SQL throughout — frappe.qb generates a derived table without
+    # an alias for this shape, which MySQL rejects with OperationalError 1248.
+    sub_clauses = ["jid NOT LIKE '%%@broadcast'"]
+    params: dict = {"line": line, "limit": limit + 1, "offset": offset}
+    if line:
+        sub_clauses.append("line = %(line)s")
+
+    if conv_filter == "groups":
+        sub_clauses.append("jid LIKE '%%@g.us'")
+    elif conv_filter == "favourites":
+        # Favourites live in the agent's own localStorage, so the client has to
+        # send them; there is nothing server-side to filter on otherwise.
+        if not favourite_jids:
+            return empty
+        sub_clauses.append("jid IN %(favourites)s")
+        params["favourites"] = tuple(favourite_jids)
+    elif conv_filter == "unread":
+        unread_jids = _unread_jids_for_user(line, frappe.session.user)
+        if not unread_jids:
+            return empty
+        sub_clauses.append("jid IN %(unread_jids)s")
+        params["unread_jids"] = tuple(unread_jids)
+
+    if search:
+        matched = _search_matched_jids(search, line)
+        # The JID itself is worth matching directly so a phone number typed in
+        # full finds its chat even with no contact record.
+        if matched:
+            sub_clauses.append("(jid IN %(matched)s OR jid LIKE %(search_like)s)")
+            params["matched"] = tuple(matched)
+        else:
+            sub_clauses.append("jid LIKE %(search_like)s")
+        params["search_like"] = f"%{search}%"
+
+    blocked = _team_blocked_jids()
+    if blocked:
+        sub_clauses.append("jid NOT IN %(blocked)s")
+        params["blocked"] = tuple(blocked)
+
     line_filter = "AND bm.line = %(line)s" if line else ""
-    sub_filter = "AND line = %(line)s" if line else ""
+    # limit + 1 rows in the subquery is how has_more is decided without a second
+    # COUNT over the same grouping.
     rows = frappe.db.sql(
         f"""
         SELECT bm.jid, bm.sender_name, bm.message, bm.content_type, bm.direction, bm.creation
@@ -1966,18 +2123,21 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         INNER JOIN (
             SELECT jid, MAX(creation) AS latest_creation
             FROM `tabWA Message`
-            WHERE jid NOT LIKE '%%@broadcast'
-            {sub_filter}
+            WHERE {' AND '.join(sub_clauses)}
             GROUP BY jid
+            ORDER BY latest_creation DESC
+            LIMIT %(limit)s OFFSET %(offset)s
         ) latest ON bm.jid = latest.jid AND bm.creation = latest.latest_creation
         WHERE bm.jid NOT LIKE '%%@broadcast'
         {line_filter}
         ORDER BY bm.creation DESC
         """,
-        {"line": line},
+        params,
         as_dict=True,
     )
 
+    # Two messages for one JID can share MAX(creation) to the microsecond, so
+    # the join can return more than one row per JID.
     seen: set[str] = set()
     deduped = []
     for r in rows:
@@ -1985,18 +2145,13 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             seen.add(r.jid)
             deduped.append(r)
 
+    has_more = len(deduped) > limit
+    deduped = deduped[:limit]
+
     line_doc = frappe.get_doc("WA Line", line) if line else None
     group_names = {}
     if line_doc:
         group_names = {row.jid: (row.group_name or row.jid) for row in (line_doc.group_jids or [])}
-
-    restrict = _shared_settings().restrict_chats_by_team
-    user_teams: set[str] = set()
-    user_has_any_team = False
-    if restrict:
-        user_teams = set(frappe.get_all("HD Team Member",
-                                        filters={"user": frappe.session.user}, pluck="parent"))
-        user_has_any_team = bool(user_teams)
 
     jids = [r.jid for r in deduped]
     contacts: dict[str, dict] = {}
@@ -2036,10 +2191,8 @@ def get_wa_conversations(line: str = "") -> list[dict]:
         is_grp = jid.endswith("@g.us")
         contact = contacts.get(jid, {})
         assigned_team = contact.get("assigned_team") or ""
-
-        if restrict and user_has_any_team and assigned_team and assigned_team not in user_teams:
-            continue
-
+        # The team restriction is applied in SQL now (see _team_blocked_jids) —
+        # filtering here would cut rows out of an already-sized page.
         canonical = contact.get("canonical_jid") or ""
         phone_fallback = (
             contact.get("phone")
@@ -2076,7 +2229,7 @@ def get_wa_conversations(line: str = "") -> list[dict]:
             "unread_count": unread_counts.get(jid, 0),
         })
 
-    return result
+    return {"conversations": result, "has_more": has_more}
 
 
 @frappe.whitelist()

@@ -135,17 +135,17 @@
     </div>
 
     <div class="flex-1 overflow-y-auto">
-      <div v-if="conversations.loading && !conversations.data" class="flex justify-center py-8">
+      <div v-if="conversations.loading && !loadedList.length" class="flex justify-center py-8">
         <LoadingIndicator :scale="5" class="text-ink-gray-5" />
       </div>
       <div
-        v-else-if="!filteredList.length"
+        v-else-if="!loadedList.length"
         class="py-10 text-center text-xs text-ink-gray-5"
       >
-        {{ search ? "No results" : "No conversations" }}
+        {{ search || activeFilter !== "all" ? "No results" : "No conversations" }}
       </div>
       <BaileysConversationItem
-        v-for="conv in filteredList"
+        v-for="conv in loadedList"
         :key="conv.jid"
         :jid="conv.jid"
         :displayName="conv.display_name"
@@ -165,6 +165,15 @@
         @select="(jid, name, company, team, phone) => $emit('select', jid, name, company, team, phone)"
         @toggle-favourite="toggleFavourite"
       />
+      <div v-if="hasMore" class="px-3 py-2">
+        <button
+          class="w-full rounded-lg border border-outline-gray-2 py-1.5 text-xs font-medium text-ink-gray-6 hover:bg-surface-gray-2 disabled:opacity-50"
+          :disabled="loadingMore"
+          @click="loadMore"
+        >
+          {{ loadingMore ? "Loading…" : "Load older conversations" }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -258,7 +267,7 @@ function onSyncComplete(data: { contacts?: number; groups?: number; error?: stri
   } else {
     toast.success(`Synced ${data?.contacts ?? 0} contact(s) and ${data?.groups ?? 0} group(s)`);
   }
-  conversations.reload();
+  reloadList();
 }
 
 // get_wa_conversations aggregates over the entire message table with no LIMIT,
@@ -267,7 +276,7 @@ function onSyncComplete(data: { contacts?: number; groups?: number; error?: stri
 // the most expensive thing this app did. The event now carries a preview of the
 // message, which is everything a row needs, so the common case patches in place
 // and never touches the network.
-const debouncedReload = useDebounceFn(() => conversations.reload(), 3000);
+const debouncedReload = useDebounceFn(() => mergeFirstPage(), 3000);
 
 interface BaileysMessageEvent {
   jid?: string;
@@ -286,7 +295,7 @@ function onBaileysMessage(data: BaileysMessageEvent) {
   if (!data?.jid) return;
   if (props.line && data.line && data.line !== props.line) return;
 
-  const list: any[] = conversations.data || [];
+  const list: any[] = loadedList.value;
   const row = list.find((c) => c.jid === data.jid);
 
   // No row means a conversation we've never rendered (first message from a new
@@ -315,7 +324,7 @@ function onBaileysMessage(data: BaileysMessageEvent) {
   };
 
   // The server orders by most recent first; keep that as rows are patched.
-  conversations.data = [patched, ...list.filter((c) => c.jid !== data.jid)];
+  loadedList.value = [patched, ...list.filter((c) => c.jid !== data.jid)];
 }
 
 // Missed events during a dropped connection can leave rows stale or absent.
@@ -405,16 +414,85 @@ function onNewChatEnter() {
 
 // ── Conversations list ──────────────────────────────────────────────────────
 
+// The endpoint returns one page at a time now, so the rendered list is
+// accumulated here rather than being whatever the last response happened to
+// contain. Search and the filter chips are server-side for the same reason:
+// narrowing a single page in the browser would hide conversations that simply
+// hadn't been fetched yet.
+const PAGE_SIZE = 50;
+
+const loadedList = ref<any[]>([]);
+const hasMore = ref(false);
+const loadingMore = ref(false);
+
 const conversations = createResource({
   url: "helpdesk.integrations.wa.get_wa_conversations",
-  params: { line: props.line },
-  auto: true,
+  auto: false,
 });
 
-watch(() => props.line, () => {
-  conversations.update({ params: { line: props.line } });
-  conversations.reload();
-});
+function queryParams(offset: number) {
+  return {
+    line: props.line,
+    search: search.value.trim(),
+    conv_filter: activeFilter.value,
+    // Favourites are per-browser (localStorage), so the server can only filter
+    // on them if we hand them over.
+    favourite_jids:
+      activeFilter.value === "favourites"
+        ? JSON.stringify([...favouriteJids.value])
+        : "[]",
+    limit: PAGE_SIZE,
+    offset,
+  };
+}
+
+let requestToken = 0;
+
+async function fetchPage({ append = false } = {}) {
+  const offset = append ? loadedList.value.length : 0;
+  // Guard against a slow first page landing after the query has moved on.
+  const token = ++requestToken;
+  if (append) loadingMore.value = true;
+  try {
+    const data = await conversations.submit(queryParams(offset));
+    if (token !== requestToken) return;
+    const page = data?.conversations || [];
+    loadedList.value = append ? [...loadedList.value, ...page] : page;
+    hasMore.value = !!data?.has_more;
+  } finally {
+    if (token === requestToken) loadingMore.value = false;
+  }
+}
+
+function reloadList() {
+  fetchPage({ append: false });
+}
+
+// Used when a message arrives for a JID we have no row for: only a fetch can
+// supply its name and company. Merging the first page instead of resetting to
+// it keeps any older pages the agent has already loaded — otherwise an idle
+// list would collapse back to page one every time a new contact wrote in.
+async function mergeFirstPage() {
+  const token = ++requestToken;
+  const data = await conversations.submit(queryParams(0));
+  if (token !== requestToken) return;
+  const page = data?.conversations || [];
+  const fetched = new Set(page.map((c: any) => c.jid));
+  const older = loadedList.value.filter((c: any) => !fetched.has(c.jid));
+  loadedList.value = [...page, ...older];
+  if (!older.length) hasMore.value = !!data?.has_more;
+}
+
+function loadMore() {
+  if (hasMore.value && !loadingMore.value) fetchPage({ append: true });
+}
+
+onMounted(reloadList);
+
+watch(() => props.line, reloadList);
+watch(activeFilter, reloadList);
+// Debounced so a query isn't fired per keystroke.
+watch(search, useDebounceFn(reloadList, 350));
 
 // Opening a conversation marks its messages read server-side (BaileysChat calls
 // mark_wa_messages_read), but this list's own fetched data never reflected that —
@@ -422,37 +500,19 @@ watch(() => props.line, () => {
 // so the count came back the moment you switched away, and "Unread" never
 // actually dropped the chat. Mutate the underlying data so both stay correct.
 watch(() => props.selectedJid, (jid) => {
-  if (!jid || !conversations.data) return;
-  const target = conversations.data.find((c: any) => c.jid === jid);
+  if (!jid) return;
+  const target = loadedList.value.find((c: any) => c.jid === jid);
   if (target && target.unread_count) {
-    conversations.data = conversations.data.map((c: any) =>
+    loadedList.value = loadedList.value.map((c: any) =>
       c.jid === jid ? { ...c, unread_count: 0 } : c
     );
   }
 });
 
-const filteredList = computed(() => {
-  let list: any[] = conversations.data || [];
-
-  if (activeFilter.value === "unread") {
-    list = list.filter((c) => (c.unread_count || 0) > 0);
-  } else if (activeFilter.value === "favourites") {
-    list = list.filter((c) => favouriteJids.value.has(c.jid));
-  } else if (activeFilter.value === "groups") {
-    list = list.filter((c) => c.is_group);
-  }
-
-  if (!search.value.trim()) return list;
-  const q = search.value.toLowerCase();
-  return list.filter(
-    (c) =>
-      (c.display_name || "").toLowerCase().includes(q) ||
-      (c.last_message || "").toLowerCase().includes(q)
-  );
-});
-
-const unreadCount = computed(() =>
-  (conversations.data || []).reduce((n: number, c: any) => n + (c.unread_count || 0), 0)
+// Counts every unread message on the line, not just the loaded page — the
+// sidebar store already tracks exactly that.
+const unreadCount = computed(
+  () => waLinesStore.lines.find((l) => l.name === props.line)?.unread || 0
 );
 
 const markAllReadResource = createResource({
@@ -460,7 +520,7 @@ const markAllReadResource = createResource({
   auto: false,
   onSuccess() {
     waLinesStore.reload();
-    conversations.reload();
+    reloadList();
   },
 });
 
@@ -468,5 +528,5 @@ function markAllRead() {
   markAllReadResource.submit({ line: props.line });
 }
 
-defineExpose({ reload: () => conversations.reload() });
+defineExpose({ reload: reloadList });
 </script>
