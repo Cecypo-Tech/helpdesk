@@ -738,8 +738,98 @@ def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "", 
     )
 
 
+def _create_wa_notifications(jid: str, preview: str, sender_name: str, line) -> None:
+    """One unread HD Notification per agent per conversation.
+
+    A WA Line conversation is a chat, not a ticket — on a representative site
+    only 1 of 340 conversations had a linked ticket and none of 219 contacts had
+    a team — so there is no assignee or team to route to the way the WABA path
+    does. Every active agent is notified instead, which matches what they can
+    already see: the sidebar badge and conversation list are not scoped either.
+
+    Inserting a row per message would be indefensible at this volume. The dedupe
+    below means an agent gets one notification per conversation and nothing
+    further until they read it, so steady-state cost is two SELECTs per incoming
+    message and no writes. Creating the row is also what sends the web push —
+    see HD Notification._send_push_notification.
+    """
+    agents = frappe.get_all(
+        "HD Agent", filters={"is_active": 1}, pluck="user", ignore_permissions=True
+    )
+    if not agents:
+        return
+
+    already_notified = set(
+        frappe.get_all(
+            "HD Notification",
+            filters={
+                "reference_wa_jid": jid,
+                "notification_type": "WhatsApp",
+                "read": 0,
+            },
+            pluck="user_to",
+            ignore_permissions=True,
+        )
+    )
+
+    body = f"{sender_name}: {preview}" if sender_name else preview
+    for agent in agents:
+        if agent in already_notified:
+            continue
+        try:
+            frappe.get_doc({
+                "doctype": "HD Notification",
+                "user_from": "Administrator",
+                "user_to": agent,
+                "notification_type": "WhatsApp",
+                "reference_wa_jid": jid,
+                "reference_wa_line": line.name,
+                "message": body,
+            }).insert(ignore_permissions=True)
+        except Exception:
+            # One agent's notification failing must not cost the others theirs,
+            # nor fail the webhook that is only incidentally creating them.
+            frappe.logger().warning(
+                f"WA notification insert failed for {agent} on {jid}", exc_info=True
+            )
+
+
+def _clear_wa_notifications(jid: str, user: str) -> None:
+    """Mark this agent's unread notifications for a conversation as read.
+
+    Not cosmetic: _create_wa_notifications skips an agent who already has an
+    unread notification for the JID, so without this the agent would be
+    notified once about a conversation and then never again. Opening the chat
+    is what releases the dedupe for the next message.
+    """
+    names = frappe.get_all(
+        "HD Notification",
+        filters={
+            "reference_wa_jid": jid,
+            "user_to": user,
+            "notification_type": "WhatsApp",
+            "read": 0,
+        },
+        pluck="name",
+        ignore_permissions=True,
+    )
+    for name in names:
+        frappe.db.set_value("HD Notification", name, "read", 1, update_modified=False)
+
+
 def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings) -> None:
-    quiet_minutes = int(_shared_settings().notification_quiet_minutes or 0)
+    # Suppress everything — bell *and* push — while a conversation is visibly
+    # being attended, i.e. some agent replied to it within the quiet period.
+    # This guard runs before the notification is created rather than only before
+    # the realtime publish, so an active chat doesn't buzz anyone's phone on
+    # every customer reply. An unattended conversation still gets through.
+    #
+    # As with unread_window_days: a Single that predates the field keeps no
+    # value for it, and Frappe only applies a field default to new documents.
+    # Treating unset as 0 would silently mean "always notify" — the exact
+    # notification flood this is here to prevent — so unset means the default.
+    quiet = _shared_settings().get("notification_quiet_minutes")
+    quiet_minutes = DEFAULT_NOTIFICATION_QUIET_MINUTES if quiet is None else cint(quiet)
     if quiet_minutes:
         recent_outgoing = frappe.db.count(
             "WA Message",
@@ -752,9 +842,18 @@ def _notify_agents(jid: str, message_text: str, sender_name: str, line, settings
         )
         if recent_outgoing:
             return
+
+    preview = (message_text or "")[:80] or "sent a WhatsApp message"
+    _create_wa_notifications(jid, preview, sender_name, line)
+
+    # Event name must match the listener in desk/src/stores/notification.ts.
+    # It used to be "helpdesk:new-baileys-message", which nothing listened for,
+    # so an incoming WA Line message never reloaded the bell or played the alert
+    # sound. Groups are deliberately treated the same as 1:1 chats here — the
+    # dedupe above caps a busy group at one unread notification per agent.
     frappe.publish_realtime(
-        "helpdesk:new-baileys-message",
-        message={"jid": jid, "message": (message_text or "")[:80],
+        "helpdesk:baileys-notification",
+        message={"jid": jid, "message": preview,
                  "sender": sender_name, "line": line.name},
         after_commit=True,
     )
@@ -1891,9 +1990,10 @@ def _mark_conversation_read_for_all_agents(jid: str, upto) -> None:
         _mark_conversation_read_for_user(jid, user=agent_user, upto=upto)
 
 
-# Keep in sync with the `unread_window_days` default in
-# WhatsApp Helpdesk Settings; used when the singleton has no stored value.
+# Keep in sync with the matching defaults in WhatsApp Helpdesk Settings; used
+# when the singleton has no stored value for them.
 DEFAULT_UNREAD_WINDOW_DAYS = 30
+DEFAULT_NOTIFICATION_QUIET_MINUTES = 10
 
 
 def _unread_floor():
@@ -2245,6 +2345,7 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
         # Baileys path
         count = _unread_counts_for_user([jid], frappe.session.user).get(jid, 0)
         _mark_conversation_read_for_user(jid)
+        _clear_wa_notifications(jid, frappe.session.user)
         frappe.db.commit()
         return count
 

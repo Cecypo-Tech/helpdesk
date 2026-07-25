@@ -182,6 +182,16 @@ function getRoute(n: Notification) {
           : undefined,
       };
     case "WhatsApp":
+      // WA Line conversations mostly have no ticket, so routing to TicketAgent
+      // unconditionally would navigate to an undefined ticket id. Open the
+      // conversation itself when that is what the notification refers to.
+      if (n.reference_wa_jid && n.reference_wa_line) {
+        return {
+          name: "WhatsAppChat",
+          params: { lineName: n.reference_wa_line },
+          query: { jid: n.reference_wa_jid },
+        };
+      }
       return {
         name: "TicketAgent",
         params: {

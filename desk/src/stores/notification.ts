@@ -22,6 +22,8 @@ export const useNotificationStore = defineStore("notification", () => {
       "read",
       "reference_comment",
       "reference_ticket",
+      "reference_wa_jid",
+      "reference_wa_line",
       "user_from",
       "user_to",
     ],

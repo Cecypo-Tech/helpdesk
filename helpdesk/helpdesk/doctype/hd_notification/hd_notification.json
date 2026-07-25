@@ -15,6 +15,8 @@
   "reference_ticket",
   "column_break_ibly",
   "reference_comment",
+  "reference_wa_jid",
+  "reference_wa_line",
   "message"
  ],
  "fields": [
@@ -55,6 +57,19 @@
    "options": "HD Ticket Comment"
   },
   {
+   "description": "WhatsApp conversation (WA Line) this notification is about. Set for chats that have no ticket, which is most of them \u2014 it is what the bell and push deep-link to, and what dedupes one unread notification per agent per conversation.",
+   "fieldname": "reference_wa_jid",
+   "fieldtype": "Data",
+   "label": "Reference WA JID",
+   "search_index": 1
+  },
+  {
+   "fieldname": "reference_wa_line",
+   "fieldtype": "Link",
+   "label": "Reference WA Line",
+   "options": "WA Line"
+  },
+  {
    "fieldname": "references_section",
    "fieldtype": "Section Break",
    "label": "References"
@@ -82,7 +97,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-02-20 12:18:20.219347",
+ "modified": "2026-07-26 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "HD Notification",

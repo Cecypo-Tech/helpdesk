@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import frappe
 from frappe.model.document import Document
 
@@ -93,7 +95,15 @@ class HDNotification(Document):
         elif self.notification_type == "Reaction":
             title = "New reaction on your comment"
 
-        url = f"/helpdesk/tickets/{self.reference_ticket}" if self.reference_ticket else "/helpdesk"
+        if self.reference_ticket:
+            url = f"/helpdesk/tickets/{self.reference_ticket}"
+        elif self.reference_wa_jid and self.reference_wa_line:
+            # WA Line conversations mostly have no ticket, so without this the
+            # push would land the agent on the dashboard with no way to tell
+            # which chat it was about. WhatsAppPage reads ?jid to open it.
+            url = f"/helpdesk/whatsapp/{quote(self.reference_wa_line)}?jid={quote(self.reference_wa_jid)}"
+        else:
+            url = "/helpdesk"
         if self.reference_comment:
             url += f"#{self.reference_comment}"
 
@@ -102,5 +112,5 @@ class HDNotification(Document):
             title=title,
             body=body,
             url=url,
-            tag=f"helpdesk-{self.reference_ticket or 'general'}",
+            tag=f"helpdesk-{self.reference_ticket or self.reference_wa_jid or 'general'}",
         )
