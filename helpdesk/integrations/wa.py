@@ -657,9 +657,17 @@ def _retry_media_download(message_name: str) -> None:
         _publish_wa_event(doc.jid, is_incoming=doc.direction == "Incoming", line=doc.line, doc=doc)
 
 
-def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = None) -> str:
+def _extract_media_url(
+    msg: dict, line=None, full_webhook_data: dict | None = None, allow_remote_fetch: bool = True
+) -> str:
     """Download and permanently save media from an incoming WhatsApp message.
-    WhatsApp CDN files (.enc) are AES-encrypted — only Evolution (Baileys session) can decrypt."""
+    WhatsApp CDN files (.enc) are AES-encrypted — only Evolution (Baileys session) can decrypt.
+
+    `allow_remote_fetch=False` skips the blocking call out to Evolution, keeping
+    only the paths that cost nothing (inline base64). The webhook uses this so a
+    media message doesn't hold the request open for a network round-trip;
+    `_retry_media_download` picks the file up a moment later and republishes.
+    """
     inner = (
         msg.get("viewOnceMessage", {}).get("message")
         or msg.get("ephemeralMessage", {}).get("message")
@@ -680,15 +688,20 @@ def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = No
                 return saved
 
         # 2. Evolution /chat/getBase64FromMediaMessage — only needs message key
-        if line and full_webhook_data:
+        if allow_remote_fetch and line and full_webhook_data:
             saved = _download_media_via_wa(line, full_webhook_data)
             if saved:
                 return saved
 
-        # 3. Last resort: store the raw CDN URL (encrypted, will fail to render in browser)
-        cdn_url = media_msg.get("url") or ""
-        if cdn_url:
-            return cdn_url
+        # 3. Last resort: store the raw CDN URL (encrypted, will fail to render
+        # in browser). Only worth doing once the decrypt attempt above has
+        # actually been made and failed — when it has merely been deferred,
+        # returning this would make the message look downloaded and stop
+        # _retry_media_download from ever running.
+        if allow_remote_fetch:
+            cdn_url = media_msg.get("url") or ""
+            if cdn_url:
+                return cdn_url
 
         break
     return ""
@@ -997,7 +1010,12 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 	text, content_type = _extract_text(raw_msg)
 	reply_to_message_id = _extract_reply_target(data, raw_msg, content_type)
 
-	# Extract media URL for media messages — pass full `data` so Evolution can decrypt
+	# Extract media URL for media messages. The decrypt-and-download round trip
+	# to Evolution is deliberately NOT made here: it is the single slowest thing
+	# the webhook did, and Evolution blocks on our response. Only the free inline
+	# base64 path runs now; anything else leaves media_url empty, which is
+	# exactly the condition that enqueues _retry_media_download below. That job
+	# fetches the file and republishes, so the bubble fills in a moment later.
 	media_url = ""
 	thumbnail_url = ""
 	raw_message_json = ""
@@ -1008,12 +1026,16 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		except Exception:
 			pass
 		try:
-			media_url = _extract_media_url(raw_msg, line=line, full_webhook_data=data)
+			media_url = _extract_media_url(
+				raw_msg, line=line, full_webhook_data=data, allow_remote_fetch=False
+			)
 		except Exception as exc:
 			frappe.logger().warning(f"_extract_media_url failed for {message_id}: {exc}")
 			media_url = ""
 		# Must happen here, not in a background job: the video poster comes from
-		# raw_msg, which is about to be stripped of its preview frames.
+		# raw_msg, which is about to be stripped of its preview frames. (An image
+		# thumbnail needs the downloaded file, so when the fetch is deferred
+		# _retry_media_download builds that one instead.)
 		thumbnail_url = _build_wa_thumbnail(raw_msg, media_url, content_type)
 
 	# Detect and handle incoming edit before dedup check
@@ -1174,6 +1196,12 @@ _STATUS_MAP = {
 
 
 def _handle_update(updates: list, line) -> dict:
+    # Status updates are the highest-frequency webhook event by far — every
+    # outgoing message produces sent/delivered/read in turn. The per-item
+    # get_value + commit this used to do meant a full table scan (message_id was
+    # unindexed) and a transaction round-trip per status. Resolve the whole
+    # batch in one query and commit once.
+    pending = []
     for item in updates:
         if not isinstance(item, dict):
             continue
@@ -1184,17 +1212,39 @@ def _handle_update(updates: list, line) -> dict:
         status = _STATUS_MAP.get(raw_status) if raw_status is not None else None
         if not message_id or not status:
             continue
-        msg_name = frappe.db.get_value("WA Message", {"message_id": message_id}, "name")
+        pending.append((message_id, status, key.get("remoteJid", "")))
+
+    if not pending:
+        return {"status": "ok"}
+
+    # A message_id is not unique (forwarded messages legitimately repeat one,
+    # which is why the unique index was dropped) — keep the first match, as the
+    # per-item get_value did.
+    name_by_id: dict[str, str] = {}
+    for row in frappe.db.sql(
+        "SELECT message_id, name FROM `tabWA Message` WHERE message_id IN %(ids)s",
+        {"ids": tuple({p[0] for p in pending})},
+        as_dict=True,
+    ):
+        name_by_id.setdefault(row.message_id, row.name)
+
+    events = []
+    for message_id, status, remote_jid in pending:
+        msg_name = name_by_id.get(message_id)
         if not msg_name:
             continue
         frappe.db.set_value("WA Message", msg_name, "status", status, update_modified=False)
-        frappe.db.commit()
-        frappe.publish_realtime(
-            "helpdesk:baileys-status-update",
-            message={"message_id": message_id, "status": status,
-                     "jid": key.get("remoteJid", ""), "line": line.name},
-            after_commit=True,
-        )
+        events.append({"message_id": message_id, "status": status,
+                       "jid": remote_jid, "line": line.name})
+
+    if not events:
+        return {"status": "ok"}
+
+    frappe.db.commit()
+    # Already durable after the commit above, so these publish immediately
+    # rather than waiting to be flushed by the next one.
+    for event in events:
+        frappe.publish_realtime("helpdesk:baileys-status-update", message=event)
     return {"status": "ok"}
 
 
