@@ -60,6 +60,12 @@ website_route_rules = [
     },
 ]
 
+# Serves the PWA service worker at /helpdesk/sw.js so its scope covers the app.
+# Registered from the asset path it is built into, the worker controlled nothing
+# under /helpdesk/ — see helpdesk/service_worker.py. Custom renderers are tried
+# before Frappe's own, so this claims the route ahead of the SPA rule above.
+page_renderer = ["helpdesk.service_worker.ServiceWorkerPage"]
+
 user_invitation = {
     "allowed_roles": {
         "Agent Manager": ["Agent", "Agent Manager"],

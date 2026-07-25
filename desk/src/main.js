@@ -24,6 +24,7 @@ import { isCustomerPortal } from "@/utils";
 import { translationPlugin } from "./translation";
 import CircleAlert from "~icons/lucide/circle-alert";
 import { initSocket } from "./socket";
+import { registerServiceWorker } from "./pwa";
 
 const globalComponents = {
   Badge,
@@ -93,3 +94,6 @@ if (import.meta.env.DEV) {
   app.config.globalProperties.$socket = socket;
   app.mount("#app");
 }
+
+registerServiceWorker();
+
