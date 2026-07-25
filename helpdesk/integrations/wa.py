@@ -6,7 +6,7 @@ import frappe
 import requests as _requests
 from frappe import _
 from frappe.database import savepoint
-from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_hours
+from frappe.utils import add_to_date, cint, get_datetime, now_datetime, time_diff_in_hours
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -654,7 +654,7 @@ def _retry_media_download(message_name: str) -> None:
             if thumb:
                 frappe.db.set_value("WA Message", message_name, "thumbnail_url", thumb)
         frappe.db.commit()
-        _publish_wa_event(doc.jid, is_incoming=doc.direction == "Incoming", line=doc.line)
+        _publish_wa_event(doc.jid, is_incoming=doc.direction == "Incoming", line=doc.line, doc=doc)
 
 
 def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = None) -> str:
@@ -694,11 +694,30 @@ def _extract_media_url(msg: dict, line=None, full_webhook_data: dict | None = No
     return ""
 
 
-def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "") -> None:
+def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "", doc=None) -> None:
+    """Broadcast a new/changed WA message to every connected client.
+
+    `doc` (the WA Message that triggered this) is optional but should be passed
+    wherever it is at hand: it lets the sidebar badge and the conversation list
+    update themselves from the payload alone. Without it every client refetched
+    `get_wa_lines` and `get_wa_conversations` on every message in both
+    directions — an N-agents x M-messages fan-out of two full-table-scan
+    queries, which dominated site compute. Clients fall back to a debounced
+    refetch when the preview is absent (or when the JID is new to them and the
+    list has no row to patch).
+    """
     frappe.db.commit()
     event_data = {"jid": jid, "is_incoming": is_incoming, "line": line}
     if ticket:
         event_data["ticket"] = ticket
+    if doc is not None:
+        event_data["preview"] = {
+            "message": doc.get("message") or "",
+            "content_type": doc.get("content_type") or "text",
+            "sender_name": doc.get("sender_name") or "",
+            "direction": doc.get("direction") or ("Incoming" if is_incoming else "Outgoing"),
+            "creation": str(doc.get("creation") or now_datetime()),
+        }
     frappe.publish_realtime(
         "helpdesk:baileys-message",
         message=event_data,
@@ -1073,7 +1092,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		except frappe.exceptions.DuplicateEntryError:
 			return {"status": "duplicate"}
 		frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
-		_publish_wa_event(jid, is_incoming=False, line=line.name)
+		_publish_wa_event(jid, is_incoming=False, line=line.name, doc=doc)
 		if not media_url and raw_message_json:
 			frappe.enqueue(
 				"helpdesk.integrations.wa._retry_media_download",
@@ -1112,7 +1131,7 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		return {"status": "duplicate"}
 
 	_upsert_contact_name(jid, sender_name)
-	_publish_wa_event(jid, is_incoming=True, line=line.name)
+	_publish_wa_event(jid, is_incoming=True, line=line.name, doc=incoming_doc)
 	if not media_url and raw_message_json:
 		frappe.enqueue(
 			"helpdesk.integrations.wa._retry_media_download",
@@ -1441,7 +1460,7 @@ def send_wa_reply(
             if shared.agent_reply_status:
                 _set_ticket_status(ticket, shared.agent_reply_status)
 
-    _publish_wa_event(jid, is_incoming=False, line=line.name, ticket=ticket or "")
+    _publish_wa_event(jid, is_incoming=False, line=line.name, ticket=ticket or "", doc=msg_doc)
     result = {"name": msg_doc.name, "message_id": sent_id, "status": status}
     if send_error:
         result["error"] = send_error
@@ -1514,7 +1533,7 @@ def send_wa_reaction(
         frappe.throw(_("WA API reaction failed: {0}").format(str(e)))
 
     sender_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
-    frappe.get_doc({
+    reaction_doc = frappe.get_doc({
         "doctype": "WA Message",
         "direction": "Outgoing",
         "jid": jid,
@@ -1527,7 +1546,7 @@ def send_wa_reaction(
         "line": line.name,
     }).insert(ignore_permissions=True)
     frappe.db.commit()
-    _publish_wa_event(jid, is_incoming=False, line=line.name)
+    _publish_wa_event(jid, is_incoming=False, line=line.name, doc=reaction_doc)
     return {"status": "ok"}
 
 
@@ -1711,7 +1730,7 @@ def retry_wa_message(message_name: str) -> dict:
     doc.db_set("message_id", sent_id, update_modified=False)
     doc.db_set("status", "Sent", update_modified=False)
     frappe.db.commit()
-    _publish_wa_event(doc.jid, is_incoming=False, line=line.name, ticket=doc.reference_name or "")
+    _publish_wa_event(doc.jid, is_incoming=False, line=line.name, ticket=doc.reference_name or "", doc=doc)
     return {"name": doc.name, "message_id": sent_id, "status": "Sent"}
 
 
@@ -1730,20 +1749,24 @@ def get_wa_lines() -> list[dict]:
 
     # Per-line unread counts for the current agent in a single grouped query,
     # rather than one query per line. Scoped to the same per-agent cursor
-    # (WA Conversation Read State) the conversation list uses.
+    # (WA Conversation Read State) the conversation list uses, and to the same
+    # unread window floor (see _unread_floor).
     unread_by_line: dict[str, int] = {}
     if lines and frappe.db.exists("DocType", "WA Message"):
+        floor = _unread_floor()
+        floor_filter = "AND m.creation > %(floor)s" if floor else ""
         for row in frappe.db.sql(
-            """
+            f"""
             SELECT m.line AS line, COUNT(*) AS cnt
             FROM `tabWA Message` m
             LEFT JOIN `tabWA Conversation Read State` r
               ON r.jid = m.jid AND r.user = %(user)s
             WHERE m.direction = 'Incoming'
+              {floor_filter}
               AND (r.last_read IS NULL OR m.creation > r.last_read)
             GROUP BY m.line
             """,
-            {"user": frappe.session.user},
+            {"user": frappe.session.user, "floor": floor},
             as_dict=True,
         ):
             if row.line:
@@ -1818,21 +1841,62 @@ def _mark_conversation_read_for_all_agents(jid: str, upto) -> None:
         _mark_conversation_read_for_user(jid, user=agent_user, upto=upto)
 
 
+# Keep in sync with the `unread_window_days` default in
+# WhatsApp Helpdesk Settings; used when the singleton has no stored value.
+DEFAULT_UNREAD_WINDOW_DAYS = 30
+
+
+def _unread_floor():
+    """Oldest creation time an incoming message can have and still count as unread.
+
+    Without a floor, an agent who has no `WA Conversation Read State` row for a
+    JID has `r.last_read IS NULL`, which makes the *entire* message history
+    unread. That is both a nonsense badge (agents were seeing counts in the
+    thousands on first login) and the reason the unread queries had to scan
+    every row ever received — cost per call grew with total history even at
+    flat traffic, and these two endpoints were the largest consumers of site
+    compute by a wide margin.
+
+    The floor turns that into a bounded range scan: it is a plain
+    `creation > :floor` predicate on `m` alone, so unlike the cursor comparison
+    (which depends on the joined read-state row) the planner can push it into
+    the `wa_message_direction_creation_jid` index.
+
+    Trade-off, by design: incoming messages older than the window are treated
+    as read for everyone, whether or not the agent ever opened them. Returns
+    None when the window is 0, which restores the old unbounded behaviour.
+    """
+    # .get() rather than attribute access: on a site that hasn't migrated since
+    # this field was added the singleton has no such attribute at all, and a
+    # Single that predates the field keeps no value for it either — Frappe only
+    # applies a field default to new documents, never to an existing singleton.
+    # Unset therefore has to mean the default, not 0; an admin who genuinely
+    # wants no window stores an explicit 0.
+    days = _shared_settings().get("unread_window_days")
+    days = DEFAULT_UNREAD_WINDOW_DAYS if days is None else cint(days)
+    if days <= 0:
+        return None
+    return add_to_date(now_datetime(), days=-days)
+
+
 def _unread_counts_for_user(jids: list[str], user: str) -> dict[str, int]:
     """{jid: unread incoming message count} for one agent, scoped to `jids`."""
     if not jids:
         return {}
+    floor = _unread_floor()
+    floor_filter = "AND m.creation > %(floor)s" if floor else ""
     rows = frappe.db.sql(
-        """
+        f"""
         SELECT m.jid, COUNT(*) AS cnt
         FROM `tabWA Message` m
         LEFT JOIN `tabWA Conversation Read State` r
           ON r.jid = m.jid AND r.user = %(user)s
         WHERE m.direction = 'Incoming' AND m.jid IN %(jids)s
+          {floor_filter}
           AND (r.last_read IS NULL OR m.creation > r.last_read)
         GROUP BY m.jid
         """,
-        {"jids": tuple(jids), "user": user},
+        {"jids": tuple(jids), "user": user, "floor": floor},
         as_dict=True,
     )
     return {row.jid: row.cnt for row in rows}
@@ -2053,12 +2117,15 @@ def mark_all_wa_messages_read(line: str) -> int:
     """Mark all unread incoming Baileys Messages for an entire line as read, for the current agent."""
     if not line:
         return 0
-    jids = frappe.get_all(
-        "WA Message",
-        filters={"line": line, "direction": "Incoming"},
-        pluck="jid",
-        distinct=True,
-    )
+    # Only JIDs that can actually hold unread messages need a cursor written.
+    # Anything older than the floor already counts as read (see _unread_floor),
+    # so bounding this the same way keeps the DISTINCT off the full history and
+    # avoids writing hundreds of read-state rows for long-dead conversations.
+    filters = {"line": line, "direction": "Incoming"}
+    floor = _unread_floor()
+    if floor:
+        filters["creation"] = [">", floor]
+    jids = frappe.get_all("WA Message", filters=filters, pluck="jid", distinct=True)
     if not jids:
         return 0
     counts = _unread_counts_for_user(jids, frappe.session.user)

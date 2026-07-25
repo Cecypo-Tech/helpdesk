@@ -24,7 +24,8 @@
   "section_access",
   "restrict_chats_by_team",
   "section_notifications",
-  "notification_quiet_minutes"
+  "notification_quiet_minutes",
+  "unread_window_days"
  ],
  "fields": [
   {
@@ -135,12 +136,19 @@
    "fieldname": "notification_quiet_minutes",
    "fieldtype": "Int",
    "label": "Notification Quiet Period (Minutes)"
+  },
+  {
+   "default": "30",
+   "description": "Incoming messages older than this are always treated as read, so unread badges only ever count recent activity. Bounds the unread-count queries to recent rows instead of the whole message history. 0 = no limit (slow on large histories).",
+   "fieldname": "unread_window_days",
+   "fieldtype": "Int",
+   "label": "Unread Window (Days)"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-28 14:00:00.000000",
+ "modified": "2026-07-25 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "WhatsApp Helpdesk Settings",

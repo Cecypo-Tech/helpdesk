@@ -2,6 +2,7 @@
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { useWaLinesStore } from "@/stores/waLines";
 import { foldReactions } from "@/utils/waReactions";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -124,8 +125,18 @@ watch(
   }
 );
 
+const waLinesStore = useWaLinesStore();
+
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
+  // Reading WhatsApp messages inside a ticket has to drop the sidebar badge
+  // too. This tab is addressed by ticket, not line, so it can't do the targeted
+  // decrement BaileysChat does — but it only fires when an agent opens a tab
+  // with genuinely unread messages, so a refetch here is bounded by user
+  // actions rather than by message volume.
+  onSuccess(cleared: number) {
+    if (cleared) waLinesStore.reload();
+  },
 });
 
 const pickUpResource = createResource({

@@ -166,6 +166,69 @@ class TestWAUnreadState(FrappeTestCase):
 		# for a race that was otherwise handled transparently.
 		self.assertEqual(len(frappe.message_log), message_log_len)
 
+	def _set_unread_window(self, days):
+		frappe.db.set_single_value("WhatsApp Helpdesk Settings", "unread_window_days", days)
+		# _shared_settings() reads through get_cached_doc.
+		frappe.clear_document_cache("WhatsApp Helpdesk Settings", "WhatsApp Helpdesk Settings")
+
+	def test_unread_window_floors_old_messages_as_read(self):
+		"""Incoming messages older than the unread window never count as unread.
+
+		Without a floor an agent with no read-state row for a JID has
+		`last_read IS NULL`, so the whole message history counts as unread —
+		which is both a nonsense badge and why the unread queries had to scan
+		every row ever received. Setting the window to 0 must restore that old
+		unbounded behaviour, so both directions are asserted here.
+		"""
+		from helpdesk.integrations.wa import get_wa_conversations, get_wa_lines
+
+		line_name = "wa-window-test-line"
+		if not frappe.db.exists("WA Line", line_name):
+			frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
+			self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
+
+		original = frappe.db.get_single_value("WhatsApp Helpdesk Settings", "unread_window_days")
+		self.addCleanup(self._set_unread_window, original)
+
+		jid = "555windowtest@s.whatsapp.net"
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
+		recent = self._make_message(jid, "recent", line=line_name)
+		old = self._make_message(jid, "ancient", line=line_name)
+		# Backdate past any plausible window. `creation` is set on insert, so it
+		# has to be rewritten directly rather than passed in.
+		frappe.db.set_value(
+			"WA Message",
+			old.name,
+			"creation",
+			frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-60),
+			update_modified=False,
+		)
+
+		def counts():
+			convs = get_wa_conversations(line=line_name)
+			match = [c for c in convs if c["jid"] == jid]
+			lines = [l for l in get_wa_lines() if l["name"] == line_name]
+			return (
+				match[0]["unread_count"] if match else 0,
+				lines[0]["unread"] if lines else 0,
+			)
+
+		frappe.set_user(self.agent_a)
+
+		self._set_unread_window(30)
+		self.assertEqual(counts(), (1, 1), "only the recent message is unread inside a 30-day window")
+
+		self._set_unread_window(0)
+		self.assertEqual(counts(), (2, 2), "a window of 0 disables the floor entirely")
+
+		# The floor must not resurrect messages an agent has explicitly read.
+		self._set_unread_window(30)
+		from helpdesk.integrations.wa import mark_wa_messages_read
+
+		mark_wa_messages_read(jid=jid)
+		self.assertEqual(counts(), (0, 0))
+		self.assertTrue(recent.name)
+
 	def test_historical_sync_does_not_create_unread_for_anyone(self):
 		from helpdesk.integrations.wa import _mark_conversation_read_for_all_agents, get_wa_conversations
 

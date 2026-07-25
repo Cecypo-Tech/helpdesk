@@ -329,6 +329,7 @@
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { useWaLinesStore } from "@/stores/waLines";
 import { foldReactions } from "@/utils/waReactions";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
@@ -537,8 +538,17 @@ function mergeMessages(incoming: Record<string, any>[]) {
   });
 }
 
+const waLinesStore = useWaLinesStore();
+
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
+  // The endpoint returns how many messages this cleared. Subtracting exactly
+  // that keeps the sidebar badge correct without refetching get_wa_lines —
+  // including for a message that arrives while its own chat is open, where the
+  // sidebar's +1 and this -1 cancel out.
+  onSuccess(cleared: number) {
+    if (cleared && props.line) waLinesStore.bumpUnread(props.line, -cleared);
+  },
 });
 
 const sendReactionResource = createResource({

@@ -770,19 +770,38 @@ function linkBadge(link: any): number | null {
   return null;
 }
 
+// Bump the WhatsApp line badge straight from the event payload. This used to
+// call waLinesStore.reload(), which re-ran an aggregate over the whole message
+// table — on every agent's sidebar, on every page, for every message in either
+// direction. Outgoing messages never affect an unread count, so they are
+// ignored outright.
+function onBaileysMessage(data: { line?: string; is_incoming?: boolean }) {
+  if (!data?.is_incoming || !data.line) return;
+  waLinesStore.bumpUnread(data.line, 1);
+}
+
+// A dropped connection means missed bumps, and the agent may have read messages
+// in another tab or on their phone while this one sat in the background.
+function onVisibilityChange() {
+  if (document.visibilityState === "visible") waLinesStore.reconcile();
+}
+
 onMounted(() => {
   setUpOnboarding();
   if (isCustomerPortal.value) return;
   useShortcut({ key: ",", meta: true }, () => {
     showSettingsModal.value = !showSettingsModal.value;
   });
-  // Refresh WhatsApp line unread counts when a new message arrives
   const { $socket } = globalStore();
-  $socket.on("helpdesk:baileys-message", waLinesStore.reload);
+  $socket.on("helpdesk:baileys-message", onBaileysMessage);
+  $socket.on("connect", waLinesStore.reconcile);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
-  $socket.off("helpdesk:baileys-message", waLinesStore.reload);
+  $socket.off("helpdesk:baileys-message", onBaileysMessage);
+  $socket.off("connect", waLinesStore.reconcile);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 });
 </script>

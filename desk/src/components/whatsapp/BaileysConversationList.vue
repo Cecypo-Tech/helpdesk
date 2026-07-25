@@ -171,6 +171,7 @@
 
 <script setup lang="ts">
 import { createResource, LoadingIndicator, toast } from "frappe-ui";
+import { useDebounceFn } from "@vueuse/core";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useWaLinesStore } from "@/stores/waLines";
@@ -260,20 +261,80 @@ function onSyncComplete(data: { contacts?: number; groups?: number; error?: stri
   conversations.reload();
 }
 
-function onBaileysMessage() {
-  conversations.reload();
+// get_wa_conversations aggregates over the entire message table with no LIMIT,
+// so refetching it on every `helpdesk:baileys-message` — which fires for every
+// message in both directions, to every connected agent — was by a wide margin
+// the most expensive thing this app did. The event now carries a preview of the
+// message, which is everything a row needs, so the common case patches in place
+// and never touches the network.
+const debouncedReload = useDebounceFn(() => conversations.reload(), 3000);
+
+interface BaileysMessageEvent {
+  jid?: string;
+  line?: string;
+  is_incoming?: boolean;
+  preview?: {
+    message?: string;
+    content_type?: string;
+    sender_name?: string;
+    direction?: string;
+    creation?: string;
+  };
+}
+
+function onBaileysMessage(data: BaileysMessageEvent) {
+  if (!data?.jid) return;
+  if (props.line && data.line && data.line !== props.line) return;
+
+  const list: any[] = conversations.data || [];
+  const row = list.find((c) => c.jid === data.jid);
+
+  // No row means a conversation we've never rendered (first message from a new
+  // contact) — only a fetch can supply its name, company and team. No preview
+  // means an older backend, or a publisher without the message doc at hand.
+  if (!row || !data.preview) {
+    debouncedReload();
+    return;
+  }
+
+  const p = data.preview;
+  const isOpen = props.selectedJid === data.jid;
+  const patched = {
+    ...row,
+    last_message: p.message || `[${p.content_type || "media"}]`,
+    last_sender_name: row.is_group ? p.sender_name || "" : "",
+    last_message_time: p.creation,
+    last_direction: p.direction || (data.is_incoming ? "Incoming" : "Outgoing"),
+    content_type: p.content_type || "text",
+    // The open conversation marks itself read as it renders the message, so
+    // counting it here would only produce a badge that immediately clears.
+    unread_count:
+      data.is_incoming && !isOpen
+        ? (row.unread_count || 0) + 1
+        : row.unread_count || 0,
+  };
+
+  // The server orders by most recent first; keep that as rows are patched.
+  conversations.data = [patched, ...list.filter((c) => c.jid !== data.jid)];
+}
+
+// Missed events during a dropped connection can leave rows stale or absent.
+function onSocketConnect() {
+  debouncedReload();
 }
 
 onMounted(() => {
   const { $socket } = globalStore();
   $socket.on("helpdesk:wa-sync-complete", onSyncComplete);
   $socket.on("helpdesk:baileys-message", onBaileysMessage);
+  $socket.on("connect", onSocketConnect);
 });
 
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
   $socket.off("helpdesk:wa-sync-complete", onSyncComplete);
   $socket.off("helpdesk:baileys-message", onBaileysMessage);
+  $socket.off("connect", onSocketConnect);
 });
 
 // ── New chat ────────────────────────────────────────────────────────────────
