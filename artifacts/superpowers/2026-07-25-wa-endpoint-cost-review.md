@@ -123,6 +123,72 @@ the full set, so search must move server-side in the same change.
 - In `_handle_update`, hoist `frappe.db.commit()` out of the per-item loop and batch
   the status lookups into one query.
 
+## What shipped
+
+All four priorities landed. Commits on `develop`:
+
+| Commit | Scope |
+|---|---|
+| `8a27f9b1f` | P0 fan-out + P1 unread floor + P2 indexes |
+| `357212ee0` | P4 webhook trimming |
+| `7d8ae8bd4` | P3 pagination + server-side search/filters |
+
+### Findings that changed the plan
+
+**The composite index does not help `get_wa_lines`.** The plan assumed an index
+would fix that query. It does not: the optimizer prefers the plain `creation`
+index, and forcing `(direction, creation, jid)` measured identically (43 ms
+either way). What fixed that query was the floor bounding how much history it
+touches. The index was kept because it *does* help the per-JID unread query
+inside `get_wa_conversations` (25.2 ms vs 34.4 ms), which is the more expensive
+endpoint. This is documented in the patch so nobody "fixes" the plan with a hint.
+
+**`message_id` needed no patch.** `search_index: 1` on the DocType field is
+enough and is self-healing if the table is rebuilt. Frappe names it
+`message_id_index`, which is why it does not collide with the index the old
+`drop_wa_message_id_unique_index` patch removed.
+
+**A Single doctype never picks up a new field's default.** `unread_window_days`
+had to treat *unset* as 30 rather than 0, or every existing site would have
+silently kept the unbounded behaviour.
+
+**A fifth fan-out, not in the original review:** `TicketActivityPanel` refetched
+its WhatsApp badge on every WhatsApp message in the system, for every agent with
+any ticket open, regardless of whether the message belonged to that ticket.
+
+### Measured (19.7k rows, 30-day floor)
+
+| | before | after |
+|---|---|---|
+| `get_wa_lines` | 39.2 ms | 26.6 ms |
+| `get_wa_conversations` | 54.6 ms | 29.3 ms (paged) |
+| `_unread_counts_for_user` | 39.9 ms | 25.2 ms |
+| `message_id` lookup | 5.8 ms | 0.18 ms |
+
+Per-call numbers understate the result. The dominant term was call *volume*, and
+the automatic per-message refetch is gone entirely — the remaining calls are
+page loads, line switches, explicit actions, and a debounced merge for a
+genuinely new conversation. This fixture also holds only ~2.5 months of history,
+so a 30-day floor cuts about half its rows; production histories are deeper and
+the ratio there should be better.
+
+### Deliberate trade-offs
+
+- Incoming messages older than the unread window count as read for everyone.
+  Configurable, 0 disables. Note that if an admin later sets it back to 0,
+  conversations that `mark_all_wa_messages_read` skipped as pre-floor will
+  resurface as unread.
+- Search runs an unindexable `message LIKE` scan. It is debounced and
+  user-initiated, not on the automatic path. In exchange it now searches the
+  whole conversation instead of only the latest message.
+- Media now always arrives via the background job rather than inline, so a
+  bubble fills in a moment after the message appears.
+
+### Not addressed
+
+`helpdesk.tests.test_baileys` fails on `develop` already — it patches a stale
+`helpdesk.integrations.baileys` module. Pre-existing and unrelated; left alone.
+
 ## Verification plan
 
 - `EXPLAIN` before/after on both hot queries — assert no `type=ALL` on `tabWA Message`.

@@ -457,7 +457,18 @@ async function fetchPage({ append = false } = {}) {
     const data = await conversations.submit(queryParams(offset));
     if (token !== requestToken) return;
     const page = data?.conversations || [];
-    loadedList.value = append ? [...loadedList.value, ...page] : page;
+    if (append) {
+      // The offset is derived from how many rows are loaded, but a socket
+      // update can prepend a row between pages and shift everything down by
+      // one — so a page can overlap what's already here.
+      const loaded = new Set(loadedList.value.map((c: any) => c.jid));
+      loadedList.value = [
+        ...loadedList.value,
+        ...page.filter((c: any) => !loaded.has(c.jid)),
+      ];
+    } else {
+      loadedList.value = page;
+    }
     hasMore.value = !!data?.has_more;
   } finally {
     if (token === requestToken) loadingMore.value = false;
