@@ -35,6 +35,11 @@ export const useConfigStore = defineStore("config", () => {
   const enableCommentReactions = computed(
     () => !!parseInt(config.value.enable_comment_reactions)
   );
+  // Already a real boolean from get_config, not a 0/1 Check field, so it is not
+  // run through parseInt like the settings flags above.
+  const backupPortalEnabled = computed(
+    () => !!config.value.backup_portal_enabled
+  );
 
   socket.on("helpdesk:settings-updated", () => configResource.reload());
 
@@ -51,5 +56,6 @@ export const useConfigStore = defineStore("config", () => {
     assignWithinTeam,
     disableGlobalScopeForSavedReplies,
     enableCommentReactions,
+    backupPortalEnabled,
   };
 });

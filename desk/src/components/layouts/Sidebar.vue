@@ -31,6 +31,19 @@
       :is-active="isActiveTab('Dashboard')"
       :is-expanded="isExpanded"
     />
+    <!--
+      Imara Backup portal. Sits directly under Dashboard for agents, and — because
+      it is intentionally NOT behind the !isCustomerPortal guard the three links
+      around it use — becomes the first entry under the user menu for customers.
+    -->
+    <SidebarLink
+      v-if="backupPortalEnabled"
+      class="relative my-0.5 min-h-7"
+      :label="backupPortalOption.label"
+      :icon="backupPortalOption.icon"
+      :on-click="backupPortalOption.onClick"
+      :is-expanded="isExpanded"
+    />
     <div class="mb-4" v-if="!isCustomerPortal">
       <div
         v-if="notificationStore.unread"
@@ -289,9 +302,11 @@ import { computed, h, markRaw, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   agentPortalSidebarOptions,
+  backupPortalOption,
   customerPortalSidebarOptions,
 } from "./layoutSettings";
 
+import { useConfigStore } from "@/stores/config";
 import { useShortcut } from "@/composables/shortcuts";
 import { useTelephonyStore } from "@/stores/telephony";
 import { useWaLinesStore } from "@/stores/waLines";
@@ -355,6 +370,8 @@ const showCommandPalette = ref(false);
 const { pinnedViews, publicViews } = useView();
 
 const isFCSite = ref(window.is_fc_site);
+
+const { backupPortalEnabled } = storeToRefs(useConfigStore());
 
 const allViews = computed(() => {
   let items = isCustomerPortal.value

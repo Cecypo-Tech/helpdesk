@@ -23,4 +23,10 @@ def get_config():
         or frappe.db.get_single_value("Website Settings", "favicon")
         or "/assets/helpdesk/desk/favicon.svg"
     )
+
+    # Drives the "Backup" sidebar link, which points at the Imara Backup portal at
+    # /backup. Presence of the app is the only gate — the link is shown to every
+    # user, and /backup does its own permission handling.
+    res.backup_portal_enabled = "imara_backup" in frappe.get_installed_apps()
+
     return res

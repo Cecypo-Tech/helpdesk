@@ -48,6 +48,22 @@
               />
             </div>
           </div>
+          <!--
+            Imara Backup portal. Its own block rather than a member of the one
+            above, because that block is hidden wholesale on the customer portal
+            and this link must reach customers as well as agents.
+          -->
+          <div class="px-2" v-if="backupPortalEnabled">
+            <div class="mb-3 flex flex-col gap-1">
+              <SidebarLink
+                class="relative"
+                :label="backupPortalOption.label"
+                :icon="backupPortalOption.icon"
+                :on-click="backupPortalOption.onClick"
+                :is-expanded="true"
+              />
+            </div>
+          </div>
 
           <!-- WhatsApp lines section -->
           <div v-if="!isCustomerPortal && waLines.length" class="px-2 mb-3">
@@ -176,8 +192,10 @@ import { isCustomerPortal } from "@/utils";
 import Apps from "../Apps.vue";
 import {
   agentPortalSidebarOptions,
+  backupPortalOption,
   customerPortalSidebarOptions,
 } from "./layoutSettings";
+import { useConfigStore } from "@/stores/config";
 import { useTelephonyStore } from "@/stores/telephony";
 import { storeToRefs } from "pinia";
 import { useWaLinesStore } from "@/stores/waLines";
@@ -194,6 +212,8 @@ const { isCallingEnabled } = storeToRefs(telephonyStore);
 const waLinesStore = useWaLinesStore();
 const { lines: waLines, totalUnread: waUnread } = storeToRefs(waLinesStore);
 const waExpanded = ref(true);
+
+const { backupPortalEnabled } = storeToRefs(useConfigStore());
 
 const allViews = computed(() => {
   let items = isCustomerPortal.value
