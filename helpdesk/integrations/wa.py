@@ -2332,6 +2332,75 @@ def get_wa_conversations(
     return {"conversations": result, "has_more": has_more}
 
 
+# Meta only accepts a read receipt inside the 24-hour customer-service window.
+_WA_RECEIPT_MAX_AGE_HOURS = 24
+# A receipt that keeps failing inside the window is almost always permanently
+# unsendable. Retrying it forever left the message short of "marked as read",
+# which re-logged the failure on every ticket open and stranded it in the tab's
+# unread badge (get_ticket_wa_unread_count filters on that same field).
+_WA_RECEIPT_MAX_ATTEMPTS = 3
+_WA_RECEIPT_BACKOFF_TTL = 900
+_WA_RECEIPT_ATTEMPTS_TTL = 86400
+
+
+def _wa_account_for_message(account_name: str | None):
+    """Resolve a message's WhatsApp Account, falling back to the default incoming one.
+
+    Returns None rather than raising: a message pointing at a since-deleted
+    account must not 500 the whole mark-as-read call for the other messages.
+    """
+    if not account_name:
+        account_name = frappe.db.get_value("WhatsApp Account", {"is_default_incoming": 1}, "name")
+    if not account_name:
+        return None
+    try:
+        return frappe.get_cached_doc("WhatsApp Account", account_name)
+    except frappe.DoesNotExistError:
+        return None
+
+
+def _post_wa_read_receipt(message_id: str, account) -> tuple[bool, str]:
+    r"""POST a read receipt to Meta. Returns (ok, error) with the real failure detail.
+
+    We own this call rather than delegating to frappe_whatsapp's
+    WhatsAppMessage.send_read_receipt(): that method swallows the exception and
+    logs an error it reconstructs from stale request flags, which in practice
+    reads "None\n{}" and tells us nothing. It also lives in a vendored app whose
+    only remote is upstream, so patches to it cannot be deployed from here.
+    """
+    try:
+        resp = _requests.post(
+            f"{account.url}/{account.version}/{account.phone_id}/messages",
+            headers={
+                "authorization": f"Bearer {account.get_password('token')}",
+                "content-type": "application/json",
+            },
+            json={"messaging_product": "whatsapp", "status": "read", "message_id": message_id},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return True, ""
+    except _requests.exceptions.HTTPError as e:
+        r = e.response
+        if r is None:
+            return False, f"HTTPError with no response: {e}"
+        return False, f"HTTP {r.status_code}: {(r.text or '').strip()[:500]}"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def _settle_wa_read_receipt(name: str) -> None:
+    """Mark a message read locally when Meta will never accept its receipt.
+
+    The agent did read the message; only the courtesy receipt failed, so the
+    honest local state is "read". Uses db.set_value rather than doc.save() to
+    keep a read receipt from re-running WhatsAppMessage.validate/on_update.
+    """
+    frappe.db.set_value(
+        "WhatsApp Message", name, "status", "marked as read", update_modified=False
+    )
+
+
 @frappe.whitelist()
 def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
     """Mark all unread incoming messages as read (Baileys or frappe_whatsapp)."""
@@ -2362,23 +2431,54 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
             "type": "Incoming",
             "status": ["!=", "marked as read"],
         },
-        fields=["name", "message_id"],
+        fields=["name", "message_id", "creation", "whatsapp_account"],
     )
     for row in unread_fw:
         if not row.message_id:
             continue
-        retry_backoff_key = f"wa_read_receipt_retry:{row.name}"
-        if frappe.cache().get_value(retry_backoff_key):
+
+        # Outside the customer-service window Meta rejects the receipt for good,
+        # so don't spend an API call to find that out.
+        if time_diff_in_hours(now_datetime(), row.creation) > _WA_RECEIPT_MAX_AGE_HOURS:
+            _settle_wa_read_receipt(row.name)
+            count += 1
             continue
-        try:
-            msg_doc = frappe.get_doc("WhatsApp Message", row.name)
-            msg_doc.send_read_receipt()
-            if msg_doc.status == "marked as read":
-                count += 1
-            else:
-                frappe.cache().set_value(retry_backoff_key, 1, expires_in_sec=900)
-        except Exception:
-            frappe.cache().set_value(retry_backoff_key, 1, expires_in_sec=900)
+
+        backoff_key = f"wa_read_receipt_retry:{row.name}"
+        attempts_key = f"wa_read_receipt_attempts:{row.name}"
+        if frappe.cache().get_value(backoff_key):
+            continue
+
+        account = _wa_account_for_message(row.whatsapp_account)
+        if not account:
+            continue
+        # The documented kill switch for receipts. Until now it only gated the
+        # button on the desk form, and this path sent them regardless.
+        if not account.allow_auto_read_receipt:
+            continue
+
+        ok, error = _post_wa_read_receipt(row.message_id, account)
+        if ok:
+            _settle_wa_read_receipt(row.name)
+            frappe.cache().delete_value(attempts_key)
+            count += 1
+            continue
+
+        attempts = cint(frappe.cache().get_value(attempts_key)) + 1
+        if attempts >= _WA_RECEIPT_MAX_ATTEMPTS:
+            # Log once, at the point we stop trying, carrying the real response.
+            frappe.log_error(
+                f"WhatsApp read receipt failed after {attempts} attempts",
+                f"message_id={row.message_id}\n{error}",
+                reference_doctype="WhatsApp Message",
+                reference_name=row.name,
+            )
+            _settle_wa_read_receipt(row.name)
+            frappe.cache().delete_value(attempts_key)
+            count += 1
+        else:
+            frappe.cache().set_value(attempts_key, attempts, expires_in_sec=_WA_RECEIPT_ATTEMPTS_TTL)
+            frappe.cache().set_value(backoff_key, 1, expires_in_sec=_WA_RECEIPT_BACKOFF_TTL)
     return count
 
 
