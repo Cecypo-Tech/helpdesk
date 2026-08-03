@@ -14,6 +14,7 @@ import frappe
 from bs4 import BeautifulSoup, PageElement
 from frappe.utils import cstr, strip_html_tags, update_progress_bar
 from frappe.utils.caching import redis_cache
+from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 from redis.commands.search.field import TagField, TextField
 
@@ -410,15 +411,47 @@ def build_index_if_not_exists():
         build_index()
 
 
-@filelock("helpdesk_corpus_download", timeout=1, is_global=True)
-def download_corpus():
-    from nltk import data, download
+def _corpus_exists() -> bool:
+    from nltk import data
 
     try:
         data.find("taggers/averaged_perceptron_tagger_eng.zip")
         data.find("tokenizers/punkt_tab.zip")
         data.find("corpora/brown.zip")
     except LookupError:
-        download("averaged_perceptron_tagger_eng")
-        download("punkt_tab")
-        download("brown")
+        return False
+    return True
+
+
+@filelock("helpdesk_corpus_download", timeout=1, is_global=True)
+def _download_corpus_locked():
+    from nltk import download
+
+    # Re-check under the lock: whoever held it before us may have just finished
+    # the download we queued behind.
+    if _corpus_exists():
+        return
+
+    download("averaged_perceptron_tagger_eng")
+    download("punkt_tab")
+    download("brown")
+
+
+def download_corpus():
+    """Download the NLTK corpora this app needs, once per bench.
+
+    The existence check deliberately runs *outside* the lock. The lock is global
+    to the bench while this job is registered on the `all` scheduler event, so on
+    a multi-site bench every site fires it on the same tick and all but one time
+    out. frappe's filelock helper calls frappe.log_error itself before raising,
+    so catching the error cannot suppress that log — the only way to stay quiet
+    is to not enter the lock when there is nothing to download.
+    """
+    if _corpus_exists():
+        return
+
+    try:
+        _download_corpus_locked()
+    except LockTimeoutError:
+        # A genuine race: another process is already downloading. Nothing to do.
+        pass
