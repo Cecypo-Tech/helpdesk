@@ -22,7 +22,8 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 - `desk/src/components/whatsapp/WhatsAppChatTab.vue` — WABA tab component (rendered when the ticket has **no** `baileys_jid`)
 - `desk/src/components/whatsapp/BaileysGroupChatTab.vue` — Evolution API (WA Line) tab component (rendered when the ticket **has** a `baileys_jid`); handles both 1:1 and group chats despite the name
 - `desk/src/components/whatsapp/WhatsAppBubble.vue` — message bubble shared by **both** tabs (outgoing = green, incoming = surface-white)
-- `desk/src/components/whatsapp/WhatsAppReplyBox.vue` — WABA reply input (file attach, paste, drag-drop)
+- `desk/src/components/whatsapp/WhatsAppReplyBox.vue` — WABA reply input (file attach, paste, drag-drop, template picker). Takes `replyWindowOpen`; past the 24-hr window the free-form controls disable themselves and the Templates button becomes the primary action
+- `desk/src/components/whatsapp/WhatsAppTemplateModal.vue` — WABA template picker. Previews via `preview_template_for_ticket()`, which shares its rendering with the send path, so the preview cannot drift from what is sent
 - `desk/src/components/whatsapp/BaileysReplyBox.vue` — Evolution API reply input (file attach, paste, drag-drop, @mentions, saved replies)
 - `desk/src/components/icons/WhatsAppIcon.vue` — SVG icon
 - `desk/src/components/ticket-agent/TicketActivityPanel.vue` — modified: adds WhatsApp tab
@@ -58,8 +59,8 @@ This fork supports **two completely separate WhatsApp integrations** that share 
 | **Routing key** | HD Ticket has **no** `baileys_jid` value |
 | **Reply function** | `_send_fw_reply()` |
 | **Media function** | `_send_fw_reply()` with `media_url` → sets `attach` field on `WhatsApp Message` |
-| **24-hr window** | Enforced — after 24 h only templates can be sent |
-| **Settings** | `WhatsApp Helpdesk Settings` singleton |
+| **24-hr window** | Enforced in **both UI and API** — `_fw_reply_window_open()` gates `_send_fw_reply()`. A ticket with **no** incoming message counts as closed (business-initiated conversations need a template). Sending a template does **not** reopen the window; only a customer reply does. |
+| **Settings** | `WhatsApp Helpdesk Settings` singleton. `allow_template_outside_window` was retired on 2026-08-04 — templates are always available from the reply toolbar. |
 | **Realtime events** | `helpdesk:whatsapp-message`, `helpdesk:whatsapp-status-update` |
 
 The `frappe_whatsapp` controller (`WhatsAppMessage.before_insert → send_outgoing`) handles the actual Meta API call. When sending media, `attach` **must** be set on the `WhatsApp Message` doc — if it is empty for a non-text `content_type`, Meta rejects the request.

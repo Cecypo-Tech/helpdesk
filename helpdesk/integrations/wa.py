@@ -1,4 +1,5 @@
 # helpdesk/integrations/wa.py
+import json
 import re
 from urllib.parse import quote as _urlquote
 
@@ -239,9 +240,22 @@ def _fw_settings():
         return None
 
 
-def _fw_allow_template_outside_window() -> bool:
-    s = _fw_settings()
-    return bool(s and s.allow_template_outside_window) if s else False
+def _fw_reply_window_open(ticket: str | int) -> bool:
+    """True when Meta still accepts free-form messages on this ticket.
+
+    The window runs 24 hours from the customer's last *incoming* message. With
+    no incoming message at all the conversation is business-initiated, which
+    Meta permits only via a template — so the window is closed, not open.
+    """
+    last_incoming = frappe.db.get_value(
+        "WhatsApp Message",
+        {"reference_doctype": "HD Ticket", "reference_name": ticket, "type": "Incoming"},
+        "creation",
+        order_by="creation desc",
+    )
+    if not last_incoming:
+        return False
+    return time_diff_in_hours(now_datetime(), last_incoming) < 24
 
 
 def match_phone_to_contact(phone: str) -> str | None:
@@ -3401,6 +3415,12 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_
 	phone = get_contact_phone(ticket)
 	if not phone:
 		frappe.throw(_("No phone number found for the contact linked to this ticket."))
+	# Meta rejects free-form sends outside the 24-hour window with error 131047.
+	# Refusing here turns an opaque delivery failure into an actionable message.
+	if not _fw_reply_window_open(ticket):
+		frappe.throw(
+			_("The 24-hour reply window has closed. Send an approved template instead.")
+		)
 	shared = _shared_settings()
 	if shared.append_agent_initials and content_type == "text":
 		suffix = f"\n^{_agent_initials()}"
@@ -3810,16 +3830,7 @@ def get_whatsapp_ticket_info(ticket: str | int) -> dict:
 	if not has_msg:
 		return {"has_whatsapp": False}
 
-	# Determine if the 24-hour reply window is open
-	last_incoming = frappe.db.get_value(
-		"WhatsApp Message",
-		{"reference_doctype": "HD Ticket", "reference_name": ticket, "type": "Incoming"},
-		"creation",
-		order_by="creation desc",
-	)
-	window_open = True
-	if last_incoming:
-		window_open = time_diff_in_hours(now_datetime(), last_incoming) < 24
+	window_open = _fw_reply_window_open(ticket)
 
 	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
 	assigned_users = frappe.parse_json(assign_json) or []
@@ -3831,7 +3842,6 @@ def get_whatsapp_ticket_info(ticket: str | int) -> dict:
 		"is_assigned": frappe.session.user in assigned_users,
 		"assignees": assigned_users,
 		"reply_window_open": window_open,
-		"allow_template_outside_window": _fw_allow_template_outside_window(),
 		"via_frappe_whatsapp": True,
 	}
 
@@ -4380,9 +4390,60 @@ def get_outgoing_templates() -> list[dict]:
 	return frappe.get_all(
 		"WhatsApp Templates",
 		filters={"status": "APPROVED"},
-		fields=["name", "template_name", "language_code"],
+		# `template` is the raw body, still carrying its {{1}} placeholders. The
+		# picker lists it so a template is recognisable by its wording rather
+		# than by an opaque name; the rendered-for-this-ticket version comes
+		# from preview_template_for_ticket once one is selected.
+		fields=["name", "template_name", "language_code", "template"],
 		order_by="template_name asc",
 	)
+
+
+def _render_template_for_ticket(ticket: str | int, template_name: str) -> tuple[str, str | None]:
+	"""Render a WhatsApp Template against a ticket.
+
+	Returns (rendered_message, body_param). Shared by preview_template_for_ticket
+	and send_template_to_ticket so the agent can never be shown a different
+	string from the one that goes to Meta.
+
+	body_param is the JSON object frappe_whatsapp's send_template() reads to take
+	its explicit-parameter branch. Its default branch misreads sample_values as
+	field names and sends empty strings, which Meta rejects with #131008.
+	"""
+	template_doc = frappe.get_doc("WhatsApp Templates", template_name)
+	body_param = None
+	params = {}
+	if template_doc.sample_values:
+		if not template_doc.field_names:
+			frappe.throw(
+				_("Template {0} has variables but no Field Names are configured. "
+				  "Open the WhatsApp Template and set Field Names to the HD Ticket "
+				  "field names that should fill each variable.").format(template_name)
+			)
+		ticket_doc = frappe.get_doc("HD Ticket", ticket)
+		field_names = [f.strip() for f in template_doc.field_names.split(",")]
+		for i, fn in enumerate(field_names, 1):
+			raw = ticket_doc.get_formatted(fn)
+			params[str(i)] = frappe.utils.strip_html(raw) if raw else (
+				str(ticket_doc.get(fn)) if ticket_doc.get(fn) is not None else ""
+			)
+		body_param = json.dumps(params)
+
+	# frappe_whatsapp never sets `message` on template sends, leaving the chat
+	# bubble blank, so we render the body ourselves for display.
+	rendered_message = template_doc.template or ""
+	for idx, value in params.items():
+		rendered_message = rendered_message.replace("{{" + idx + "}}", str(value))
+	return rendered_message, body_param
+
+
+@frappe.whitelist()
+def preview_template_for_ticket(ticket: str | int, template_name: str) -> dict:
+	"""Return the template body exactly as it will be sent to this ticket's contact."""
+	if not frappe.db.exists("WhatsApp Templates", template_name):
+		frappe.throw(_("Template {0} not found.").format(template_name))
+	message, _body_param = _render_template_for_ticket(ticket, template_name)
+	return {"message": message}
 
 
 @frappe.whitelist()
@@ -4405,30 +4466,7 @@ def send_template_to_ticket(ticket: str, template_name: str) -> dict:
 	if not phone:
 		frappe.throw(_("No phone number found for the contact linked to this ticket."))
 
-	template_doc = frappe.get_doc("WhatsApp Templates", template_name)
-	body_param = None
-	params = {}
-	if template_doc.sample_values:
-		if not template_doc.field_names:
-			frappe.throw(
-				_("Template {0} has variables but no Field Names are configured. "
-				  "Open the WhatsApp Template and set Field Names to the HD Ticket "
-				  "field names that should fill each variable.").format(template_name)
-			)
-		ticket_doc = frappe.get_doc("HD Ticket", ticket)
-		field_names = [f.strip() for f in template_doc.field_names.split(",")]
-		params = {}
-		for i, fn in enumerate(field_names, 1):
-			raw = ticket_doc.get_formatted(fn)
-			params[str(i)] = frappe.utils.strip_html(raw) if raw else (str(ticket_doc.get(fn)) if ticket_doc.get(fn) is not None else "")
-		body_param = json.dumps(params)
-
-	# Render the template body text for display in the chat UI.
-	# frappe_whatsapp never sets `message` on template sends, leaving the bubble blank.
-	rendered_message = template_doc.template or ""
-	if params:
-		for idx, value in params.items():
-			rendered_message = rendered_message.replace("{{" + idx + "}}", str(value))
+	rendered_message, body_param = _render_template_for_ticket(ticket, template_name)
 
 	msg_doc = frappe.get_doc({
 		"doctype": "WhatsApp Message",

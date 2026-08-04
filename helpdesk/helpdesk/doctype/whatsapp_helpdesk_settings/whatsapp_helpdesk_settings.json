@@ -19,8 +19,6 @@
   "col_break_status",
   "agent_reply_status",
   "append_agent_initials",
-  "section_template_window",
-  "allow_template_outside_window",
   "section_access",
   "restrict_chats_by_team",
   "section_notifications",
@@ -101,17 +99,6 @@
    "fieldname": "append_agent_initials",
    "fieldtype": "Check",
    "label": "Append Agent Initials to Outgoing Messages"
-  },
-  {
-   "fieldname": "section_template_window",
-   "fieldtype": "Section Break",
-   "label": "Template Messages After 24h Window"
-  },
-  {
-   "default": "0",
-   "fieldname": "allow_template_outside_window",
-   "fieldtype": "Check",
-   "label": "Allow Template Messages After 24h Window"
   },
   {
    "fieldname": "section_access",
