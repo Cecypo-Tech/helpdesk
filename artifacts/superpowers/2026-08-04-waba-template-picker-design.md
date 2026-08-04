@@ -61,8 +61,19 @@ component whose job is the message list.
 `WhatsAppReplyBox` becomes always-mounted and takes a `replyWindowOpen` prop:
 
 - **window open** — unchanged behaviour, plus a Templates button in the toolbar.
-- **window closed** — textarea, attach, AI and send are disabled; an inline
-  notice explains why; the Templates button stays live.
+- **window closed** — textarea, attach, AI and send are `disabled`; the
+  placeholder is replaced with the reason; an inline notice explains why; the
+  Templates button stays live and becomes the visually primary action.
+
+`disabled`, not `readonly`: `readonly` is for content you can read and copy but
+not change, and it renders looking active, so agents would click in, get a
+caret, type, and see nothing happen. A greyed control is the clearer failure.
+The explanation lives in visible text beside the box rather than as a tooltip on
+the disabled control, since screen readers skip disabled elements.
+
+This state persists after a template send — sending a template does not reopen
+the window (see Data flow) — so it must read as a deliberate mode, not as a
+transient error.
 
 The separate panel in `WhatsAppChatTab` and its `templates` / `selectedTemplate`
 / `sendTemplate` state are deleted.
