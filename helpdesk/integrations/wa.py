@@ -4390,7 +4390,11 @@ def get_outgoing_templates() -> list[dict]:
 	return frappe.get_all(
 		"WhatsApp Templates",
 		filters={"status": "APPROVED"},
-		fields=["name", "template_name", "language_code"],
+		# `template` is the raw body, still carrying its {{1}} placeholders. The
+		# picker lists it so a template is recognisable by its wording rather
+		# than by an opaque name; the rendered-for-this-ticket version comes
+		# from preview_template_for_ticket once one is selected.
+		fields=["name", "template_name", "language_code", "template"],
 		order_by="template_name asc",
 	)
 

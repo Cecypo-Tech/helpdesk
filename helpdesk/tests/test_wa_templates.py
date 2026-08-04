@@ -1,3 +1,4 @@
+import re
 from unittest.mock import patch
 
 import frappe
@@ -26,6 +27,31 @@ class TestWATemplates(FrappeTestCase):
 	WhatsAppTemplates.after_insert and WhatsAppMessage.notify, and both are
 	patched at the make_post_request boundary.
 	"""
+
+	@classmethod
+	def tearDownClass(cls):
+		# Safety net. These templates are created with status APPROVED, so any
+		# that survive a failed cleanup show up in the agent's real template
+		# picker. Sweep the whole fixture namespace rather than trusting that
+		# every per-test cleanup ran.
+		if frappe.db.exists("DocType", "WhatsApp Templates"):
+			leftovers = [
+				row.name
+				for row in frappe.get_all(
+					"WhatsApp Templates", fields=["name", "template_name"]
+				)
+				if re.match(r"^tpl_[0-9a-f]{8}$", row.template_name or "")
+			]
+			if leftovers:
+				with patch(
+					TEMPLATES_POST, return_value={"id": "1", "status": "APPROVED"}
+				), patch(TEMPLATES_REQUEST, return_value={"success": True}):
+					for name in leftovers:
+						frappe.delete_doc(
+							"WhatsApp Templates", name, ignore_permissions=True, force=True
+						)
+				frappe.db.commit()
+		super().tearDownClass()
 
 	def setUp(self):
 		self.addCleanup(frappe.db.commit)
