@@ -66,11 +66,20 @@
       </div>
     </div>
 
+    <div
+      v-if="!replyWindowOpen"
+      class="mb-2 flex items-center gap-1.5 text-xs text-ink-gray-5"
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      {{ __("The 24-hour reply window has closed. Only approved templates can be sent until the customer replies.") }}
+    </div>
+
     <div class="flex items-end gap-2">
       <!-- Attach button -->
       <button
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7 disabled:cursor-not-allowed disabled:opacity-50"
         title="Attach file"
+        :disabled="!replyWindowOpen"
         @click="fileInput?.click()"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -88,8 +97,9 @@
 
       <!-- Saved Replies button -->
       <button
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7 disabled:cursor-not-allowed disabled:opacity-50"
         title="Saved Replies"
+        :disabled="!replyWindowOpen"
         @click="showSavedReplies = true"
       >
         <SavedReplyIcon class="h-4 w-4" />
@@ -100,7 +110,7 @@
         ref="aiBtn"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-3 text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
         :class="{ 'bg-surface-gray-1 border-purple-300 text-purple-600': showAiSuggestion }"
-        :disabled="aiLoading"
+        :disabled="aiLoading || !replyWindowOpen"
         title="AI suggest reply"
         @click.stop="toggleAiSuggestion"
       >
@@ -109,6 +119,28 @@
         </svg>
         <svg v-else class="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12"/>
+        </svg>
+      </button>
+
+      <!-- Templates button -->
+      <button
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-ink-gray-5 hover:bg-surface-gray-1 hover:text-ink-gray-7"
+        :class="
+          replyWindowOpen
+            ? 'border-outline-gray-3'
+            : 'border-green-600 bg-green-600 text-white hover:bg-green-700 hover:text-white'
+        "
+        :title="
+          replyWindowOpen
+            ? 'WhatsApp templates'
+            : 'Reply window closed — send a template'
+        "
+        @click="showTemplates = true"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="9" y1="21" x2="9" y2="9"/>
         </svg>
       </button>
 
@@ -150,8 +182,14 @@
       <textarea
         ref="textareaRef"
         v-model="text"
-        :disabled="sending"
-        :placeholder="attachments.length ? 'Add a caption (optional)...' : 'Type a message...'"
+        :disabled="sending || !replyWindowOpen"
+        :placeholder="
+          !replyWindowOpen
+            ? '24-hour reply window closed — send a template to re-engage'
+            : attachments.length
+              ? 'Add a caption (optional)...'
+              : 'Type a message...'
+        "
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-gray-2 px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
         @input="autoResize"
@@ -159,7 +197,7 @@
         @paste="onPaste"
       />
       <button
-        :disabled="(!text.trim() && !attachments.length) || sending"
+        :disabled="(!text.trim() && !attachments.length) || sending || !replyWindowOpen"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
         @click="send"
       >
@@ -181,6 +219,13 @@
     :ticketId="ticketId"
     @apply="applySavedReply"
   />
+
+  <WhatsAppTemplateModal
+    v-if="showTemplates"
+    v-model="showTemplates"
+    :ticketId="ticketId"
+    @sent="$emit('sent')"
+  />
 </template>
 
 <script setup lang="ts">
@@ -188,11 +233,16 @@ import { call, createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from "vue";
 import SavedReplyIcon from "@/components/icons/SavedReplyIcon.vue";
 import SavedRepliesSelectorModal from "@/components/SavedRepliesSelectorModal.vue";
+import WhatsAppTemplateModal from "@/components/whatsapp/WhatsAppTemplateModal.vue";
 
-const props = defineProps<{
-  ticketId: string;
-  replyTo?: Record<string, any> | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    ticketId: string;
+    replyTo?: Record<string, any> | null;
+    replyWindowOpen?: boolean;
+  }>(),
+  { replyWindowOpen: true }
+);
 
 const emit = defineEmits<{
   (e: "sent"): void;
@@ -203,6 +253,7 @@ const text = ref("");
 const sending = ref(false);
 const dragging = ref(false);
 const showSavedReplies = ref(false);
+const showTemplates = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 

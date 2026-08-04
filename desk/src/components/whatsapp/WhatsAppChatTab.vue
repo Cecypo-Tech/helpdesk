@@ -59,43 +59,15 @@
         </button>
       </div>
 
-      <!-- Reply box or window expired -->
+      <!-- Reply box. Stays mounted past the 24-hour window: the free-form
+           controls disable themselves and the template picker stays live. -->
       <WhatsAppReplyBox
-        v-if="ticketInfo.data.reply_window_open"
         :ticketId="ticketId"
         :replyTo="replyingTo"
+        :replyWindowOpen="ticketInfo.data.reply_window_open"
         @sent="onMessageSent"
         @clearReply="replyingTo = null"
       />
-      <!-- Window expired — template sender -->
-      <div v-else class="border-t border-outline-gray-2 px-4 py-3">
-        <div class="mb-2 flex items-center gap-1.5 text-xs text-ink-gray-5">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          24-hour reply window has expired.
-          <span v-if="!ticketInfo.data.allow_template_outside_window" class="text-ink-gray-4">Enable template messages in WhatsApp settings to reopen.</span>
-        </div>
-        <div v-if="ticketInfo.data.allow_template_outside_window" class="flex gap-2">
-          <select
-            v-model="selectedTemplate"
-            class="flex-1 rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-2 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-            :disabled="sendingTemplate || templates.loading"
-          >
-            <option value="">{{ templates.loading ? 'Loading templates…' : 'Select a template…' }}</option>
-            <option v-for="t in templates.data || []" :key="t.name" :value="t.name">
-              {{ t.template_name || t.name }}
-            </option>
-          </select>
-          <button
-            :disabled="!selectedTemplate || sendingTemplate"
-            class="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-            @click="sendTemplate"
-          >
-            <svg v-if="!sendingTemplate" width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M14.67 1.33L7.33 8.67M14.67 1.33l-4.34 13.34-3-6-6-3 13.34-4.34z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <svg v-else class="animate-spin" width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="28" stroke-dashoffset="8" stroke-linecap="round"/></svg>
-            Send
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- No phone number linked -->
@@ -124,8 +96,6 @@ const props = defineProps<{
 const { $socket } = globalStore();
 const messagesContainer = ref<HTMLElement | null>(null);
 const pickingUp = ref(false);
-const selectedTemplate = ref("");
-const sendingTemplate = ref(false);
 const replyingTo = ref<Record<string, any> | null>(null);
 
 const messages = createResource({
@@ -161,27 +131,6 @@ const mentionMap = computed<Record<string, string>>(() => {
     }
   }
   return map;
-});
-
-const templates = createResource({
-  url: "helpdesk.integrations.wa.get_outgoing_templates",
-  auto: true,
-});
-
-const sendTemplateResource = createResource({
-  url: "helpdesk.integrations.wa.send_template_to_ticket",
-  onSuccess() {
-    sendingTemplate.value = false;
-    selectedTemplate.value = "";
-    messages.reload();
-    ticketInfo.reload();
-    scrollToBottom();
-    toast.success("Template sent");
-  },
-  onError(e: any) {
-    sendingTemplate.value = false;
-    toast.error(e?.messages?.[0] || "Failed to send template");
-  },
 });
 
 const sendReactionResource = createResource({
@@ -295,15 +244,6 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
-}
-
-function sendTemplate() {
-  if (!selectedTemplate.value || sendingTemplate.value) return;
-  sendingTemplate.value = true;
-  sendTemplateResource.submit({
-    ticket: props.ticketId,
-    template_name: selectedTemplate.value,
-  });
 }
 
 function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
