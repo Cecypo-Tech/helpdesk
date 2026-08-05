@@ -3017,14 +3017,49 @@ def get_wa_qr(line: str) -> dict:
 
 # ── Migrated from baileys.py ──────────────────────────────────────────────────
 
+def _wa_message_phone(doc) -> str:
+	"""The other party's digits for a WhatsApp Message: sender in, recipient out."""
+	raw = doc.get("from") if doc.get("type") == "Incoming" else doc.get("to")
+	return _normalize_phone(raw or "")
+
+
+def set_wa_message_normalized_phone(doc, method=None):
+	"""Store the conversation key at write time so it can be indexed.
+
+	Computing it in the query instead (REGEXP_REPLACE over `from`/`to`) forces a
+	full scan of tabWhatsApp Message on every conversation page load, because an
+	expression can never use an index.
+
+	Assigning a field the doctype lacks is a no-op in frappe, so this is safe on
+	a site that has not yet imported the Custom Field fixture.
+	"""
+	doc.normalized_phone = _wa_message_phone(doc)
+
+
+def _wa_has_normalized_phone() -> bool:
+	"""Whether the normalized_phone custom field has been migrated onto this site.
+
+	Custom fields are absent until `bench migrate` imports the fixture, which is
+	a real window on every deploy — querying the column before then raises
+	OperationalError and would take the WhatsApp page down.
+	"""
+	cached = frappe.flags.get("wa_normalized_phone_col")
+	if cached is None:
+		cached = bool(frappe.db.has_column("WhatsApp Message", "normalized_phone"))
+		frappe.flags.wa_normalized_phone_col = cached
+	return cached
+
+
 def _waba_phone_sql(alias: str = "") -> str:
 	"""SQL for a WhatsApp Message's conversation key: the other party's digits.
 
-	Incoming messages carry the customer in `from`, outgoing in `to`, and both
-	arrive in assorted formats — so the key is normalised in SQL to match what
-	_normalize_phone() produces in Python.
+	Prefers the stored, indexed normalized_phone column. Falls back to computing
+	it inline on sites where the fixture has not been migrated yet — same result,
+	just unindexed.
 	"""
 	p = f"{alias}." if alias else ""
+	if _wa_has_normalized_phone():
+		return f"{p}`normalized_phone`"
 	return (
 		f"REGEXP_REPLACE(CASE WHEN {p}`type`='Incoming' THEN {p}`from` ELSE {p}`to` END,"
 		" '[^0-9]', '')"
