@@ -1,0 +1,30 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "Contact Phone-phone_suffix",
+  "dt": "Contact Phone",
+  "fieldname": "phone_suffix",
+  "fieldtype": "Data",
+  "label": "Phone Suffix",
+  "read_only": 1,
+  "no_copy": 1,
+  "hidden": 1,
+  "insert_after": "is_primary_mobile_no",
+  "module": "Helpdesk",
+  "search_index": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Contact-phone_suffix",
+  "dt": "Contact",
+  "fieldname": "phone_suffix",
+  "fieldtype": "Data",
+  "label": "Phone Suffix",
+  "read_only": 1,
+  "no_copy": 1,
+  "hidden": 1,
+  "insert_after": "phone",
+  "module": "Helpdesk",
+  "search_index": 1
+ }
+]

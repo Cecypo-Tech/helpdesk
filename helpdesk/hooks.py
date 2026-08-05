@@ -77,6 +77,10 @@ user_invitation = {
 doc_events = {
     "Contact": {
         "before_insert": "helpdesk.overrides.contact.before_insert",
+        # before_save, not validate: Contact.validate() is what fills mobile_no
+        # and phone from the phone_nos child rows, so reading them any earlier
+        # would store a stale suffix.
+        "before_save": "helpdesk.integrations.wa.set_contact_phone_suffix",
     },
     "Assignment Rule": {
         "on_trash": "helpdesk.extends.assignment_rule.on_assignment_rule_trash",
@@ -175,6 +179,13 @@ fixtures = [
         "filters": [
             ["dt", "=", "WhatsApp Message"],
             ["fieldname", "=", "normalized_phone"],
+        ],
+    },
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            ["dt", "in", ["Contact", "Contact Phone"]],
+            ["fieldname", "=", "phone_suffix"],
         ],
     },
 ]
