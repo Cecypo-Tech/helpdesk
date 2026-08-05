@@ -3017,48 +3017,186 @@ def get_wa_qr(line: str) -> dict:
 
 # ── Migrated from baileys.py ──────────────────────────────────────────────────
 
-@frappe.whitelist()
-def get_whatsapp_conversations() -> list[dict]:
-	"""One entry per phone number for the WABA standalone chat page (WhatsApp Business),
-	most-recent message first. Unlike get_wa_conversations() (WA Line, keyed by jid),
-	a WABA "conversation" spans every ticket ever created for that phone number."""
-	if not frappe.db.exists("DocType", "WhatsApp Message"):
-		return []
+def _waba_phone_sql(alias: str = "") -> str:
+	"""SQL for a WhatsApp Message's conversation key: the other party's digits.
 
-	WM = frappe.qb.DocType("WhatsApp Message")
-	rows = (
-		frappe.qb.from_(WM)
-		.select(
-			WM["from"],
-			WM["to"],
-			WM.type,
-			WM.message,
-			WM.content_type,
-			WM.creation,
-			WM.profile_name,
-			WM.reference_doctype,
-			WM.reference_name,
-		)
-		.orderby(WM.creation, order=frappe.qb.desc)
-		.run(as_dict=True)
+	Incoming messages carry the customer in `from`, outgoing in `to`, and both
+	arrive in assorted formats — so the key is normalised in SQL to match what
+	_normalize_phone() produces in Python.
+	"""
+	p = f"{alias}." if alias else ""
+	return (
+		f"REGEXP_REPLACE(CASE WHEN {p}`type`='Incoming' THEN {p}`from` ELSE {p}`to` END,"
+		" '[^0-9]', '')"
 	)
 
-	latest: dict[str, dict] = {}
-	# Most recent *ticket-linked* message per phone, tracked separately from
-	# `latest` since the newest message overall may predate any ticket link.
-	# HD Ticket autonames with an integer primary key, but reference_name is
-	# stored as a string on WhatsApp Message — cast here so this dict's
-	# values line up with ticket_info's keys (frappe.get_all returns "name"
-	# as int for this doctype) and with the "in" filter below.
+
+def _waba_open_phones() -> set[str]:
+	"""Phones whose linked ticket is still open.
+
+	Mirrors get_my_open_counts()'s definition so the Open filter agrees with the
+	sidebar badge. Note the badge counts *tickets* while this counts *phones*,
+	so one customer with two open tickets is 2 there and 1 here.
+	"""
+	rows = frappe.db.sql(
+		f"""
+		SELECT DISTINCT {_waba_phone_sql('wm')} AS phone
+		FROM `tabWhatsApp Message` wm
+		INNER JOIN `tabHD Ticket` t
+			ON wm.reference_doctype = 'HD Ticket' AND wm.reference_name = t.name
+		WHERE t.status NOT IN ('Resolved', 'Closed')
+		""",
+		as_dict=True,
+	)
+	return {r.phone for r in rows if r.phone}
+
+
+def _waba_search_phones(search: str) -> set[str]:
+	"""Phones of contacts whose name matches the search text.
+
+	The display name comes from Contact, not from the message, so name search
+	has to resolve to phone numbers before the page is cut.
+	"""
+	like = f"%{search}%"
+	phones: set[str] = set()
+	contacts = frappe.db.sql(
+		"""
+		SELECT name, phone, mobile_no
+		FROM `tabContact`
+		WHERE first_name LIKE %(like)s OR last_name LIKE %(like)s OR name LIKE %(like)s
+		""",
+		{"like": like},
+		as_dict=True,
+	)
+	if not contacts:
+		return phones
+	for c in contacts:
+		for raw in (c.phone, c.mobile_no):
+			norm = _normalize_phone(raw)
+			if norm:
+				phones.add(norm)
+	for row in frappe.get_all(
+		"Contact Phone",
+		filters={"parenttype": "Contact", "parent": ["in", [c.name for c in contacts]]},
+		fields=["phone"],
+	):
+		norm = _normalize_phone(row.phone)
+		if norm:
+			phones.add(norm)
+	return phones
+
+
+@frappe.whitelist()
+def get_whatsapp_conversations(
+	search: str = "",
+	conv_filter: str = "all",
+	limit: int = CONVERSATIONS_PAGE_SIZE,
+	offset: int = 0,
+) -> dict:
+	"""One entry per phone number for the WABA chat page, most-recent first, one page at a time.
+
+	Returns `{"conversations": [...], "has_more": bool}`.
+
+	Unlike get_wa_conversations() (WA Line, keyed by jid), a WABA "conversation"
+	spans every ticket ever created for that phone number.
+
+	This used to select every WhatsApp Message with no LIMIT, reduce to
+	latest-per-phone in Python and scan the whole Contact table, so its cost
+	tracked total message history rather than what was displayed. Search and the
+	filters run here rather than in the browser for the usual reason: a filter
+	applied after the page cut silently shrinks pages.
+	"""
+	limit = max(1, min(cint(limit) or CONVERSATIONS_PAGE_SIZE, 200))
+	offset = max(0, cint(offset))
+	search = (search or "").strip()
+	conv_filter = conv_filter or "all"
+
+	empty: dict = {"conversations": [], "has_more": False}
+	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return empty
+
+	phone_expr = _waba_phone_sql()
+	clauses = ["rn = 1", "phone != ''"]
+	params: dict = {"limit": limit + 1, "offset": offset}
+
+	if conv_filter == "awaiting":
+		# Last word was the customer's, so we owe them a reply.
+		clauses.append("`type` = 'Incoming'")
+	elif conv_filter == "open":
+		open_phones = _waba_open_phones()
+		if not open_phones:
+			return empty
+		clauses.append("phone IN %(open_phones)s")
+		params["open_phones"] = tuple(open_phones)
+
+	if search:
+		matched = _waba_search_phones(search)
+		# Match the number itself too, so a phone typed in full finds its chat
+		# even when no contact record exists for it.
+		if matched:
+			clauses.append(
+				"(phone IN %(matched)s OR message LIKE %(search_like)s"
+				" OR phone LIKE %(search_like)s)"
+			)
+			params["matched"] = tuple(matched)
+		else:
+			clauses.append("(message LIKE %(search_like)s OR phone LIKE %(search_like)s)")
+		params["search_like"] = f"%{search}%"
+
+	# ROW_NUMBER picks each phone's newest message, so the filters above apply to
+	# the row the agent actually sees. limit + 1 decides has_more without a
+	# second COUNT over the same grouping.
+	rows = frappe.db.sql(
+		f"""
+		SELECT phone, `type`, message, content_type, creation, profile_name
+		FROM (
+			SELECT
+				{phone_expr} AS phone,
+				`type`, message, content_type, creation, profile_name,
+				ROW_NUMBER() OVER (
+					PARTITION BY {phone_expr} ORDER BY creation DESC, name DESC
+				) AS rn
+			FROM `tabWhatsApp Message`
+		) t
+		WHERE {' AND '.join(clauses)}
+		ORDER BY creation DESC
+		LIMIT %(limit)s OFFSET %(offset)s
+		""",
+		params,
+		as_dict=True,
+	)
+
+	has_more = len(rows) > limit
+	rows = rows[:limit]
+	if not rows:
+		return empty
+
+	phones = [r.phone for r in rows]
+	phones_set = set(phones)
+
+	# Most recent *ticket-linked* message per phone, resolved separately: the
+	# newest message overall may predate any ticket link. HD Ticket autonames
+	# with an integer key while reference_name is stored as a string, so cast to
+	# line up with ticket_info's keys.
 	phone_to_ticket: dict[str, int] = {}
-	for r in rows:
-		phone = _normalize_phone(r["from"] if r["type"] == "Incoming" else r["to"])
-		if not phone:
-			continue
-		if phone not in latest:
-			latest[phone] = r
-		if phone not in phone_to_ticket and r.reference_doctype == "HD Ticket" and r.reference_name:
-			phone_to_ticket[phone] = int(r.reference_name)
+	for r in frappe.db.sql(
+		f"""
+		SELECT phone, reference_name FROM (
+			SELECT
+				{phone_expr} AS phone, reference_name,
+				ROW_NUMBER() OVER (
+					PARTITION BY {phone_expr} ORDER BY creation DESC, name DESC
+				) AS rn
+			FROM `tabWhatsApp Message`
+			WHERE reference_doctype = 'HD Ticket' AND IFNULL(reference_name, '') != ''
+		) t
+		WHERE rn = 1 AND phone IN %(phones)s
+		""",
+		{"phones": tuple(phones)},
+		as_dict=True,
+	):
+		if r.phone and r.reference_name:
+			phone_to_ticket[r.phone] = int(r.reference_name)
 
 	ticket_info: dict[int, dict] = {}
 	ticket_names = list(set(phone_to_ticket.values()))
@@ -3102,9 +3240,9 @@ def get_whatsapp_conversations() -> list[dict]:
 					count += 1
 			task_count[ticket_id] = count
 
-	# Build normalized-phone → Contact name/first_name once, instead of the
-	# per-call full-table scan match_phone_to_contact() does.
-	phone_to_contact: dict[str, str] = {}
+	# normalized-phone → Contact, built only for the phones on this page. This
+	# used to scan the whole Contact table plus Contact Phone on every call.
+	phone_to_contact: dict[str, dict] = {}
 	for c in frappe.get_all(
 		"Contact",
 		fields=["name", "first_name", "phone", "mobile_no"],
@@ -3112,21 +3250,25 @@ def get_whatsapp_conversations() -> list[dict]:
 	):
 		for raw in (c.phone, c.mobile_no):
 			norm = _normalize_phone(raw)
-			if norm:
-				phone_to_contact[norm] = c
-	for row in frappe.get_all("Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}):
-		norm = _normalize_phone(row.phone)
-		if norm and norm not in phone_to_contact:
-			contact = frappe.db.get_value("Contact", row.parent, "first_name", as_dict=True)
-			if contact:
-				phone_to_contact[norm] = {"name": row.parent, "first_name": contact.first_name}
+			if norm in phones_set:
+				phone_to_contact.setdefault(norm, c)
+	missing = phones_set - set(phone_to_contact)
+	if missing:
+		for row in frappe.get_all(
+			"Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}
+		):
+			norm = _normalize_phone(row.phone)
+			if norm in missing and norm not in phone_to_contact:
+				first_name = frappe.db.get_value("Contact", row.parent, "first_name")
+				phone_to_contact[norm] = {"name": row.parent, "first_name": first_name}
 
-	result = []
-	for phone, r in latest.items():
+	conversations = []
+	for r in rows:
+		phone = r.phone
 		contact = phone_to_contact.get(phone)
 		display_name = (contact and contact.get("first_name")) or r.get("profile_name") or phone
 		ticket = ticket_info.get(phone_to_ticket.get(phone))
-		result.append({
+		conversations.append({
 			"phone": phone,
 			"display_name": display_name,
 			"last_message": r["message"] or f"[{r['content_type']}]",
@@ -3138,7 +3280,7 @@ def get_whatsapp_conversations() -> list[dict]:
 			"assigned_to": ticket.assigned_to if ticket else None,
 			"open_task_count": task_count.get(phone_to_ticket.get(phone), 0),
 		})
-	return result
+	return {"conversations": conversations, "has_more": has_more}
 
 
 def _dedupe_wa_rows(rows: list) -> list:
