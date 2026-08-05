@@ -258,8 +258,38 @@ def _fw_reply_window_open(ticket: str | int) -> bool:
     return time_diff_in_hours(now_datetime(), last_incoming) < 24
 
 
+# Digits of the subscriber number compared when two numbers are stored in
+# different formats. Long enough that a match is not coincidence, short enough
+# to survive a missing country code.
+_PHONE_SUFFIX_DIGITS = 9
+
+
+def _phones_match(a: str, b: str) -> bool:
+    """True when two numbers denote the same subscriber.
+
+    WhatsApp always delivers full international digits (254799123456) while
+    contacts are commonly stored nationally (0799123456), so exact comparison
+    silently misses. Compare the trailing subscriber digits when the two differ
+    in format.
+    """
+    x, y = _normalize_phone(a), _normalize_phone(b)
+    if not x or not y:
+        return False
+    if x == y:
+        return True
+    if len(x) < _PHONE_SUFFIX_DIGITS or len(y) < _PHONE_SUFFIX_DIGITS:
+        return False
+    return x[-_PHONE_SUFFIX_DIGITS:] == y[-_PHONE_SUFFIX_DIGITS:]
+
+
 def match_phone_to_contact(phone: str) -> str | None:
-    """Match a raw phone number to a Frappe Contact name."""
+    """Match a raw phone number to a Frappe Contact name.
+
+    Exact matches win outright. Only when nothing matches exactly do we fall
+    back to comparing trailing digits, and then only if it identifies exactly
+    one contact — attaching a conversation to the wrong customer is worse than
+    not attaching it at all.
+    """
     normalized = _normalize_phone(phone)
     if not normalized:
         return None
@@ -271,10 +301,21 @@ def match_phone_to_contact(phone: str) -> str | None:
     for c in contacts:
         if _normalize_phone(c.phone) == normalized or _normalize_phone(c.mobile_no) == normalized:
             return c.name
-    for row in frappe.get_all("Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}):
+    phone_rows = frappe.get_all(
+        "Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}
+    )
+    for row in phone_rows:
         if _normalize_phone(row.phone) == normalized:
             return row.parent
-    return None
+
+    loose = set()
+    for c in contacts:
+        if _phones_match(c.phone, normalized) or _phones_match(c.mobile_no, normalized):
+            loose.add(c.name)
+    for row in phone_rows:
+        if _phones_match(row.phone, normalized):
+            loose.add(row.parent)
+    return loose.pop() if len(loose) == 1 else None
 
 
 def get_contact_phone(ticket: str) -> str | None:
@@ -3510,9 +3551,36 @@ def on_whatsapp_message_insert(doc, method=None):
 	if not phone:
 		return
 
-	contact_name = match_phone_to_contact(phone)
 	placeholder_domain = s.placeholder_email_domain or "whatsapp.placeholder.local"
 	profile_name = doc.profile_name or f"WhatsApp User {phone}"
+
+	# The most recent ticket this number already wrote to. Looked up before the
+	# contact is resolved because its linkage is authoritative — an agent may
+	# have set it by hand — and because a phone lookup can fail where this
+	# cannot (number stored nationally, contact carrying no number at all).
+	from frappe.query_builder import DocType as _DocType
+	WM = _DocType("WhatsApp Message")
+	linked = (
+		frappe.qb.from_(WM)
+		.select(WM.reference_name, WM.creation)
+		.where(WM.reference_doctype == "HD Ticket")
+		.where(WM.type == "Incoming")
+		.where(WM["from"] == doc.get("from"))
+		.orderby(WM.creation, order=frappe.qb.desc)
+		.limit(1)
+		.run(as_dict=True)
+	)
+
+	prev_ticket = linked[0].reference_name if linked and linked[0].reference_name else None
+	prev_contact = prev_customer = None
+	if prev_ticket:
+		prev = frappe.db.get_value(
+			"HD Ticket", prev_ticket, ["contact", "customer"], as_dict=True
+		)
+		if prev:
+			prev_contact, prev_customer = prev.contact, prev.customer
+
+	contact_name = prev_contact or match_phone_to_contact(phone)
 
 	if not contact_name:
 		action = s.unknown_contact_action or "Skip Ticket Creation"
@@ -3537,28 +3605,15 @@ def on_whatsapp_message_insert(doc, method=None):
 	else:
 		email = f"whatsapp+{phone}@{placeholder_domain}"
 
-	# Find an existing open ticket for this phone number
-	from frappe.query_builder import DocType as _DocType
-	WM = _DocType("WhatsApp Message")
-	linked = (
-		frappe.qb.from_(WM)
-		.select(WM.reference_name, WM.creation)
-		.where(WM.reference_doctype == "HD Ticket")
-		.where(WM.type == "Incoming")
-		.where(WM["from"] == doc.get("from"))
-		.orderby(WM.creation, order=frappe.qb.desc)
-		.limit(1)
-		.run(as_dict=True)
-	)
-
+	# Reuse that ticket only while it is still live. A resolved or closed one
+	# starts a fresh ticket, but its contact/customer carry over (see above).
 	existing_ticket = None
-	if linked and linked[0].reference_name:
-		candidate = linked[0].reference_name
-		status_category = frappe.db.get_value("HD Ticket", candidate, "status_category")
+	if prev_ticket:
+		status_category = frappe.db.get_value("HD Ticket", prev_ticket, "status_category")
 		if status_category and status_category != "Resolved":
 			timeout = int(s.new_conversation_timeout_hours or 24)
 			if time_diff_in_hours(now_datetime(), linked[0].creation) < timeout:
-				existing_ticket = candidate
+				existing_ticket = prev_ticket
 
 	if existing_ticket:
 		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
@@ -3579,6 +3634,11 @@ def on_whatsapp_message_insert(doc, method=None):
 		}
 		if contact_name:
 			ticket_data["contact"] = contact_name
+		# HD Ticket.set_customer() can only derive a customer from the contact's
+		# Dynamic Links. Carrying it forward preserves a customer an agent set
+		# by hand on the previous ticket, which that derivation would miss.
+		if prev_customer:
+			ticket_data["customer"] = prev_customer
 		if s.default_ticket_type:
 			ticket_data["ticket_type"] = s.default_ticket_type
 		if s.default_team:
