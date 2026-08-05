@@ -1,0 +1,14 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "WhatsApp Message-normalized_phone",
+  "dt": "WhatsApp Message",
+  "fieldname": "normalized_phone",
+  "fieldtype": "Data",
+  "label": "Normalized Phone",
+  "read_only": 1,
+  "no_copy": 1,
+  "insert_after": "profile_name",
+  "module": "Helpdesk"
+ }
+]

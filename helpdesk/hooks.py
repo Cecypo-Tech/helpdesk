@@ -83,6 +83,7 @@ doc_events = {
         "validate": "helpdesk.extends.assignment_rule.on_assignment_rule_validate",
     },
     "WhatsApp Message": {
+        "before_insert": "helpdesk.integrations.wa.set_wa_message_normalized_phone",
         "after_insert": [
             "helpdesk.integrations.wa.on_whatsapp_message_insert",
             "helpdesk.integrations.bot.handle_whatsapp_message",
@@ -168,6 +169,13 @@ fixtures = [
     {
         "doctype": "Custom Field",
         "filters": [["dt", "=", "WhatsApp Account"], ["fieldname", "=", "bot_enabled"]],
+    },
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            ["dt", "=", "WhatsApp Message"],
+            ["fieldname", "=", "normalized_phone"],
+        ],
     },
 ]
 
