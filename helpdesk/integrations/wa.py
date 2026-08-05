@@ -282,28 +282,57 @@ def _phones_match(a: str, b: str) -> bool:
     return x[-_PHONE_SUFFIX_DIGITS:] == y[-_PHONE_SUFFIX_DIGITS:]
 
 
-def match_phone_to_contact(phone: str) -> str | None:
-    """Match a raw phone number to a Frappe Contact name.
+def _phone_suffix(number: str) -> str:
+    """The trailing subscriber digits used to bucket a number for lookup.
+
+    Shorter numbers keep their whole value, which matches _phones_match(): it
+    refuses to loosely match anything under _PHONE_SUFFIX_DIGITS, so a short
+    number can only ever match itself.
+    """
+    normalized = _normalize_phone(number)
+    return normalized[-_PHONE_SUFFIX_DIGITS:] if normalized else ""
+
+
+def set_contact_phone_suffix(doc, method=None):
+    """Store each number's lookup key when a Contact is saved.
+
+    match_phone_to_contact() used to load every Contact and Contact Phone row
+    into Python on each inbound message. Storing the key makes that an indexed
+    lookup. Assigning a field the doctype lacks is a no-op in frappe, so this is
+    safe before the fixture has been migrated.
+    """
+    doc.phone_suffix = _phone_suffix(doc.get("mobile_no") or doc.get("phone") or "")
+    for row in doc.get("phone_nos") or []:
+        row.phone_suffix = _phone_suffix(row.get("phone") or "")
+
+
+def _contact_has_phone_suffix() -> bool:
+    """Whether the phone_suffix custom fields have been migrated onto this site.
+
+    Code deploys before `bench migrate` runs; querying the column in that window
+    would throw on every inbound message.
+    """
+    cached = frappe.flags.get("contact_phone_suffix_col")
+    if cached is None:
+        cached = bool(
+            frappe.db.has_column("Contact", "phone_suffix")
+            and frappe.db.has_column("Contact Phone", "phone_suffix")
+        )
+        frappe.flags.contact_phone_suffix_col = cached
+    return cached
+
+
+def _resolve_contact_match(normalized: str, contacts: list, phone_rows: list) -> str | None:
+    """Pick a contact from candidate rows.
 
     Exact matches win outright. Only when nothing matches exactly do we fall
     back to comparing trailing digits, and then only if it identifies exactly
     one contact — attaching a conversation to the wrong customer is worse than
     not attaching it at all.
     """
-    normalized = _normalize_phone(phone)
-    if not normalized:
-        return None
-    contacts = frappe.get_all(
-        "Contact",
-        fields=["name", "phone", "mobile_no"],
-        or_filters={"phone": ("is", "set"), "mobile_no": ("is", "set")},
-    )
     for c in contacts:
         if _normalize_phone(c.phone) == normalized or _normalize_phone(c.mobile_no) == normalized:
             return c.name
-    phone_rows = frappe.get_all(
-        "Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}
-    )
     for row in phone_rows:
         if _normalize_phone(row.phone) == normalized:
             return row.parent
@@ -316,6 +345,51 @@ def match_phone_to_contact(phone: str) -> str | None:
         if _phones_match(row.phone, normalized):
             loose.add(row.parent)
     return loose.pop() if len(loose) == 1 else None
+
+
+def match_phone_to_contact(phone: str) -> str | None:
+    """Match a raw phone number to a Frappe Contact name.
+
+    Narrows to candidates with an indexed lookup on the stored phone_suffix,
+    then applies the exact-then-unique-loose rules over those few rows. Falls
+    back to scanning when the columns are not migrated yet — same answer, just
+    linear in contact count.
+    """
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return None
+    if not _contact_has_phone_suffix():
+        return _match_phone_to_contact_scan(normalized)
+
+    suffix = _phone_suffix(normalized)
+    contacts = frappe.get_all(
+        "Contact",
+        filters={"phone_suffix": suffix},
+        fields=["name", "phone", "mobile_no"],
+    )
+    phone_rows = frappe.get_all(
+        "Contact Phone",
+        filters={"parenttype": "Contact", "phone_suffix": suffix},
+        fields=["parent", "phone"],
+    )
+    return _resolve_contact_match(normalized, contacts, phone_rows)
+
+
+def _match_phone_to_contact_scan(normalized: str) -> str | None:
+    """Pre-index implementation, kept for sites without the phone_suffix fields.
+
+    Loads every candidate rather than narrowing by suffix, then hands the same
+    rows to the same resolver — so the two paths cannot disagree.
+    """
+    contacts = frappe.get_all(
+        "Contact",
+        fields=["name", "phone", "mobile_no"],
+        or_filters={"phone": ("is", "set"), "mobile_no": ("is", "set")},
+    )
+    phone_rows = frappe.get_all(
+        "Contact Phone", fields=["parent", "phone"], filters={"parenttype": "Contact"}
+    )
+    return _resolve_contact_match(normalized, contacts, phone_rows)
 
 
 def get_contact_phone(ticket: str) -> str | None:
