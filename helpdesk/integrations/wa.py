@@ -301,9 +301,16 @@ def set_contact_phone_suffix(doc, method=None):
     lookup. Assigning a field the doctype lacks is a no-op in frappe, so this is
     safe before the fixture has been migrated.
     """
-    doc.phone_suffix = _phone_suffix(doc.get("mobile_no") or doc.get("phone") or "")
+    # Assign only when the value actually differs. Writing unconditionally marks
+    # the parent and every phone_nos row dirty on every Contact save bench-wide,
+    # which is needless write amplification on a doctype every app touches.
+    suffix = _phone_suffix(doc.get("mobile_no") or doc.get("phone") or "")
+    if doc.get("phone_suffix") != suffix:
+        doc.phone_suffix = suffix
     for row in doc.get("phone_nos") or []:
-        row.phone_suffix = _phone_suffix(row.get("phone") or "")
+        row_suffix = _phone_suffix(row.get("phone") or "")
+        if row.get("phone_suffix") != row_suffix:
+            row.phone_suffix = row_suffix
 
 
 def _contact_has_phone_suffix() -> bool:
