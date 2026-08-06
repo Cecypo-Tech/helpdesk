@@ -20,6 +20,12 @@ class TestContactPhoneSuffix(FrappeTestCase):
 			if not frappe.db.has_column(doctype, "phone_suffix"):
 				self.skipTest("phone_suffix not migrated on this site")
 		self.tag = frappe.generate_hash(length=6)
+		# Its own number space. These were the same literals test_wa_contact_link
+		# uses, so in a full-suite run the two modules' contacts shared a suffix
+		# and every "unique match" assertion turned ambiguous.
+		body = f"{int(frappe.generate_hash(length=12), 16) % 10**9:09d}"
+		self.intl = "2547" + body
+		self.local = "0" + body
 		frappe.flags.pop("contact_phone_suffix_col", None)
 		self.addCleanup(frappe.flags.pop, "contact_phone_suffix_col", None)
 
@@ -47,14 +53,15 @@ class TestContactPhoneSuffix(FrappeTestCase):
 	# ── population on write ───────────────────────────────────────────────
 
 	def test_saving_a_contact_stores_the_suffix_on_parent_and_child(self):
-		doc = self._contact("254799123456")
+		doc = self._contact(self.intl)
+		expected = self.intl[-9:]
 		self.assertEqual(
-			frappe.db.get_value("Contact", doc.name, "phone_suffix"), "799123456"
+			frappe.db.get_value("Contact", doc.name, "phone_suffix"), expected
 		)
 		child = frappe.get_all(
 			"Contact Phone", filters={"parent": doc.name}, fields=["phone_suffix"]
 		)
-		self.assertEqual(child[0].phone_suffix, "799123456")
+		self.assertEqual(child[0].phone_suffix, expected)
 
 	def test_punctuation_is_stripped(self):
 		doc = self._contact("+254 (799) 123-999")
@@ -73,27 +80,28 @@ class TestContactPhoneSuffix(FrappeTestCase):
 	# ── the indexed path agrees with the scan ─────────────────────────────
 
 	def test_exact_match_agrees(self):
-		contact = self._contact("254799123456")
-		indexed, scan = self._both_paths("254799123456")
+		contact = self._contact(self.intl)
+		indexed, scan = self._both_paths(self.intl)
 		self.assertEqual(indexed, contact.name)
 		self.assertEqual(indexed, scan)
 
 	def test_national_vs_international_agrees(self):
-		contact = self._contact("0799123456")
-		indexed, scan = self._both_paths("254799123456")
+		contact = self._contact(self.local)
+		indexed, scan = self._both_paths(self.intl)
 		self.assertEqual(indexed, contact.name)
 		self.assertEqual(indexed, scan)
 
 	def test_ambiguous_match_returns_none_on_both_paths(self):
-		self._contact("0799123456", first_name=f"A {self.tag}")
-		self._contact("+1 799123456", first_name=f"B {self.tag}")
-		indexed, scan = self._both_paths("254799123456")
+		self._contact(self.local, first_name=f"A {self.tag}")
+		# A different country code sharing the same subscriber digits.
+		self._contact(f"+1 {self.intl[-9:]}", first_name=f"B {self.tag}")
+		indexed, scan = self._both_paths(self.intl)
 		self.assertIsNone(indexed)
 		self.assertEqual(indexed, scan)
 
 	def test_no_match_agrees(self):
 		self._contact("254711000000")
-		indexed, scan = self._both_paths("254799123456")
+		indexed, scan = self._both_paths(self.intl)
 		self.assertIsNone(indexed)
 		self.assertEqual(indexed, scan)
 
@@ -104,16 +112,16 @@ class TestContactPhoneSuffix(FrappeTestCase):
 	def test_exact_match_wins_over_a_loose_one(self):
 		# Two contacts share trailing digits; one matches exactly. The exact one
 		# must win rather than the pair being treated as ambiguous.
-		exact = self._contact("254799123456", first_name=f"Exact {self.tag}")
-		self._contact("0799123456", first_name=f"Loose {self.tag}")
-		indexed, scan = self._both_paths("254799123456")
+		exact = self._contact(self.intl, first_name=f"Exact {self.tag}")
+		self._contact(self.local, first_name=f"Loose {self.tag}")
+		indexed, scan = self._both_paths(self.intl)
 		self.assertEqual(indexed, exact.name)
 		self.assertEqual(indexed, scan)
 
 	def test_fallback_is_used_when_columns_are_absent(self):
-		contact = self._contact("254799123456")
+		contact = self._contact(self.intl)
 		frappe.flags.contact_phone_suffix_col = False
-		self.assertEqual(wa.match_phone_to_contact("254799123456"), contact.name)
+		self.assertEqual(wa.match_phone_to_contact(self.intl), contact.name)
 
 	# ── the patch ─────────────────────────────────────────────────────────
 

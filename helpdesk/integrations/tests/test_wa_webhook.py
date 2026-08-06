@@ -21,19 +21,20 @@ class TestWaWebhook(unittest.TestCase):
                 "instance_name": "_test-evo",
             }).insert(ignore_permissions=True)
             frappe.db.commit()
-        # Clean up any committed test records from previous runs
-        for test_msg_id in [
-            "_test-apply-edit-001",
-            "_test-apply-edit-002",
-            "_test-incoming-edit-001",
-            "_test-edit-no-original-001",
-            "_test-out-edit-001",
-            "_test-in-reject-001",
-            "_test-media-reject-001",
-            "_test-empty-reject-001",
-        ]:
-            frappe.db.delete("WA Message", {"message_id": test_msg_id})
+        # Clean up committed test records from previous runs. Swept by prefix
+        # rather than an explicit list: the list had drifted and no longer
+        # covered _test-msg-id-001, so old rows accumulated — 156 of them going
+        # back months. _handle_update keeps the first row matching a message_id,
+        # so it kept updating a stale row and the test's own message never
+        # changed status.
+        frappe.db.sql("DELETE FROM `tabWA Message` WHERE message_id LIKE '\\_test-%'")
         frappe.db.commit()
+        # _handle_upsert deduplicates on a Redis key with a 300s TTL, not on the
+        # row. Deleting the rows alone left those keys behind, so a suite run
+        # within five minutes of the last one got {"status": "duplicate"},
+        # stored nothing, and the test failed — the intermittent failure that
+        # looked like ordering noise.
+        frappe.cache().delete_keys("wa_dedup:")
 
     def tearDown(self):
         # Restore production WA API Settings so tests can't corrupt the live site.
@@ -168,9 +169,15 @@ class TestWaWebhook(unittest.TestCase):
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {}
 
-        with patch("helpdesk.integrations.wa._requests") as mock_req:
-            mock_req.put.return_value = mock_resp
+        # Patch the session the code actually uses. This patched the _requests
+        # module and stubbed .put, while edit_wa_message posts through
+        # _evo_session — so the stub never applied and the test fired a real
+        # request at hd-whatsapp-api.cecypo.tech, failing on its 404.
+        with patch("helpdesk.integrations.wa._evo_session") as mock_session:
+            mock_session.post.return_value = mock_resp
             result = edit_wa_message(msg.name, "updated agent text")
+            # edit_wa_message posts rather than puts.
+            call_args = mock_session.post.call_args
 
         self.assertEqual(result["status"], "ok")
         updated = frappe.get_doc("WA Message", msg.name)
@@ -179,8 +186,6 @@ class TestWaWebhook(unittest.TestCase):
         self.assertEqual(len(updated.edit_history), 1)
         self.assertEqual(updated.edit_history[0].old_message, "original agent text")
 
-        # Verify correct WA API endpoint was called
-        call_args = mock_req.put.call_args
         self.assertIn("updateMessage", call_args[0][0])
         payload = call_args[1]["json"]
         self.assertEqual(payload["number"], "254799000005@s.whatsapp.net")
@@ -394,6 +399,10 @@ class TestWaWebhook(unittest.TestCase):
         from helpdesk.integrations.wa import _handle_upsert, _line, _settings
         line = _line("_test-evo")
         settings = _settings()
+        # Unique per run: _handle_upsert deduplicates on a Redis key with a
+        # 300s TTL, so a fixed id makes this pass only on a cold cache and
+        # fail on any re-run inside five minutes.
+        msg_id = f"_test-reroute-lid-{frappe.generate_hash(length=8)}"
         lid_jid = "99999000005@lid"
         pn_jid = "447900000005@s.whatsapp.net"
 
@@ -413,7 +422,7 @@ class TestWaWebhook(unittest.TestCase):
             "key": {
                 "remoteJid": lid_jid,
                 "fromMe": False,
-                "id": "_test-reroute-lid-001",
+                "id": msg_id,
             },
             "pushName": "Reroute Test",
             "message": {"conversation": "hello reroute"},
@@ -421,13 +430,13 @@ class TestWaWebhook(unittest.TestCase):
 
         # Message should be stored under the PN JID, not the LID
         msg = frappe.db.get_value(
-            "WA Message", {"message_id": "_test-reroute-lid-001"}, ["jid", "name"], as_dict=True
+            "WA Message", {"message_id": msg_id}, ["jid", "name"], as_dict=True
         )
         self.assertIsNotNone(msg)
         self.assertEqual(msg["jid"], pn_jid)
 
         # Cleanup
-        frappe.db.delete("WA Message", {"message_id": "_test-reroute-lid-001"})
+        frappe.db.delete("WA Message", {"message_id": msg_id})
         frappe.db.delete("WA Contact", {"jid": lid_jid})
         frappe.db.commit()
 
@@ -445,7 +454,10 @@ class TestExtractEdit(unittest.TestCase):
                 }
             }
         }
-        text, is_edit = _extract_edit(raw)
+        # _extract_edit returns (new_text, is_edit, original_message_id); the
+        # third value was added when edits started carrying the id of the
+        # message being edited, and these call sites were never updated.
+        text, is_edit, _original_id = _extract_edit(raw)
         self.assertTrue(is_edit)
         self.assertEqual(text, "new text shape1")
 
@@ -457,7 +469,10 @@ class TestExtractEdit(unittest.TestCase):
                 "editedMessage": {"conversation": "new text shape2"}
             }
         }
-        text, is_edit = _extract_edit(raw)
+        # _extract_edit returns (new_text, is_edit, original_message_id); the
+        # third value was added when edits started carrying the id of the
+        # message being edited, and these call sites were never updated.
+        text, is_edit, _original_id = _extract_edit(raw)
         self.assertTrue(is_edit)
         self.assertEqual(text, "new text shape2")
 
@@ -471,20 +486,26 @@ class TestExtractEdit(unittest.TestCase):
                 }
             }
         }
-        text, is_edit = _extract_edit(raw)
+        # _extract_edit returns (new_text, is_edit, original_message_id); the
+        # third value was added when edits started carrying the id of the
+        # message being edited, and these call sites were never updated.
+        text, is_edit, _original_id = _extract_edit(raw)
         self.assertTrue(is_edit)
         self.assertEqual(text, "new text extended")
 
     def test_regular_message_returns_false(self):
         from helpdesk.integrations.wa import _extract_edit
         raw = {"conversation": "hello"}
-        text, is_edit = _extract_edit(raw)
+        # _extract_edit returns (new_text, is_edit, original_message_id); the
+        # third value was added when edits started carrying the id of the
+        # message being edited, and these call sites were never updated.
+        text, is_edit, _original_id = _extract_edit(raw)
         self.assertFalse(is_edit)
         self.assertEqual(text, "")
 
     def test_empty_dict_returns_false(self):
         from helpdesk.integrations.wa import _extract_edit
-        text, is_edit = _extract_edit({})
+        text, is_edit, _original_id = _extract_edit({})
         self.assertFalse(is_edit)
         self.assertEqual(text, "")
 

@@ -4,8 +4,9 @@ from unittest.mock import patch
 
 from helpdesk.integrations import wa
 
-INTL = "254799123456"
-LOCAL = "0799123456"
+# Derived per run rather than fixed: a shared literal meant this module and
+# test_contact_phone_suffix created contacts with the same trailing digits, so
+# in a full-suite run every "unique match" assertion turned ambiguous.
 
 
 def _settings(**overrides):
@@ -45,6 +46,12 @@ class TestWAContactLink(FrappeTestCase):
 		if not frappe.db.exists("DocType", "WhatsApp Message"):
 			self.skipTest("frappe_whatsapp is not installed")
 		self.suffix = frappe.generate_hash(length=6)
+		# 9 random subscriber digits shared by both spellings, so intl and local
+		# match each other and nothing else. hash() was too small a keyspace and
+		# collided with the other WA test modules across a full-suite run.
+		body = f"{int(frappe.generate_hash(length=12), 16) % 10**9:09d}"
+		self.intl = "2547" + body
+		self.local = "0" + body
 
 	@staticmethod
 	def _sweep_automation_contacts():
@@ -111,7 +118,7 @@ class TestWAContactLink(FrappeTestCase):
 		data = {
 			"doctype": "WhatsApp Message",
 			"type": "Incoming",
-			"from": INTL,
+			"from": self.intl,
 			"message": message,
 			"content_type": "text",
 			"message_id": f"wamid.link.{frappe.generate_hash(length=10)}",
@@ -135,30 +142,31 @@ class TestWAContactLink(FrappeTestCase):
 	# ── phone matching ────────────────────────────────────────────────────
 
 	def test_national_format_matches_international(self):
-		contact = self._make_contact(LOCAL)
-		self.assertEqual(wa.match_phone_to_contact(INTL), contact.name)
+		contact = self._make_contact(self.local)
+		self.assertEqual(wa.match_phone_to_contact(self.intl), contact.name)
 
 	def test_exact_match_still_works(self):
-		contact = self._make_contact(INTL)
-		self.assertEqual(wa.match_phone_to_contact(INTL), contact.name)
+		contact = self._make_contact(self.intl)
+		self.assertEqual(wa.match_phone_to_contact(self.intl), contact.name)
 
 	def test_ambiguous_loose_match_returns_none_rather_than_guessing(self):
 		# Two contacts whose numbers both end in the same subscriber digits.
 		# Attaching the conversation to either would be a guess, and guessing
 		# wrong shows one customer's messages under another's ticket.
-		self._make_contact(LOCAL, first_name=f"A {self.suffix}")
-		self._make_contact("+1 799123456", first_name=f"B {self.suffix}")
-		self.assertIsNone(wa.match_phone_to_contact(INTL))
+		self._make_contact(self.local, first_name=f"A {self.suffix}")
+		# Different country code, same subscriber digits.
+		self._make_contact(f"+1 {self.intl[-9:]}", first_name=f"B {self.suffix}")
+		self.assertIsNone(wa.match_phone_to_contact(self.intl))
 
 	def test_unrelated_number_does_not_match(self):
-		self._make_contact("0711000000")
-		self.assertIsNone(wa.match_phone_to_contact(INTL))
+		self._make_contact("07" + self.intl[-8:-1] + "9")
+		self.assertIsNone(wa.match_phone_to_contact(self.intl))
 
 	# ── linkage across the resolve boundary ───────────────────────────────
 
 	def test_reply_after_resolution_keeps_contact_and_customer(self):
 		customer = self._make_customer()
-		contact = self._make_contact(LOCAL, customer=customer.name)
+		contact = self._make_contact(self.local, customer=customer.name)
 		t1 = self._make_ticket(contact=contact.name)
 		self.assertEqual(frappe.db.get_value("HD Ticket", t1.name, "customer"), customer.name)
 		self._incoming(ticket=t1.name)
@@ -182,7 +190,7 @@ class TestWAContactLink(FrappeTestCase):
 
 	def test_reply_after_resolution_does_not_invent_a_contact(self):
 		customer = self._make_customer()
-		contact = self._make_contact(LOCAL, customer=customer.name)
+		contact = self._make_contact(self.local, customer=customer.name)
 		t1 = self._make_ticket(contact=contact.name)
 		self._incoming(ticket=t1.name)
 		self._resolve(t1.name)
@@ -200,7 +208,7 @@ class TestWAContactLink(FrappeTestCase):
 		self.assertEqual(after, before, "a duplicate Contact was created")
 
 	def test_reply_while_open_still_attaches_to_the_same_ticket(self):
-		contact = self._make_contact(LOCAL)
+		contact = self._make_contact(self.local)
 		t1 = self._make_ticket(contact=contact.name)
 		self._incoming(ticket=t1.name)
 
