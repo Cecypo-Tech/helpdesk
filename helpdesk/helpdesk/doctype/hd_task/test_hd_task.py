@@ -435,23 +435,36 @@ class TestHDTask(FrappeTestCase):
 		self.assertEqual(get_tasks_for_customer(""), [])
 
 	def test_create_task_for_ticket_sets_customer_and_ticket(self):
-		from unittest.mock import patch
 		from helpdesk.helpdesk.doctype.hd_task.hd_task import create_task_for_ticket
 
+		# HD Customer autonames from customer_name, so a run whose cleanup failed
+		# leaves this record behind and every later run collides on insert.
+		frappe.delete_doc_if_exists("HD Customer", "_Test Create Task Customer", force=1)
 		cust = frappe.get_doc({
 			"doctype": "HD Customer",
 			"customer_name": "_Test Create Task Customer",
 		}).insert(ignore_permissions=True)
 		self.addCleanup(lambda: frappe.delete_doc("HD Customer", cust.name, force=True))
 
-		# Patch frappe.db.get_value so we don't need a real HD Ticket in the DB
-		with patch("frappe.db.get_value", return_value=cust.name):
-			task_name = create_task_for_ticket("FAKE-TICKET-999", "Fix the widget")
+		# A real ticket, rather than patching frappe.db.get_value to fake one.
+		# That patch was global, so it also answered the get_value calls frappe
+		# makes while validating HD Task.ticket — which expect a document and
+		# broke with "'str' object has no attribute 'name'". HD Task.ticket is a
+		# Link, so a fake id could never have survived link validation anyway.
+		ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": "_Test Create Task Ticket",
+			"raised_by": "create.task@example.com",
+		}).insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("HD Ticket", ticket.name, force=True))
+		frappe.db.set_value("HD Ticket", ticket.name, "customer", cust.name, update_modified=False)
+
+		task_name = create_task_for_ticket(str(ticket.name), "Fix the widget")
 
 		task = frappe.get_doc("HD Task", task_name)
 		self.addCleanup(lambda: frappe.delete_doc("HD Task", task_name, force=True))
 
 		self.assertEqual(task.title, "Fix the widget")
-		self.assertEqual(task.ticket, "FAKE-TICKET-999")
+		self.assertEqual(str(task.ticket), str(ticket.name))
 		self.assertEqual(task.customer, cust.name)
 		self.assertEqual(task.status, "Todo")

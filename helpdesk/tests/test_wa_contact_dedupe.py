@@ -21,7 +21,7 @@ class TestWAContactDedupe(FrappeTestCase):
 		self.tag = frappe.generate_hash(length=6)
 		# Distinctive digits so this run's numbers cannot collide with fixtures
 		# or with another test's.
-		self.digits = f"{abs(hash(self.tag)) % 900000 + 100000}"
+		self.digits = f"{int(frappe.generate_hash(length=8), 16) % 10**6:06d}"
 
 	def _number(self, intl=True, seq=0):
 		body = f"{self.digits}{seq}{seq}{seq}"

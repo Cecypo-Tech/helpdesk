@@ -484,10 +484,12 @@ class TestAgentHome(IntegrationTestCase):
         result = get_pending_tickets(ticket_type="upcoming_sla")
 
         # Verify our SLA ticket is in the result
-        ticket_names = [t["name"] for t in result["tickets"]]
-        self.assertIn(ticket.name, ticket_names)
+        # HD Ticket autonames to an integer, but the API serialises name as a
+        # string — compare like for like.
+        ticket_names = [str(t["name"]) for t in result["tickets"]]
+        self.assertIn(str(ticket.name), ticket_names)
         # Other agent's ticket should NOT be in the result
-        self.assertNotIn(other_ticket.name, ticket_names)
+        self.assertNotIn(str(other_ticket.name), ticket_names)
 
     def test_get_pending_tickets_new_tickets_type(self):
         """Test getting newly assigned tickets"""
@@ -512,10 +514,12 @@ class TestAgentHome(IntegrationTestCase):
         self.assertEqual(result["total_pending_tickets"], 3)
 
         # Verify all new tickets are in the result
-        ticket_names = [t["name"] for t in result["tickets"]]
-        self.assertIn(ticket1.name, ticket_names)
-        self.assertIn(ticket2.name, ticket_names)
-        self.assertIn(ticket3.name, ticket_names)
+        # HD Ticket autonames to an integer, but the API serialises name as a
+        # string — compare like for like.
+        ticket_names = [str(t["name"]) for t in result["tickets"]]
+        self.assertIn(str(ticket1.name), ticket_names)
+        self.assertIn(str(ticket2.name), ticket_names)
+        self.assertIn(str(ticket3.name), ticket_names)
 
         # Verify reason format
         for t in result["tickets"]:
@@ -574,9 +578,11 @@ class TestAgentHome(IntegrationTestCase):
         self.assertGreaterEqual(result["total_pending_tickets"], 2)
 
         # Verify pending tickets are in the result
-        ticket_names = [t["name"] for t in result["tickets"]]
-        self.assertIn(ticket1.name, ticket_names)
-        self.assertIn(ticket2.name, ticket_names)
+        # HD Ticket autonames to an integer, but the API serialises name as a
+        # string — compare like for like.
+        ticket_names = [str(t["name"]) for t in result["tickets"]]
+        self.assertIn(str(ticket1.name), ticket_names)
+        self.assertIn(str(ticket2.name), ticket_names)
 
         # Verify reason format
         for t in result["tickets"]:

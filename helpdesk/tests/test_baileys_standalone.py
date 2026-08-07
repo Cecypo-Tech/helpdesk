@@ -5,18 +5,18 @@ from frappe.tests.utils import FrappeTestCase
 class TestBaileysStandalone(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		self._orig_enabled = frappe.db.get_single_value("Baileys Gateway Settings", "enabled")
-		self._orig_api_key = frappe.db.get_single_value("Baileys Gateway Settings", "api_key")
-		self._orig_gateway_url = frappe.db.get_single_value("Baileys Gateway Settings", "gateway_url")
+		self._orig_enabled = frappe.db.get_single_value("WA API Settings", "enabled")
+		self._orig_api_key = frappe.db.get_single_value("WA API Settings", "global_api_key")
+		self._orig_gateway_url = frappe.db.get_single_value("WA API Settings", "server_url")
 		self.addCleanup(self._restore_settings)
-		frappe.db.set_single_value("Baileys Gateway Settings", "enabled", 1)
-		frappe.db.set_single_value("Baileys Gateway Settings", "api_key", "testkey")
-		frappe.db.set_single_value("Baileys Gateway Settings", "gateway_url", "http://localhost:9999")
+		frappe.db.set_single_value("WA API Settings", "enabled", 1)
+		frappe.db.set_single_value("WA API Settings", "global_api_key", "testkey")
+		frappe.db.set_single_value("WA API Settings", "server_url", "http://localhost:9999")
 
 	def _restore_settings(self):
-		frappe.db.set_single_value("Baileys Gateway Settings", "enabled", self._orig_enabled)
-		frappe.db.set_single_value("Baileys Gateway Settings", "api_key", self._orig_api_key or "")
-		frappe.db.set_single_value("Baileys Gateway Settings", "gateway_url", self._orig_gateway_url or "")
+		frappe.db.set_single_value("WA API Settings", "enabled", self._orig_enabled)
+		frappe.db.set_single_value("WA API Settings", "global_api_key", self._orig_api_key or "")
+		frappe.db.set_single_value("WA API Settings", "server_url", self._orig_gateway_url or "")
 
 	def _make_message(self, jid="120363test@g.us", direction="Incoming", message="hello", content_type="text", msg_id=None):
 		doc = frappe.get_doc({
@@ -41,8 +41,10 @@ class TestBaileysStandalone(FrappeTestCase):
 		self._make_message(jid=jid_a, message="second")
 		self._make_message(jid=jid_b, message="dm hello")
 
-		from helpdesk.integrations.baileys import get_baileys_conversations
-		result = get_baileys_conversations()
+		# get_baileys_conversations moved to wa.get_wa_conversations during the
+		# Evolution → WA rename and now returns a page, not a bare list.
+		from helpdesk.integrations.wa import get_wa_conversations
+		result = get_wa_conversations(limit=200)["conversations"]
 		jids = [r["jid"] for r in result]
 
 		self.assertIn(jid_a, jids)
@@ -53,11 +55,15 @@ class TestBaileysStandalone(FrappeTestCase):
 	def test_get_baileys_conversations_last_message_is_most_recent(self):
 		jid = "333standalone@g.us"
 		self._make_message(jid=jid, message="earlier")
-		import time; time.sleep(0.05)
+		import time
+
+		time.sleep(0.05)
 		self._make_message(jid=jid, message="later one")
 
-		from helpdesk.integrations.baileys import get_baileys_conversations
-		result = [r for r in get_baileys_conversations() if r["jid"] == jid]
+		from helpdesk.integrations.wa import get_wa_conversations
+		result = [
+			r for r in get_wa_conversations(limit=200)["conversations"] if r["jid"] == jid
+		]
 		self.assertEqual(len(result), 1)
 		self.assertEqual(result[0]["last_message"], "later one")
 
@@ -66,9 +72,12 @@ class TestBaileysStandalone(FrappeTestCase):
 		self._make_message(jid=jid, message="msg one")
 		self._make_message(jid=jid, message="msg two")
 
-		from helpdesk.integrations.baileys import get_baileys_messages
-		result = get_baileys_messages(jid=jid)
-		messages = [r["message"] for r in result]
+		# get_baileys_messages was folded into wa.get_whatsapp_messages, which
+		# serves both the WA Line and WABA chats.
+		from helpdesk.integrations.wa import get_whatsapp_messages
+		result = get_whatsapp_messages(jid=jid)
+		rows = result["messages"] if isinstance(result, dict) else result
+		messages = [r["message"] for r in rows]
 		self.assertIn("msg one", messages)
 		self.assertIn("msg two", messages)
 
@@ -80,13 +89,18 @@ class TestBaileysStandalone(FrappeTestCase):
 
 		with mock.patch("frappe.publish_realtime"):
 			class FakeRequest:
+				# Evolution API envelope. This sent the old self-hosted gateway
+				# shape (jid/messageId/contentType), which the current webhook
+				# does not recognise — it returned {"status": "skipped"} and the
+				# assertion had never been updated.
 				data = frappe.as_json({
-					"jid": jid,
-					"messageId": msg_id,
-					"sender": jid,
-					"senderName": "Tester",
-					"message": "webhook test",
-					"contentType": "text",
+					"event": "messages.upsert",
+					"instance": "_test-evo",
+					"data": {
+						"key": {"remoteJid": jid, "fromMe": False, "id": msg_id},
+						"pushName": "Tester",
+						"message": {"conversation": "webhook test"},
+					},
 				}).encode()
 				def get(self, key, default=None):
 					return {"X-API-Key": "testkey", "x-api-key": "testkey"}.get(key, default)
