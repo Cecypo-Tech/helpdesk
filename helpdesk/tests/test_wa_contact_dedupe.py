@@ -193,6 +193,26 @@ class TestWAContactDedupe(FrappeTestCase):
 		self.assertEqual(row.customer, other.name, "merge overwrote a customer it did not set")
 		self.assertNotEqual(row.customer, customer.name)
 
+	# ── access ────────────────────────────────────────────────────────────
+
+	def test_both_entry_points_require_system_manager(self):
+		# Both are whitelisted so they can be called over HTTP on hosts with no
+		# shell. merge deletes Contacts, and report enumerates every contact's
+		# phone number, so neither may be reachable by an ordinary agent.
+		user = f"dedupe.agent.{self.tag}@example.com"
+		frappe.get_doc({
+			"doctype": "User", "email": user, "first_name": "Dedupe Agent",
+			"send_welcome_email": 0, "roles": [{"role": "Agent"}],
+		}).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "User", user, ignore_permissions=True, force=True)
+
+		frappe.set_user(user)
+		self.addCleanup(frappe.set_user, "Administrator")
+		with self.assertRaises(frappe.PermissionError):
+			dedupe.report_duplicate_contacts(verbose=0)
+		with self.assertRaises(frappe.PermissionError):
+			dedupe.merge_duplicate_contacts(dry_run=1)
+
 	def test_merge_is_a_no_op_when_there_is_nothing_to_do(self):
 		result = dedupe.merge_duplicate_contacts(dry_run=0)
 		mine = [r for r in result["applied"] if self.digits in (r.get("suffix") or "")]

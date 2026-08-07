@@ -146,7 +146,12 @@ def report_duplicate_contacts(verbose: int = 1) -> dict:
 	Returns {"candidates": [...], "skipped": [...]}. Every group that is not a
 	clean pair is reported as skipped with a reason rather than silently dropped,
 	so the output accounts for everything it looked at.
+
+	System Manager only: it exposes every contact's phone number and who they
+	belong to, which is not something an ordinary agent should be able to
+	enumerate over HTTP.
 	"""
+	frappe.only_for("System Manager")
 	candidates, skipped = _classify(*_load())
 
 	if cint(verbose):
@@ -207,7 +212,11 @@ def merge_duplicate_contacts(dry_run: int = 1, limit: int = 0) -> dict:
 	Communication, a ToDo, another app's link — frappe refuses and the pair is
 	reported as failed, rather than the row being destroyed along with whatever
 	pointed at it.
+
+	System Manager only. This deletes Contacts, so it must never be reachable
+	over HTTP by an ordinary agent.
 	"""
+	frappe.only_for("System Manager")
 	dry_run = cint(dry_run)
 	limit = cint(limit)
 	candidates = report_duplicate_contacts(verbose=0)["candidates"]
