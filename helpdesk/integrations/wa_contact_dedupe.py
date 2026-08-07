@@ -201,7 +201,7 @@ def _still_valid(candidate) -> str | None:
 	return None
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def merge_duplicate_contacts(dry_run: int = 1, limit: int = 0) -> dict:
 	"""Repoint tickets onto the keeper and remove the duplicate.
 
@@ -213,8 +213,10 @@ def merge_duplicate_contacts(dry_run: int = 1, limit: int = 0) -> dict:
 	reported as failed, rather than the row being destroyed along with whatever
 	pointed at it.
 
-	System Manager only. This deletes Contacts, so it must never be reachable
-	over HTTP by an ordinary agent.
+	System Manager only, and POST only. This deletes Contacts, so it must
+	neither be reachable by an ordinary agent nor be triggerable by pasting a
+	URL — a GET that destroys data is one browser prefetch away from an
+	accident.
 	"""
 	frappe.only_for("System Manager")
 	dry_run = cint(dry_run)
