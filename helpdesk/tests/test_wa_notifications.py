@@ -30,6 +30,19 @@ class TestWANotifications(FrappeTestCase):
 		self.addCleanup(frappe.db.delete, "HD Notification", {"reference_wa_jid": JID})
 
 	def _make_agent(self, email):
+		# Registered before the User so it runs after it (addCleanup is LIFO):
+		# frappe's User.after_insert creates a Contact via contact.update_contact,
+		# and deleting the User only nulls Contact.user rather than removing the
+		# row. Left behind, that Contact outlives the test, and the next run's
+		# update_contact mutates the same long-lived row that the delete cascade
+		# (UPDATE `tabContact` SET user=null) then hits — a read-then-write on an
+		# already-modified row, which surfaces intermittently as
+		# "1020 Record has changed since last read in table 'tabContact'".
+		self.addCleanup(self._drop_contact_for, email)
+
+		# Cleanup is registered whether or not this call created the record. It
+		# used to be registered only on creation, so anything surviving a failed
+		# run was never cleaned up again.
 		if not frappe.db.exists("User", email):
 			frappe.get_doc({
 				"doctype": "User",
@@ -37,13 +50,31 @@ class TestWANotifications(FrappeTestCase):
 				"first_name": email.split("@")[0],
 				"send_welcome_email": 0,
 			}).insert(ignore_permissions=True)
-			self.addCleanup(frappe.delete_doc, "User", email, ignore_permissions=True, force=True)
+		self.addCleanup(frappe.delete_doc, "User", email, ignore_permissions=True, force=True)
+
 		if not frappe.db.exists("HD Agent", {"user": email}):
-			agent = frappe.get_doc({
+			frappe.get_doc({
 				"doctype": "HD Agent", "user": email, "agent_name": email, "is_active": 1
 			}).insert(ignore_permissions=True)
-			self.addCleanup(frappe.delete_doc, "HD Agent", agent.name, ignore_permissions=True, force=True)
+		for agent in frappe.get_all("HD Agent", filters={"user": email}, pluck="name"):
+			self.addCleanup(
+				frappe.delete_doc, "HD Agent", agent, ignore_permissions=True, force=True
+			)
 		return email
+
+	@staticmethod
+	def _drop_contact_for(email):
+		"""Remove the Contact frappe auto-creates for a User."""
+		local_part = email.split("@")[0]
+		names = set(frappe.get_all("Contact", filters={"user": email}, pluck="name"))
+		names |= set(frappe.get_all("Contact", filters={"first_name": local_part}, pluck="name"))
+		for name in names:
+			try:
+				frappe.delete_doc(
+					"Contact", name, ignore_permissions=True, force=True, delete_permanently=True
+				)
+			except Exception:
+				pass
 
 	def _notifications_for(self, user, read=None):
 		filters = {"reference_wa_jid": JID, "user_to": user, "notification_type": "WhatsApp"}
