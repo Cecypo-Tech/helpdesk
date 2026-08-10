@@ -4717,6 +4717,32 @@ def get_outgoing_templates() -> list[dict]:
 	)
 
 
+def _template_field_value(ticket_doc, fieldname: str) -> str:
+	"""Resolve one template variable from a ticket.
+
+	Supports `link_field.target_field` so a template can greet someone by name.
+	Plain `contact` renders the Contact's document key, which frappe builds as
+	`first_name-company_name` — "Hello Shivani Somaia-Acme Ltd" is not something
+	to send a customer, so the seeded templates use `contact.first_name`.
+	"""
+	if "." in fieldname:
+		link_field, target = fieldname.split(".", 1)
+		link_value = ticket_doc.get(link_field)
+		if not link_value:
+			return ""
+		meta_field = ticket_doc.meta.get_field(link_field)
+		doctype = meta_field.options if meta_field else None
+		if not doctype:
+			return ""
+		return str(frappe.db.get_value(doctype, link_value, target) or "")
+
+	raw = ticket_doc.get_formatted(fieldname)
+	if raw:
+		return frappe.utils.strip_html(raw)
+	value = ticket_doc.get(fieldname)
+	return str(value) if value is not None else ""
+
+
 def _render_template_for_ticket(ticket: str | int, template_name: str) -> tuple[str, str | None]:
 	"""Render a WhatsApp Template against a ticket.
 
@@ -4741,10 +4767,7 @@ def _render_template_for_ticket(ticket: str | int, template_name: str) -> tuple[
 		ticket_doc = frappe.get_doc("HD Ticket", ticket)
 		field_names = [f.strip() for f in template_doc.field_names.split(",")]
 		for i, fn in enumerate(field_names, 1):
-			raw = ticket_doc.get_formatted(fn)
-			params[str(i)] = frappe.utils.strip_html(raw) if raw else (
-				str(ticket_doc.get(fn)) if ticket_doc.get(fn) is not None else ""
-			)
+			params[str(i)] = _template_field_value(ticket_doc, fn)
 		body_param = json.dumps(params)
 
 	# frappe_whatsapp never sets `message` on template sends, leaving the chat

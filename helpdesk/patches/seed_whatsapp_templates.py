@@ -33,6 +33,9 @@ TEMPLATES = [
 		"header": "Tech Support",
 		"footer": "Reply STOP to unsubscribe",
 		"sample_values": "Customer Name,TICKET-0001",
+		# Maps {{1}} and {{2}} to HD Ticket fields. Without it, rendering a
+		# template raises "has variables but no Field Names are configured".
+		"field_names": "contact.first_name,name",
 		"buttons": [
 			{"button_type": "Quick Reply", "button_label": "Product A"},
 			{"button_type": "Quick Reply", "button_label": "Product B"},
@@ -55,6 +58,9 @@ TEMPLATES = [
 		"header_type": "TEXT",
 		"header": "Rate Our Service",
 		"sample_values": "Customer Name,TICKET-0001",
+		# Maps {{1}} and {{2}} to HD Ticket fields. Without it, rendering a
+		# template raises "has variables but no Field Names are configured".
+		"field_names": "contact.first_name,name",
 		"buttons": [
 			{"button_type": "Quick Reply", "button_label": "Excellent"},
 			{"button_type": "Quick Reply", "button_label": "Good"},
@@ -77,6 +83,9 @@ TEMPLATES = [
 		"header_type": "TEXT",
 		"header": "Ticket Follow-Up",
 		"sample_values": "Customer Name,TICKET-0001",
+		# Maps {{1}} and {{2}} to HD Ticket fields. Without it, rendering a
+		# template raises "has variables but no Field Names are configured".
+		"field_names": "contact.first_name,name",
 		"buttons": [
 			{"button_type": "Quick Reply", "button_label": "Yes, resolved"},
 			{"button_type": "Quick Reply", "button_label": "No, still open"},
