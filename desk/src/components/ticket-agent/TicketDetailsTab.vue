@@ -92,6 +92,14 @@ const coreFields = computed(() => {
   if (!fieldsMeta || fieldsMeta.length === 0) {
     return [];
   }
+  // The WhatsApp Business page reloads the active ticket whenever a reply may
+  // have changed which ticket is current, and provides no ticket at all for a
+  // conversation that has never been linked to one. Both leave doc null while
+  // this still renders, so dereferencing it here threw
+  // "can't access property ticket_type, ticket.value.doc is null".
+  if (!ticket.value?.doc) {
+    return [];
+  }
   const _coreFields = [
     { group: true, fields: [getField("ticket_type"), getField("priority")] },
     { group: false, fields: [getField("customer")] },
@@ -117,6 +125,9 @@ const coreFields = computed(() => {
 const customFields = computed(() => {
   const fieldsMeta = getFields();
   if (!fieldsMeta || fieldsMeta.length === 0) {
+    return [];
+  }
+  if (!ticket.value?.doc) {
     return [];
   }
 
@@ -146,7 +157,7 @@ const customFields = computed(() => {
 function getFieldInFormat(fieldTemplate, fieldMeta) {
   return {
     label: fieldMeta?.label || fieldTemplate.fieldname,
-    value: ticket.value.doc[fieldTemplate.fieldname],
+    value: ticket.value?.doc?.[fieldTemplate.fieldname],
     fieldtype: fieldMeta?.fieldtype,
     doctype: fieldMeta?.options || "",
     options: fieldMeta?.options || "",
@@ -167,6 +178,8 @@ function handleFieldUpdate(
   value: FieldValue,
   isCoreFieldUpdated = false
 ) {
+  // Nothing to update against while the ticket is between loads.
+  if (!ticket.value?.doc) return;
   if (ticket.value.doc[fieldname] == value) return;
   if (isCoreFieldUpdated) {
     const label = getField(fieldname)?.label || fieldname;
