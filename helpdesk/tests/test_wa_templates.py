@@ -150,6 +150,77 @@ class TestWATemplates(FrappeTestCase):
 
 		self.assertEqual(preview["message"], rendered)
 
+	def test_seeded_templates_render_without_configuration(self):
+		"""The seeded templates must work out of the box.
+
+		They shipped with sample_values but no field_names, so every one of them
+		threw "has variables but no Field Names are configured" the moment an
+		agent picked it — the picker previews on selection.
+		"""
+		from helpdesk.patches import seed_whatsapp_templates, set_whatsapp_template_field_names
+
+		for tmpl in seed_whatsapp_templates.TEMPLATES:
+			if not tmpl.get("sample_values"):
+				continue
+			self.assertTrue(
+				(tmpl.get("field_names") or "").strip(),
+				f"{tmpl['name']} declares variables with no field_names",
+			)
+
+		# And the backfill maps any already-created seeded template.
+		name = set_whatsapp_template_field_names.SEEDED[1]
+		if frappe.db.exists("WhatsApp Templates", name):
+			set_whatsapp_template_field_names.execute()
+			self.assertTrue(
+				(frappe.db.get_value("WhatsApp Templates", name, "field_names") or "").strip()
+			)
+
+	def test_field_names_from_the_seed_actually_render(self):
+		# contact,name is only useful if those fields resolve on a real ticket.
+		tpl = self._make_template(
+			"Hello {{1}}, ticket #{{2}}.",
+			sample_values="Customer Name,TICKET-0001",
+			field_names="contact.first_name,name",
+		)
+
+		message, body_param = wa._render_template_for_ticket(self.ticket.name, tpl.name)
+
+		self.assertNotIn("{{1}}", message)
+		self.assertNotIn("{{2}}", message)
+		self.assertIn(str(self.ticket.name), message)
+		self.assertIsNotNone(body_param)
+
+	def test_dotted_field_name_reads_through_the_link(self):
+		# Plain `contact` renders the Contact document key, which frappe builds
+		# as first_name-company_name — "Hello Shivani Somaia-Acme Ltd" is not
+		# something to send a customer.
+		tag = frappe.generate_hash(length=6)
+		contact = frappe.get_doc({
+			"doctype": "Contact",
+			"first_name": f"Ada{tag}",
+			"last_name": "Lovelace",
+		}).insert(ignore_permissions=True)
+		self.addCleanup(
+			frappe.delete_doc, "Contact", contact.name, ignore_permissions=True, force=True
+		)
+		frappe.db.set_value("HD Ticket", self.ticket.name, "contact", contact.name)
+
+		tpl = self._make_template(
+			"Hello {{1}}.", sample_values="Name", field_names="contact.first_name"
+		)
+		message, _body = wa._render_template_for_ticket(self.ticket.name, tpl.name)
+
+		self.assertEqual(message, f"Hello Ada{tag}.")
+		self.assertNotIn(contact.name, message)
+
+	def test_dotted_field_name_is_blank_when_the_link_is_empty(self):
+		frappe.db.set_value("HD Ticket", self.ticket.name, "contact", None)
+		tpl = self._make_template(
+			"Hello {{1}}.", sample_values="Name", field_names="contact.first_name"
+		)
+		message, _body = wa._render_template_for_ticket(self.ticket.name, tpl.name)
+		self.assertEqual(message, "Hello .")
+
 	def test_variables_without_field_names_raise_a_configuration_error(self):
 		tpl = self._make_template("Hi {{1}}", sample_values="Name", field_names="")
 

@@ -54,3 +54,4 @@ helpdesk.patches.add_wa_conversation_read_state_unique_index
 helpdesk.patches.add_wa_message_unread_index
 helpdesk.patches.add_wa_message_normalized_phone
 helpdesk.patches.add_contact_phone_suffix
+helpdesk.patches.set_whatsapp_template_field_names
