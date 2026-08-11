@@ -224,7 +224,7 @@
     v-if="showTemplates"
     v-model="showTemplates"
     :ticketId="ticketId"
-    @sent="$emit('sent')"
+    @sent="$emit('sent'); $emit('delivered')"
   />
 </template>
 
@@ -245,7 +245,11 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
+  // Fired the moment the agent hits send, so the composer can clear. The
+  // message does not exist yet at this point — nothing may fetch on it.
   (e: "sent"): void;
+  // Fired once the server has stored the message, so the thread can refetch.
+  (e: "delivered"): void;
   (e: "clearReply"): void;
 }>();
 
@@ -423,6 +427,9 @@ function onPaste(e: ClipboardEvent) {
 
 const sendReply = createResource({
   url: "helpdesk.integrations.wa.send_wa_reply",
+  onSuccess() {
+    emit("delivered");
+  },
   onError(e: any) {
     toast.error(e?.messages?.[0] || "Failed to send message");
   },
@@ -484,13 +491,17 @@ async function send() {
   }
 
   sending.value = true;
+  let anyStored = false;
   try {
     for (let i = 0; i < items.length; i++) {
       const ok = await sendMediaUnit(items[i], i === 0 ? caption : "", i === 0 ? replyToMsgId : "");
       if (!ok) break;
+      anyStored = true;
     }
   } finally {
     sending.value = false;
+    // Even a partial run stored rows the thread has not seen.
+    if (anyStored) emit("delivered");
   }
 }
 
