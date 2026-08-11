@@ -4804,7 +4804,12 @@ def _template_field_value(ticket_doc, fieldname: str) -> str:
 
 	raw = ticket_doc.get_formatted(fieldname)
 	if raw:
-		return frappe.utils.strip_html(raw)
+		# str() before strip_html, which is a re.sub and rejects anything else
+		# with "expected string or bytes-like object, got 'int'". HD Ticket is
+		# autoincrement-named, so `name` — the {{2}} of every seeded template —
+		# arrives here as an int on any site whose tickets are numbered, and the
+		# preview 500s on the agent the moment they pick a template.
+		return frappe.utils.strip_html(str(raw))
 	value = ticket_doc.get(fieldname)
 	return str(value) if value is not None else ""
 
