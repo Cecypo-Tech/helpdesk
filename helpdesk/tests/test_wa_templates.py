@@ -221,6 +221,23 @@ class TestWATemplates(FrappeTestCase):
 		message, _body = wa._render_template_for_ticket(self.ticket.name, tpl.name)
 		self.assertEqual(message, "Hello .")
 
+	def test_non_string_field_value_renders(self):
+		# HD Ticket is autoincrement-named, so on a site whose tickets are
+		# numbered `name` comes back from get_formatted as an int. strip_html is
+		# a re.sub and rejected it with "expected string or bytes-like object,
+		# got 'int'", so picking any seeded template — they all map {{2}} to
+		# `name` — 500'd the preview in front of the agent.
+		class _IntNamed:
+			meta = self.ticket.meta
+
+			def get_formatted(self, fieldname):
+				return 4211
+
+			def get(self, fieldname):
+				return 4211
+
+		self.assertEqual(wa._template_field_value(_IntNamed(), "name"), "4211")
+
 	def test_variables_without_field_names_raise_a_configuration_error(self):
 		tpl = self._make_template("Hi {{1}}", sample_values="Name", field_names="")
 
