@@ -3117,6 +3117,60 @@ def set_wa_message_normalized_phone(doc, method=None):
 	doc.normalized_phone = _wa_message_phone(doc)
 
 
+_WA_DUPLICATE_FLAG = "hd_wa_duplicate"
+
+
+def _wa_message_id_seen(message_id: str) -> bool:
+	"""Whether this wamid is already stored, as of the latest committed write.
+
+	A plain exists() reads the transaction's snapshot under REPEATABLE READ, so
+	it cannot see a row a concurrent delivery has inserted but not yet
+	committed — which is exactly the fan-out case, where two requests carrying
+	the same wamid land a fraction of a second apart. SELECT ... FOR UPDATE is a
+	current read and takes a lock on the message_id key, so the second request
+	waits for the first to commit and then sees its row.
+
+	This is why the index in add_whatsapp_message_id_index is not optional:
+	without it the locking read scans the table and holds locks across it.
+	"""
+	rows = frappe.db.sql(
+		"""SELECT `name` FROM `tabWhatsApp Message`
+		WHERE `message_id` = %s LIMIT 1 FOR UPDATE""",
+		(message_id,),
+	)
+	return bool(rows)
+
+
+def flag_duplicate_whatsapp_message(doc, method=None):
+	"""Mark an inbound WhatsApp Message whose wamid has already been stored.
+
+	Meta fans each inbound event out to every app subscribed to the WABA, and
+	retries any delivery that does not return 200 promptly. frappe_whatsapp
+	checks for neither: message_id carries no unique constraint and post()
+	inserts unconditionally, so every delivery stored its own row and the
+	conversation showed the customer's message twice.
+
+	The insert cannot be cancelled from before_insert without raising, and
+	raising would hand Meta a 500 — which buys a retry of the very delivery
+	being rejected, and repeated, gets the app's webhook backed off. So this
+	only records the verdict, while the keyed lookup is cheap, and
+	on_whatsapp_message_insert drops the row.
+
+	Inbound only. Outgoing rows take their message_id from Meta's send
+	response, and collapsing one into an inbound row would erase a reply an
+	agent actually sent. Blank ids are left alone for the same reason: a row can
+	reach the table before Meta has issued one, and treating "" as a value would
+	collapse all of them into a single row.
+	"""
+	if doc.get("type") != "Incoming":
+		return
+	message_id = (doc.get("message_id") or "").strip()
+	if not message_id:
+		return
+	if _wa_message_id_seen(message_id):
+		doc.flags[_WA_DUPLICATE_FLAG] = True
+
+
 def _wa_has_normalized_phone() -> bool:
 	"""Whether the normalized_phone custom field has been migrated onto this site.
 
@@ -3791,6 +3845,18 @@ def on_whatsapp_message_update(doc, method=None):
 def on_whatsapp_message_insert(doc, method=None):
 	"""Create or link an HD Ticket when a frappe_whatsapp message arrives."""
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
+		return
+
+	if doc.flags.get(_WA_DUPLICATE_FLAG):
+		# Meta delivered this wamid twice (see flag_duplicate_whatsapp_message).
+		# Dropped raw rather than through delete_doc: the row has no children and
+		# no links, nothing has seen it, and running a document lifecycle over
+		# something that logically never existed only invites side effects.
+		#
+		# Returning here also leaves reference_doctype unset, which is what stops
+		# bot.handle_whatsapp_message — the next after_insert hook — from firing a
+		# second automated reply at the customer.
+		frappe.db.delete("WhatsApp Message", {"name": doc.name})
 		return
 
 	s = _fw_settings()

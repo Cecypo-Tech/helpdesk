@@ -87,7 +87,12 @@ doc_events = {
         "validate": "helpdesk.extends.assignment_rule.on_assignment_rule_validate",
     },
     "WhatsApp Message": {
-        "before_insert": "helpdesk.integrations.wa.set_wa_message_normalized_phone",
+        "before_insert": [
+            # Must run before anything else reads the row: it decides whether
+            # this delivery is a duplicate Meta already sent us.
+            "helpdesk.integrations.wa.flag_duplicate_whatsapp_message",
+            "helpdesk.integrations.wa.set_wa_message_normalized_phone",
+        ],
         "after_insert": [
             "helpdesk.integrations.wa.on_whatsapp_message_insert",
             "helpdesk.integrations.bot.handle_whatsapp_message",
@@ -186,6 +191,15 @@ fixtures = [
         "filters": [
             ["dt", "in", ["Contact", "Contact Phone"]],
             ["fieldname", "=", "phone_suffix"],
+        ],
+    },
+    # Indexes WhatsApp Message.message_id for the duplicate-delivery guard. Also
+    # created by add_whatsapp_message_id_index, but a fresh install marks patches
+    # as already-run without executing them, so the fixture is what carries it there.
+    {
+        "doctype": "Property Setter",
+        "filters": [
+            ["name", "=", "WhatsApp Message-message_id-search_index"],
         ],
     },
 ]

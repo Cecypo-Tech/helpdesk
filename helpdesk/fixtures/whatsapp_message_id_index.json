@@ -1,0 +1,13 @@
+[
+ {
+  "doctype": "Property Setter",
+  "name": "WhatsApp Message-message_id-search_index",
+  "doctype_or_field": "DocField",
+  "doc_type": "WhatsApp Message",
+  "field_name": "message_id",
+  "property": "search_index",
+  "property_type": "Check",
+  "value": "1",
+  "module": "Helpdesk"
+ }
+]
