@@ -56,3 +56,4 @@ helpdesk.patches.add_wa_message_normalized_phone
 helpdesk.patches.add_contact_phone_suffix
 helpdesk.patches.set_whatsapp_template_field_names
 helpdesk.patches.drop_wa_bot_session_table
+helpdesk.patches.add_whatsapp_message_id_index
