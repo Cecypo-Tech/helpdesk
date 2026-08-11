@@ -66,6 +66,7 @@
         :replyTo="replyingTo"
         :replyWindowOpen="ticketInfo.data.reply_window_open"
         @sent="onMessageSent"
+        @delivered="onMessageDelivered"
         @clearReply="replyingTo = null"
       />
     </div>
@@ -244,6 +245,16 @@ function sendReaction(emoji: string, targetMessageId: string) {
 
 function onMessageSent() {
   replyingTo.value = null;
+}
+
+function onMessageDelivered() {
+  // The thread used to refresh only on helpdesk:whatsapp-message, so an agent's
+  // own message stayed invisible until they switched conversation and came back
+  // and the list refetched. Refetching on the send's own response makes the
+  // message appear whether or not the socket event arrives.
+  messages.reload();
+  ticketInfo.reload();
+  scrollToBottom();
 }
 
 function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
