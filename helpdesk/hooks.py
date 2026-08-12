@@ -38,6 +38,11 @@ scheduler_events = {
         "helpdesk.search.build_index_if_not_exists",
         "helpdesk.search.download_corpus",
     ],
+    "cron": {
+        # Recovers inbound messages whose ingestion job died — without this they
+        # stay stored but ticketless, and nothing would ever notice.
+        "*/15 * * * *": ["helpdesk.integrations.wa_ingest.sweep_unlinked_messages"],
+    },
     "hourly": [
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_due_task_wpa_notifications",
         "helpdesk.integrations.outline.sync_outline_docs",
@@ -93,10 +98,12 @@ doc_events = {
             "helpdesk.integrations.wa.flag_duplicate_whatsapp_message",
             "helpdesk.integrations.wa.set_wa_message_normalized_phone",
         ],
-        "after_insert": [
-            "helpdesk.integrations.wa.on_whatsapp_message_insert",
-            "helpdesk.integrations.bot.handle_whatsapp_message",
-        ],
+        # The bot is deliberately NOT here. It requires reference_doctype, which
+        # is now written by the background job rather than by an earlier hook in
+        # this list — as an after_insert hook its guard would always be false and
+        # it would silently stop replying. wa_ingest.process_incoming_message
+        # calls it once the ticket link exists.
+        "after_insert": "helpdesk.integrations.wa.on_whatsapp_message_insert",
         "on_update": "helpdesk.integrations.wa.on_whatsapp_message_update",
     },
     "WA Message": {

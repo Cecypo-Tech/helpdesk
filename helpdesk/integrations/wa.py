@@ -422,11 +422,18 @@ def get_contact_phone(ticket: str) -> str | None:
 
 
 def _publish_fw_message(ticket_name: str, is_incoming: bool) -> None:
-    """Publish realtime event for a frappe_whatsapp message linked to a ticket."""
-    frappe.db.commit()
+    """Publish realtime event for a frappe_whatsapp message linked to a ticket.
+
+    after_commit rather than an explicit commit(): the client reloads the thread
+    on this event, so the row must be visible before it fires — but forcing a
+    commit mid-request to guarantee that also forces a durability barrier inside
+    Meta's webhook request, and frappe v16 disallows commits in doc events.
+    Deferring the emit to the real commit gives the same ordering for free.
+    """
     frappe.publish_realtime(
         "helpdesk:whatsapp-message",
         message={"ticket": str(ticket_name), "is_incoming": is_incoming},
+        after_commit=True,
     )
 
 
@@ -3831,7 +3838,10 @@ def on_whatsapp_message_update(doc, method=None):
 	before = doc.get_doc_before_save()
 	if before and before.status == doc.status:
 		return
-	frappe.db.commit()
+	# See _publish_fw_message: this runs on the status path, which is the
+	# highest-volume webhook traffic there is — every sent/delivered/read for
+	# every outgoing message. A forced commit here was a durability barrier per
+	# status callback.
 	frappe.publish_realtime(
 		"helpdesk:whatsapp-status-update",
 		message={
@@ -3839,6 +3849,7 @@ def on_whatsapp_message_update(doc, method=None):
 			"message_name": doc.name,
 			"status": doc.status or "",
 		},
+		after_commit=True,
 	)
 
 
@@ -3869,6 +3880,35 @@ def on_whatsapp_message_insert(doc, method=None):
 			if s.agent_reply_status:
 				_set_ticket_status(doc.reference_name, s.agent_reply_status)
 			_publish_fw_message(doc.reference_name, is_incoming=False)
+		return
+
+	# Everything an inbound message needs — contact resolution, ticket creation,
+	# agent notifications, the bot — used to run here, inside the HTTP request
+	# Meta is still waiting on. Meta retries any delivery it does not get a
+	# timely 200 for, and sustained retries get an endpoint deprioritised, so
+	# holding its request open for that work is the wrong trade. The webhook now
+	# returns as soon as the row is stored and the work happens in a job.
+	frappe.enqueue(
+		"helpdesk.integrations.wa_ingest.process_incoming_message",
+		queue="short",
+		job_id=f"wa_ingest_{doc.name}",
+		# The job re-reads the row by name, so it must not start before the
+		# insert commits or it would find nothing.
+		enqueue_after_commit=True,
+		message_name=doc.name,
+	)
+
+
+def link_incoming_message(doc, s=None) -> None:
+	"""Resolve the contact and ticket for one inbound message.
+
+	Split out of on_whatsapp_message_insert so it can run in a job rather than
+	in Meta's webhook request. Called only by
+	wa_ingest.process_incoming_message, which owns the idempotency check —
+	this function assumes it is the first and only run for this message.
+	"""
+	s = s or _fw_settings()
+	if not s or not s.enabled:
 		return
 
 	phone = _normalize_phone(doc.get("from") or "")
