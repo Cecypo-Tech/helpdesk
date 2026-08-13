@@ -190,8 +190,26 @@ class HDTicket(Document):
             not self.via_customer_portal
             and not frappe.flags.initial_sync
             and send_ack_email
+            # WhatsApp tickets carry a placeholder raised_by
+            # (whatsapp+254…@whatsapp.placeholder.local) because the customer
+            # reached us by phone number and has no email address. Sending there
+            # bounces off a domain that does not exist, once per ticket.
+            and not self.flags.get("skip_ack_email")
         ):
-            self.send_acknowledgement_email()
+            try:
+                self.send_acknowledgement_email()
+            except Exception:
+                # A ticket must exist even when we cannot announce it. This
+                # raised through after_insert and killed the whole insert, so on
+                # 2026-08-13 an unconfigured outgoing Email Account silently
+                # stopped every new WhatsApp conversation from becoming a
+                # ticket — and inside the webhook request, the rollback took the
+                # message and its Notification Log row with it, which made
+                # arriving messages look like they were never delivered.
+                frappe.log_error(
+                    title="Acknowledgement email failed",
+                    message=f"Ticket {self.name} was created; the email was not sent.",
+                )
 
     def capture_ticket_created_telemetry_events(self):
         if self.subject == "Welcome to Helpdesk":
