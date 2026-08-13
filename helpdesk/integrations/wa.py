@@ -240,19 +240,59 @@ def _fw_settings():
         return None
 
 
+def _fw_conversation_phone(ticket: str | int) -> str | None:
+    """The customer's digits for this ticket's WhatsApp conversation.
+
+    normalized_phone holds the other party either way — sender on an incoming
+    row, recipient on an outgoing one — so the newest message linked to the
+    ticket identifies the person regardless of who wrote last.
+
+    None when the custom field has not been migrated onto this site yet, which
+    is a real window on every deploy.
+    """
+    if not _wa_has_normalized_phone():
+        return None
+    return frappe.db.get_value(
+        "WhatsApp Message",
+        {"reference_doctype": "HD Ticket", "reference_name": ticket},
+        "normalized_phone",
+        order_by="creation desc",
+    )
+
+
 def _fw_reply_window_open(ticket: str | int) -> bool:
-    """True when Meta still accepts free-form messages on this ticket.
+    """True when Meta still accepts free-form messages to this ticket's customer.
 
     The window runs 24 hours from the customer's last *incoming* message. With
     no incoming message at all the conversation is business-initiated, which
     Meta permits only via a template — so the window is closed, not open.
+
+    Meta scopes that window to the **phone number**, not to a ticket: one
+    person, one window, wherever their messages landed. Scoping it per ticket
+    told agents "the 24-hour reply window has closed" whenever the customer's
+    latest message had opened a *new* ticket — the previous one having been
+    resolved, closed, or aged past the conversation timeout — which is the
+    normal course of events rather than an edge case. The reply would have been
+    accepted; we refused to send it.
+
+    Keyed on normalized_phone, which is indexed for exactly this kind of lookup.
     """
-    last_incoming = frappe.db.get_value(
-        "WhatsApp Message",
-        {"reference_doctype": "HD Ticket", "reference_name": ticket, "type": "Incoming"},
-        "creation",
-        order_by="creation desc",
-    )
+    phone = _fw_conversation_phone(ticket)
+    if phone:
+        last_incoming = frappe.db.get_value(
+            "WhatsApp Message",
+            {"normalized_phone": phone, "type": "Incoming"},
+            "creation",
+            order_by="creation desc",
+        )
+    else:
+        # Pre-migration fallback: per-ticket, as before.
+        last_incoming = frappe.db.get_value(
+            "WhatsApp Message",
+            {"reference_doctype": "HD Ticket", "reference_name": ticket, "type": "Incoming"},
+            "creation",
+            order_by="creation desc",
+        )
     if not last_incoming:
         return False
     return time_diff_in_hours(now_datetime(), last_incoming) < 24
@@ -4012,6 +4052,11 @@ def link_incoming_message(doc, s=None) -> None:
 		frappe.set_user("Administrator")
 		try:
 			ticket_doc = frappe.get_doc(ticket_data)
+			# raised_by here is a placeholder address for a customer who reached
+			# us by phone number, so an acknowledgement email would bounce off a
+			# domain that does not exist. The customer already has their
+			# acknowledgement — the bot replies on WhatsApp.
+			ticket_doc.flags.skip_ack_email = True
 			ticket_doc.insert(ignore_permissions=True)
 		finally:
 			frappe.set_user(original_user)
