@@ -461,19 +461,32 @@ def get_contact_phone(ticket: str) -> str | None:
     return result[0][0] if result else None
 
 
-def _publish_fw_message(ticket_name: str, is_incoming: bool) -> None:
+def _publish_fw_message(ticket_name: str, is_incoming: bool, immediate: bool = False) -> None:
     """Publish realtime event for a frappe_whatsapp message linked to a ticket.
 
-    after_commit rather than an explicit commit(): the client reloads the thread
-    on this event, so the row must be visible before it fires — but forcing a
-    commit mid-request to guarantee that also forces a durability barrier inside
-    Meta's webhook request, and frappe v16 disallows commits in doc events.
-    Deferring the emit to the real commit gives the same ordering for free.
+    The client reloads the thread on this event, so the row must be committed
+    before it fires.
+
+    From a doc event (`immediate=False`) that means after_commit: forcing a
+    commit there would put a durability barrier inside Meta's webhook request,
+    and frappe v16 disallows commits in doc events anyway.
+
+    From the ingestion job (`immediate=True`) commit and emit directly. Relying
+    on after_commit there left the agent staring at a thread that never
+    refreshed until they clicked away and back — the emit is registered on
+    frappe.db.after_commit, and in a job that fires only once the worker
+    finishes, which is not a guarantee worth depending on for something the
+    agent watches in real time. A job is not a doc event, so committing here is
+    both legal and cheap.
     """
+    if immediate:
+        # nosemgrep: frappe-manual-commit -- job context, not a doc event; the
+        # client refetches on this event and must not race the write.
+        frappe.db.commit()
     frappe.publish_realtime(
         "helpdesk:whatsapp-message",
         message={"ticket": str(ticket_name), "is_incoming": is_incoming},
-        after_commit=True,
+        after_commit=not immediate,
     )
 
 
@@ -3939,6 +3952,33 @@ def on_whatsapp_message_insert(doc, method=None):
 	)
 
 
+def _announce_incoming(doc, ticket_name, profile_name: str, s) -> None:
+	"""Status, agent notification and realtime for a message already linked.
+
+	Each step is guarded on its own. The link is what matters and is already
+	written by the time this runs; a notification that fails must not cost the
+	agent the ticket. That is not hypothetical — on 2026-08-13 one unguarded
+	notification (an acknowledgement email with no outgoing account configured)
+	threw from a ticket's after_insert, took the insert with it, and stopped new
+	WhatsApp conversations becoming tickets at all.
+
+	Realtime is emitted last and outside the guards' silence: if it fails the
+	agent's thread will not refresh by itself, which is worth an Error Log.
+	"""
+	for step, run in (
+		("status", lambda: s.customer_reply_status and _set_ticket_status(ticket_name, s.customer_reply_status)),
+		("notification", lambda: _notify_fw_agents(ticket_name, doc.message, profile_name)),
+		("realtime", lambda: _publish_fw_message(ticket_name, is_incoming=True, immediate=True)),
+	):
+		try:
+			run()
+		except Exception:
+			frappe.log_error(
+				title=f"WhatsApp ingestion: {step} failed",
+				message=f"Message {doc.name} is linked to ticket {ticket_name}.",
+			)
+
+
 def link_incoming_message(doc, s=None) -> None:
 	"""Resolve the contact and ticket for one inbound message.
 
@@ -4022,10 +4062,7 @@ def link_incoming_message(doc, s=None) -> None:
 	if existing_ticket:
 		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
 		doc.db_set("reference_name", existing_ticket, update_modified=False)
-		if s.customer_reply_status:
-			_set_ticket_status(existing_ticket, s.customer_reply_status)
-		_notify_fw_agents(existing_ticket, doc.message, profile_name)
-		_publish_fw_message(existing_ticket, is_incoming=True)
+		_announce_incoming(doc, existing_ticket, profile_name, s)
 	else:
 		subject = (doc.message or "")[:100] or f"WhatsApp from {profile_name}"
 		ticket_data = {
@@ -4063,8 +4100,7 @@ def link_incoming_message(doc, s=None) -> None:
 
 		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)
 		doc.db_set("reference_name", ticket_doc.name, update_modified=False)
-		_notify_fw_agents(ticket_doc.name, doc.message, profile_name)
-		_publish_fw_message(ticket_doc.name, is_incoming=True)
+		_announce_incoming(doc, ticket_doc.name, profile_name, s)
 
 
 @frappe.whitelist()

@@ -213,3 +213,79 @@ class TestWaIngestSweeper(_SettingsMixin, unittest.TestCase):
 		self.assertNotIn(
 			doc.name, [c.kwargs.get("message_name") for c in enqueued.call_args_list]
 		)
+
+
+class TestWaIngestHardening(_SettingsMixin, unittest.TestCase):
+	"""A message must keep its ticket even when the trimmings fail.
+
+	On 2026-08-13 one unguarded notification threw from HD Ticket.after_insert,
+	took the insert with it, and stopped new WhatsApp conversations becoming
+	tickets — invisibly, because inside the webhook request the rollback erased
+	the message and its Notification Log row too.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		frappe.set_user("Administrator")
+		_cleanup()
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup()
+
+	def tearDown(self):
+		_cleanup()
+
+	def _linked(self, name):
+		return frappe.db.get_value("WhatsApp Message", name, "reference_name")
+
+	def test_ticket_survives_a_failing_agent_notification(self):
+		with patch("frappe.enqueue"):
+			doc = _insert(PREFIX + "notify-boom")
+
+		with patch(
+			"helpdesk.integrations.wa._notify_fw_agents",
+			side_effect=Exception("smtp is down"),
+		):
+			wa_ingest.process_incoming_message(doc.name)
+
+		self.assertTrue(self._linked(doc.name))
+
+	def test_ticket_survives_a_failing_realtime_publish(self):
+		with patch("frappe.enqueue"):
+			doc = _insert(PREFIX + "realtime-boom")
+
+		# Scoped to our publisher: patching frappe.publish_realtime itself breaks
+		# every unrelated doc write in the same call, Contact creation included.
+		with patch(
+			"helpdesk.integrations.wa._publish_fw_message",
+			side_effect=Exception("redis is down"),
+		):
+			wa_ingest.process_incoming_message(doc.name)
+
+		self.assertTrue(self._linked(doc.name))
+
+	def test_ticket_survives_a_failing_bot(self):
+		with patch("frappe.enqueue"):
+			doc = _insert(PREFIX + "bot-boom")
+
+		with patch(
+			"helpdesk.integrations.bot.handle_whatsapp_message",
+			side_effect=Exception("bot exploded"),
+		):
+			wa_ingest.process_incoming_message(doc.name)
+
+		self.assertTrue(self._linked(doc.name))
+
+	def test_incoming_realtime_is_emitted_immediately(self):
+		# after_commit in a job fires only when the worker finishes, which left
+		# the agent's thread stale until they clicked away and back.
+		with patch("frappe.enqueue"):
+			doc = _insert(PREFIX + "realtime-now")
+
+		with patch("helpdesk.integrations.wa.frappe.publish_realtime") as pub:
+			wa_ingest.process_incoming_message(doc.name)
+
+		events = [c for c in pub.call_args_list if c.args and c.args[0] == "helpdesk:whatsapp-message"]
+		self.assertTrue(events)
+		self.assertFalse(events[-1].kwargs.get("after_commit"))
