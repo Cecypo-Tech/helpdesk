@@ -49,8 +49,22 @@ def process_incoming_message(message_name: str) -> None:
 	# bot's own guard requires it. Skipping the bot when linking did not happen
 	# is deliberate — a reply that quotes no ticket is worse than no reply.
 	doc.reload()
-	if doc.reference_doctype == "HD Ticket" and doc.reference_name:
+	if not (doc.reference_doctype == "HD Ticket" and doc.reference_name):
+		return
+
+	# The ticket exists and the message points at it; that is the part that
+	# matters and it is already committed. An automated reply failing must not
+	# undo it — on 2026-08-13 a single unguarded notification (an acknowledgement
+	# email with no outgoing account configured) threw from a ticket's
+	# after_insert and took the whole insert with it, which is how new
+	# conversations stopped becoming tickets at all.
+	try:
 		bot.handle_whatsapp_message(doc)
+	except Exception:
+		frappe.log_error(
+			title="WhatsApp bot dispatch failed",
+			message=f"Message {doc.name} is linked to ticket {doc.reference_name}; the bot did not run.",
+		)
 
 
 def sweep_unlinked_messages() -> dict:
