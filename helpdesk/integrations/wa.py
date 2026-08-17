@@ -110,6 +110,49 @@ def _is_group(jid: str) -> bool:
     return jid.endswith("@g.us")
 
 
+def _latest_incoming_names(jids: list[str]) -> dict[str, str]:
+    """Map each JID to the most recent non-empty name the *customer* sent.
+
+    Only Incoming rows qualify. Outgoing rows carry a sender_name describing
+    our side — the agent's full name, or the literal "(via phone)" for messages
+    mirrored from the line's handset — so falling back to the latest message
+    regardless of direction titles a chat after whoever spoke last.
+
+    Rows with a blank name are skipped rather than treated as the answer: a
+    recent nameless message must not bury a name an earlier one carried.
+    """
+    if not jids:
+        return {}
+    # The inner query collapses to one creation per JID before any row is
+    # returned, so this stays proportional to the page size rather than to the
+    # message history behind it.
+    rows = frappe.db.sql(
+        """
+        SELECT m.jid, m.sender_name, m.profile_name
+        FROM `tabWA Message` m
+        INNER JOIN (
+            SELECT jid, MAX(creation) AS latest
+            FROM `tabWA Message`
+            WHERE direction = 'Incoming'
+              AND jid IN %(jids)s
+              AND (COALESCE(sender_name, '') != '' OR COALESCE(profile_name, '') != '')
+            GROUP BY jid
+        ) newest ON newest.jid = m.jid AND m.creation = newest.latest
+        WHERE m.direction = 'Incoming'
+        """,
+        {"jids": tuple(jids)},
+        as_dict=True,
+    )
+    names: dict[str, str] = {}
+    for row in rows:  # ties on creation are possible — first non-empty wins
+        if row.jid in names:
+            continue
+        candidate = (row.sender_name or row.profile_name or "").strip()
+        if candidate:
+            names[row.jid] = candidate
+    return names
+
+
 def _extract_edit(raw_msg: dict) -> tuple[str, bool, str]:
     """Detect an edited-message payload.
 
@@ -2509,6 +2552,14 @@ def get_wa_conversations(
     # via WA Conversation Read State (per-agent cursor, not a shared flag).
     unread_counts = _unread_counts_for_user(jids, frappe.session.user)
 
+    # Titles fall back to the name the customer sent, never to whoever spoke
+    # last — see _latest_incoming_names. Only chats without a stored name can
+    # use the result, so only those are looked up.
+    incoming_names = _latest_incoming_names([
+        j for j in jids
+        if not _is_group(j) and not (contacts.get(j) or {}).get("custom_name")
+    ])
+
     result = []
     for r in deduped:
         jid = r.jid
@@ -2533,7 +2584,7 @@ def get_wa_conversations(
         else:
             display_name = (
                 contact.get("custom_name")
-                or r.get("sender_name")
+                or incoming_names.get(jid)
                 or (f"+{phone_fallback}" if phone_fallback else "")
                 or jid.split("@")[0]
             )
@@ -2908,15 +2959,12 @@ def get_contact_info_for_jid(jid: str) -> dict:
         as_dict=True,
     ) or {}
     phone = contact.get("phone") or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
-    # Fall back to last message sender_name if no custom_name
+    # Fall back to the most recent name the customer actually sent. Reading the
+    # latest Incoming row directly would let a recent nameless message bury a
+    # name an earlier one carried.
     display_name = contact.get("custom_name") or ""
     if not display_name:
-        display_name = frappe.db.get_value(
-            "WA Message",
-            {"jid": jid, "direction": "Incoming"},
-            "profile_name",
-            order_by="creation desc",
-        ) or jid.split("@")[0]
+        display_name = _latest_incoming_names([jid]).get(jid) or jid.split("@")[0]
     return {
         "display_name": display_name,
         "company": contact.get("company") or "",
