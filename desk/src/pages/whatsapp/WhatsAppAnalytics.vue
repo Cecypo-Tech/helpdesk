@@ -29,7 +29,7 @@
           v-for="p in presets"
           :key="p.label"
           class="rounded-full px-3 py-1 text-xs font-medium transition-colors"
-          :class="activePreset === p.label ? 'text-surface-white' : 'text-ink-gray-6 hover:bg-surface-gray-2'"
+          :class="activePreset === p.label ? 'text-ink-white' : 'text-ink-gray-6 hover:bg-surface-gray-2'"
           :style="activePreset === p.label ? { backgroundColor: 'var(--ink-gray-9)' } : {}"
           @click="applyPreset(p)"
         >{{ p.label }}</button>
@@ -85,7 +85,7 @@
                 class="w-full rounded-t opacity-70 transition-opacity group-hover:opacity-100"
                 :style="{ height: Math.max(2, Math.round((r.total / dailyMax) * 110)) + 'px', backgroundColor: 'var(--ink-gray-8)' }"
               />
-              <div class="absolute -top-6 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] text-surface-white group-hover:block z-10" style="background-color: var(--ink-gray-9)">
+              <div class="absolute -top-6 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] text-ink-white group-hover:block z-10" style="background-color: var(--ink-gray-9)">
                 {{ r.date }}: {{ r.total }}
               </div>
             </div>
@@ -114,7 +114,7 @@
                 :class="r.hour >= 8 && r.hour <= 18 ? 'bg-green-500 opacity-80 group-hover:opacity-100' : 'bg-surface-gray-4 group-hover:bg-surface-gray-5'"
                 :style="{ height: Math.max(2, Math.round((r.total / hourlyMax) * 70)) + 'px' }"
               />
-              <div v-if="r.total" class="absolute -top-6 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] text-surface-white group-hover:block z-10" style="background-color: var(--ink-gray-9)">
+              <div v-if="r.total" class="absolute -top-6 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] text-ink-white group-hover:block z-10" style="background-color: var(--ink-gray-9)">
                 {{ r.hour }}:00 — {{ r.total }}
               </div>
             </div>

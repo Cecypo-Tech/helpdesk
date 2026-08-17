@@ -260,12 +260,29 @@ function syncContacts() {
   }, 480_000);
 }
 
-function onSyncComplete(data: { contacts?: number; groups?: number; error?: string }) {
+function onSyncComplete(data: {
+  contacts?: number;
+  groups?: number;
+  names?: number;
+  names_cooldown?: boolean;
+  error?: string;
+}) {
   syncingContacts.value = false;
   if (data?.error) {
     toast.error(`Sync failed: ${data.error}`);
+  } else if (data?.names_cooldown) {
+    // Live profile lookups are rate-limited. Say so, rather than reporting a
+    // skipped pass as "no names found" — that reads as a broken button.
+    toast.info("Chats synced. Name lookup is cooling down — try again in a few minutes");
   } else {
-    toast.success(`Synced ${data?.contacts ?? 0} contact(s) and ${data?.groups ?? 0} group(s)`);
+    // Lead with names resolved: the contact/group row counts stop moving once
+    // every chat has been seen once, which made this button look like a no-op.
+    const names = data?.names ?? 0;
+    toast.success(
+      names
+        ? `Resolved ${names} contact name(s)`
+        : `Synced ${data?.contacts ?? 0} contact(s) and ${data?.groups ?? 0} group(s) — no new names found`
+    );
   }
   reloadList();
 }
