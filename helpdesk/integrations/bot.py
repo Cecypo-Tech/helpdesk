@@ -191,6 +191,7 @@ def _record_gap(
 				"query_text": query_text,
 				"suggested_title": suggested_title,
 				"suggested_category": suggested_category,
+				"product": entitlement.resolve_product_for_ticket(ticket_name),
 				"status": "Pending",
 			}
 		).insert(ignore_permissions=True)

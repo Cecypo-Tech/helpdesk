@@ -181,7 +181,17 @@ fixtures = [
     {
         "doctype": "Custom Field",
         "filters": [
-            ["dt", "in", ["HD Ticket", "Customer", "HD Task", "HD Article"]],
+            [
+                "dt",
+                "in",
+                [
+                    "HD Ticket",
+                    "Customer",
+                    "HD Task",
+                    "HD Article",
+                    "HD Bot Missing KB Query",
+                ],
+            ],
             [
                 "fieldname",
                 "in",
@@ -192,6 +202,7 @@ fixtures = [
                     "hd_product",
                     "support_status",
                     "products",
+                    "product",
                 ],
             ],
         ],
