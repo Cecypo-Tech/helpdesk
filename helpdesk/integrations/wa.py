@@ -1,6 +1,7 @@
 # helpdesk/integrations/wa.py
 import json
 import re
+import time as _time
 from urllib.parse import quote as _urlquote
 
 import frappe
@@ -33,6 +34,18 @@ _evo_session: _requests.Session = _build_evo_session()
 # Redis lock keys for long-running sync operations.
 _LOCK_SYNC_GROUPS = "wa:sync_groups:lock"
 _LOCK_SYNC_MESSAGES_PREFIX = "wa:sync_old_messages:lock:"
+_LOCK_SYNC_EVO_CONTACTS = "wa:sync_evo_contacts:lock"
+
+# Ceiling on chat/fetchProfile calls per WA Line per sync run. Each call is a
+# live WhatsApp profile lookup, and bulk lookups are what anti-scraping
+# heuristics watch for — so the backlog drains over successive runs instead of
+# in one burst. Only numbers already in our WA Message history are ever queried.
+_PROFILE_LOOKUP_LIMIT = 200
+# Spacing between consecutive fetchProfile calls, for the same reason.
+_PROFILE_LOOKUP_DELAY = 0.3
+# How long after a run live profile lookups stay on cooldown. Surfaced to the
+# operator rather than silently returning "no names found".
+_PROFILE_COOLDOWN_SEC = 300
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +89,21 @@ def _normalize_phone(number: str) -> str:
 
 def _phone_from_jid(jid: str) -> str:
     return _normalize_phone(jid.split("@")[0])
+
+
+def _is_placeholder_name(name: str) -> bool:
+    """True when a contact name carries no information beyond the phone number.
+
+    WhatsApp sends the raw number as pushName when the sender has never set a
+    profile name, so a WA Contact can look "named" while telling an agent
+    nothing. Rows matching this are treated as blank by every enrichment pass —
+    which is also what protects an agent's manually typed name from being
+    overwritten, since a real name never matches.
+    """
+    stripped = (name or "").strip()
+    if not stripped:
+        return True
+    return bool(re.fullmatch(r"[\d\s\+\-\(\)]+", stripped))
 
 
 def _is_group(jid: str) -> bool:
@@ -4622,6 +4650,14 @@ def _run_wa_sync_job() -> None:
 			message={
 				"contacts": contact_result.get("total", 0),
 				"groups": group_result.get("total", 0),
+				# Names actually resolved this run. The row count above barely
+				# moves once every contact has been seen once, which is what
+				# made the sync button look broken.
+				"names": (
+					contact_result.get("enriched", 0)
+					+ contact_result.get("from_evolution", 0)
+				),
+				"names_cooldown": contact_result.get("names_cooldown", False),
 			},
 		)
 	except Exception as exc:
@@ -4679,9 +4715,8 @@ def _enrich_wa_contacts_from_frappe_contacts() -> int:
 		frappe_name = contact_map.get(norm)
 		if not frappe_name:
 			continue
-		existing = wa.custom_name or ""
 		# Skip if already has a real name (not just digits/plus/spaces)
-		if existing and not re.fullmatch(r"[\d\s\+\-\(\)]+", existing):
+		if not _is_placeholder_name(wa.custom_name):
 			continue
 		frappe.db.set_value("WA Contact", wa.name, "custom_name", frappe_name, update_modified=False)
 		enriched += 1
@@ -4689,6 +4724,218 @@ def _enrich_wa_contacts_from_frappe_contacts() -> int:
 	if enriched:
 		frappe.db.commit()
 	return enriched
+
+
+def _contact_name_row(jid: str) -> dict | None:
+	"""Return the WA Contact row that owns the display name for this JID.
+
+	Follows canonical_jid so a @lid alias resolves to the PN row that actually
+	renders in the UI — writing the name onto the alias would leave the chat
+	title unchanged.
+	"""
+	row = frappe.db.get_value(
+		"WA Contact", {"jid": jid}, ["name", "custom_name", "canonical_jid"], as_dict=True
+	)
+	if row and row.get("canonical_jid"):
+		canon = frappe.db.get_value(
+			"WA Contact", {"jid": row["canonical_jid"]}, ["name", "custom_name"], as_dict=True
+		)
+		if canon:
+			return canon
+	return row
+
+
+def _apply_resolved_name(jid: str, phone: str, name: str) -> bool:
+	"""Store a name resolved from Evolution, replacing only placeholder names.
+
+	Returns True when the stored name actually changed. Row creation and
+	@lid → PN merging are delegated to _upsert_contact so these passes cannot
+	introduce the duplicate rows that merge exists to prevent.
+	"""
+	if not jid or _is_placeholder_name(name):
+		return False
+	row = _contact_name_row(jid)
+	if row and not _is_placeholder_name(row.get("custom_name")):
+		return False  # a real name is already there — never overwrite an agent's
+	if not row:
+		_upsert_contact(jid, phone, name)
+		row = _contact_name_row(jid)
+		if not row:
+			return False
+	if (row.get("custom_name") or "") == name:
+		return True
+	frappe.db.set_value("WA Contact", row["name"], "custom_name", name, update_modified=False)
+	return True
+
+
+def _evo_contact_entries(line_doc) -> list[dict]:
+	"""Fetch Evolution's whole contact store for one line via chat/findContacts.
+
+	Evolution has shipped both an empty body and a {"where": {}} filter depending
+	on version, and wraps the list in several different envelopes, so both bodies
+	are tried and every known envelope is unwrapped. Returns [] on any failure —
+	this is a best-effort bulk pass and the profile pass still runs after it.
+	"""
+	for body in ({}, {"where": {}}):
+		try:
+			resp = _evo_session.post(
+				_url("chat/findContacts", line_doc.instance_name),
+				headers=_headers(line_doc),
+				json=body,
+				timeout=30,
+			)
+			if not resp.ok:
+				continue
+			data = resp.json()
+		except Exception as e:
+			frappe.logger().warning(f"findContacts {line_doc.instance_name}: {e}")
+			continue
+
+		if isinstance(data, dict):
+			for key in ("contacts", "records", "data"):
+				if isinstance(data.get(key), list):
+					data = data[key]
+					break
+		if isinstance(data, list):
+			return [d for d in data if isinstance(d, dict)]
+	return []
+
+
+def _sync_contacts_from_evolution_store(line_doc) -> int:
+	"""Blank-fill contact names from Evolution's contact store. Returns names written.
+
+	One request covers the whole store, which makes this the cheap pass. Its real
+	value is that every name it fills is one fewer per-number fetchProfile
+	lookup the next pass has to make.
+	"""
+	own_jid = getattr(line_doc, "connected_user", "") or ""
+	filled = 0
+	for entry in _evo_contact_entries(line_doc):
+		jid = entry.get("id") or entry.get("remoteJid") or ""
+		if not jid or jid == own_jid or _is_group(jid) or "@broadcast" in jid:
+			continue
+		# A saved or verified name beats a self-declared pushName.
+		name = ""
+		for key in ("name", "verifiedName", "pushName", "notify"):
+			candidate = (entry.get(key) or "").strip()
+			if candidate and not _is_placeholder_name(candidate):
+				name = candidate
+				break
+		if not name:
+			continue
+		phone = _phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else ""
+		if _apply_resolved_name(jid, phone, name):
+			filled += 1
+	if filled:
+		frappe.db.commit()
+	return filled
+
+
+def _resolve_wa_names_via_profile(line_doc, limit: int = _PROFILE_LOOKUP_LIMIT) -> int:
+	"""Resolve still-unnamed contacts for one line via chat/fetchProfile.
+
+	This is the pass that actually produces names for WhatsApp Business accounts:
+	their verified profile name never appears in pushName, because the customer
+	never sends one, so no amount of message history will ever surface it.
+
+	Candidates are restricted to numbers already present in our WA Message
+	history for this line — existing conversations, never a cold list. That
+	distinction is what keeps a bulk profile lookup from reading as scraping.
+	The SQL predicate only narrows the candidate set; _apply_resolved_name
+	re-checks with _is_placeholder_name before writing anything.
+	"""
+	rows = frappe.db.sql(
+		"""
+		SELECT c.name AS row_name, c.jid, c.phone, MAX(m.creation) AS last_seen
+		FROM `tabWA Contact` c
+		INNER JOIN `tabWA Message` m ON m.jid = c.jid AND m.line = %(line)s
+		WHERE c.phone IS NOT NULL AND c.phone != ''
+		  AND (c.custom_name IS NULL OR c.custom_name = ''
+		       OR c.custom_name REGEXP '^[0-9 +()-]+$')
+		  AND c.jid NOT LIKE '%%@g.us'
+		  AND c.jid NOT LIKE '%%@broadcast'
+		GROUP BY c.name, c.jid, c.phone
+		ORDER BY last_seen DESC
+		LIMIT %(limit)s
+		""",
+		{"line": line_doc.name, "limit": limit + 1},
+		as_dict=True,
+	)
+	truncated = len(rows) > limit
+	rows = rows[:limit]
+	if truncated:
+		frappe.logger().warning(
+			f"fetchProfile: {line_doc.instance_name} has more than {limit} unnamed "
+			f"contacts — resolving the {limit} most recently active this run, "
+			f"remainder on the next run"
+		)
+
+	resolved = 0
+	for idx, row in enumerate(rows):
+		if idx:
+			_time.sleep(_PROFILE_LOOKUP_DELAY)
+		try:
+			resp = _evo_session.post(
+				_url("chat/fetchProfile", line_doc.instance_name),
+				headers=_headers(line_doc),
+				json={"number": row.phone},
+				timeout=20,
+			)
+			if not resp.ok:
+				continue
+			profile = resp.json()
+		except Exception as e:
+			frappe.logger().warning(f"fetchProfile {line_doc.instance_name}: {e}")
+			continue
+
+		if not isinstance(profile, dict) or profile.get("numberExists") is False:
+			continue
+		name = (
+			profile.get("name")
+			or profile.get("verifiedName")
+			or profile.get("pushName")
+			or ""
+		).strip()
+		# An existing number with no name is a genuinely nameless contact —
+		# not a failure, and no API will fix it. Leave the number showing.
+		if not name:
+			continue
+		if _apply_resolved_name(row.jid, row.phone, name):
+			resolved += 1
+
+	if resolved:
+		frappe.db.commit()
+	return resolved
+
+
+def sync_wa_contact_names_from_evolution(limit: int = _PROFILE_LOOKUP_LIMIT) -> dict:
+	"""Ask Evolution for names our local message history never carried.
+
+	Runs the cheap bulk store pass first, then the per-number profile pass for
+	whatever is still unnamed. A per-line try/except keeps one unreachable
+	instance from aborting the whole run.
+
+	Returns {"resolved": int, "cooldown": bool}. The cooldown flag matters: the
+	lock doubles as a rate-limit cooldown on live profile lookups, so a second
+	press inside the window does no work. Reporting that as "0 names found"
+	would read as a broken button, so the caller surfaces it distinctly.
+	"""
+	settings = _settings()
+	if not settings.enabled or not settings.server_url:
+		return {"resolved": 0, "cooldown": False}
+	if frappe.cache().get_value(_LOCK_SYNC_EVO_CONTACTS):
+		return {"resolved": 0, "cooldown": True}
+	frappe.cache().set_value(_LOCK_SYNC_EVO_CONTACTS, 1, expires_in_sec=_PROFILE_COOLDOWN_SEC)
+
+	resolved = 0
+	for line_name in frappe.get_all("WA Line", pluck="name"):
+		try:
+			line_doc = frappe.get_doc("WA Line", line_name)
+			resolved += _sync_contacts_from_evolution_store(line_doc)
+			resolved += _resolve_wa_names_via_profile(line_doc, limit=limit)
+		except Exception as e:
+			frappe.logger().warning(f"contact name sync failed for {line_name}: {e}")
+	return {"resolved": resolved, "cooldown": False}
 
 
 @frappe.whitelist()
@@ -4708,9 +4955,6 @@ def sync_wa_contacts() -> dict:
 		""",
 		as_dict=True,
 	)
-	if not rows:
-		return {"created": 0, "updated": 0, "total": 0}
-
 	values = []
 	for row in rows:
 		jid = row.sender_jid
@@ -4721,24 +4965,38 @@ def sync_wa_contacts() -> dict:
 		doc_name = frappe.generate_hash(length=10)
 		values.append((doc_name, jid, phone, name))
 
-	placeholders = ", ".join(["(%s, %s, %s, %s, '', '')" for _ in values])
-	flat_values = tuple(item for v in values for item in v)
-	frappe.db.sql(
-		"""
-		INSERT INTO `tabWA Contact` (name, jid, phone, custom_name, company, assigned_team)
-		VALUES {placeholders}
-		ON DUPLICATE KEY UPDATE
-		    custom_name = IF(custom_name IS NULL OR custom_name = '', VALUES(custom_name), custom_name),
-		    phone       = IF(phone IS NULL OR phone = '', VALUES(phone), phone)
-		""".format(placeholders=placeholders),
-		flat_values,
-	)
-	frappe.db.commit()
+	# Guard the empty case: every row can be an @lid without a resolvable phone,
+	# which would otherwise build "VALUES " and raise a SQL syntax error.
+	if values:
+		placeholders = ", ".join(["(%s, %s, %s, %s, '', '')" for _ in values])
+		flat_values = tuple(item for v in values for item in v)
+		frappe.db.sql(
+			"""
+			INSERT INTO `tabWA Contact` (name, jid, phone, custom_name, company, assigned_team)
+			VALUES {placeholders}
+			ON DUPLICATE KEY UPDATE
+			    custom_name = IF(custom_name IS NULL OR custom_name = '', VALUES(custom_name), custom_name),
+			    phone       = IF(phone IS NULL OR phone = '', VALUES(phone), phone)
+			""".format(placeholders=placeholders),
+			flat_values,
+		)
+		frappe.db.commit()
 
 	# Enrich custom_name from Frappe Contact where we have a phone match and custom_name is still blank/pushName
 	enriched = _enrich_wa_contacts_from_frappe_contacts()
 
-	return {"created": len(values), "updated": 0, "total": len(values), "enriched": enriched}
+	# Last resort: ask Evolution for names our local message history never carried.
+	# Runs after the Frappe Contact pass so the curated CRM name always wins.
+	evo = sync_wa_contact_names_from_evolution()
+
+	return {
+		"created": len(values),
+		"updated": 0,
+		"total": len(values),
+		"enriched": enriched,
+		"from_evolution": evo.get("resolved", 0),
+		"names_cooldown": evo.get("cooldown", False),
+	}
 
 
 @frappe.whitelist()
