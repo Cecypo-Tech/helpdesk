@@ -59,3 +59,4 @@ helpdesk.patches.drop_wa_bot_session_table
 helpdesk.patches.add_whatsapp_message_id_index
 helpdesk.patches.add_hd_customer_product_unique_index
 helpdesk.patches.add_hd_ticket_product_fields
+helpdesk.patches.add_hd_article_products_field

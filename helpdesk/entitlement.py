@@ -105,3 +105,62 @@ def resolve_product_for_ticket(ticket: str | None) -> str | None:
 	if len(entitlements) == 1:
 		return entitlements[0]["product"]
 	return None
+
+
+def products_for_articles(article_names: list[str]) -> dict[str, list[str]]:
+	"""Map each article name to the products it is tagged with.
+
+	Articles absent from the result, or present with an empty list, carry no
+	tags and are generic.
+
+	Wrapped in try/except because `products` is a Custom Field: on a site that
+	has not migrated since the fixtures landed the child table does not exist.
+	Returning {} there makes every article generic, which keeps the bot
+	answering rather than silently muting it.
+	"""
+	if not article_names:
+		return {}
+
+	try:
+		rows = frappe.get_all(
+			"HD Article Product",
+			filters={"parent": ["in", article_names], "parenttype": "HD Article"},
+			fields=["parent", "product"],
+		)
+	except Exception:
+		return {}
+
+	mapped: dict[str, list[str]] = {}
+	for row in rows:
+		mapped.setdefault(row["parent"], []).append(row["product"])
+	return mapped
+
+
+def filter_articles_for_product(rows: list[dict], product: str | None) -> list[dict]:
+	"""Drop articles tagged for other products. Untagged articles always pass.
+
+	Untagged-means-generic is deliberate: it makes the safe state the default,
+	so a newly written article is visible everywhere until somebody narrows it,
+	rather than invisible until somebody remembers to tag it.
+
+	Rows with no `name` are Outline results that never synced to an HD Article.
+	They pass through rather than being dropped — we have no tags for them, and
+	silently discarding them would shrink the bot's knowledge for no stated
+	reason.
+	"""
+	if not product or not rows:
+		return rows
+
+	names = [r["name"] for r in rows if r.get("name")]
+	tags = products_for_articles(names)
+
+	kept = []
+	for row in rows:
+		name = row.get("name")
+		if not name:
+			kept.append(row)
+			continue
+		article_products = tags.get(name) or []
+		if not article_products or product in article_products:
+			kept.append(row)
+	return kept
