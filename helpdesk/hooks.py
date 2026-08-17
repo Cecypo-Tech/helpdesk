@@ -109,6 +109,9 @@ doc_events = {
     "WA Message": {
         "after_insert": "helpdesk.integrations.bot.handle_wa_message",
     },
+    "HD Ticket": {
+        "before_save": "helpdesk.overrides.ticket_product.stamp_support_status",
+    },
     "HD Article": {
         "on_update": "helpdesk.integrations.embeddings.on_article_update",
     },
