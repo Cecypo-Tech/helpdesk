@@ -30,6 +30,34 @@ ticket was raised.
 Explicitly **advisory**: nothing here refuses service. This follows the same
 principle settled for account standing — flag and route, never block.
 
+### Standing invariant: WhatsApp support works with no ERPNext
+
+Helpdesk and ERPNext run on **separate benches**. Production helpdesk has no
+`erpnext` app, and that must never change. This applies to every sub-project, not
+just E.
+
+The risk is not hypothetical. `hooks.py:125-136` wires doc_events for
+`User Permission` and `DocShare` — core Frappe doctypes present on every site —
+to handlers in `helpdesk.integrations.erpnext`, and `ALLOWED_DOCTYPES` includes
+`HD Customer`, which also exists without ERPNext. Those hooks fire on a
+helpdesk-only site and enter the mirror path.
+
+They are correctly guarded today: every path funnels through `should_sync()`
+(`integrations/erpnext/utils.py:16`), which returns `False` when `erpnext` is
+absent from the installed-app list. `HD Customer.erpnext_customer` is a plain
+`Data` field, not a Link, so there is no foreign key to a missing doctype.
+
+Verified by `helpdesk/integrations/tests/test_no_erpnext.py`. Because this bench
+*has* erpnext installed, the guarantee is proved in two halves: that the guard
+detects the missing app, and that with sync inactive the full WhatsApp ingestion
+path — ticket creation, contact creation, idempotency — still works. Patching
+`frappe.get_installed_apps` globally is not a viable simulation; Frappe's own hook
+resolution calls it and raises `AppNotInstalledError` for an app the site
+genuinely has.
+
+**Every sub-project must keep that test passing**, and any new ERPNext-touching
+code must sit behind the same guard.
+
 ## Design
 
 ### Data model
