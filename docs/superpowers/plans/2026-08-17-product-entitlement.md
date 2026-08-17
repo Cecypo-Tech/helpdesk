@@ -4,7 +4,7 @@
 
 **Goal:** Record what each customer bought, show it on the ticket, scope the bot's knowledge base to it, and freeze whether support was in contract when the ticket was raised.
 
-**Architecture:** Four new doctypes (a flat `HD Product` catalogue, its KB-category child table, a standalone `HD Customer Product` entitlement row, and an `HD Article Product` tag table), four custom fields added via fixtures, one pure-logic module `helpdesk/entitlement.py` that every consumer calls, a `before_save` doc_event that stamps status once, and a two-stage narrowing of the bot's knowledge-base search — category ceiling first, then per-article product tags.
+**Architecture:** Three new doctypes (a flat `HD Product` catalogue, a standalone `HD Customer Product` entitlement row, and an `HD Article Product` tag table), four custom fields added via fixtures, one pure-logic module `helpdesk/entitlement.py` that every consumer calls, a `before_save` doc_event that stamps status once, and a per-article product filter applied to the bot's knowledge-base search inside the existing category allowlist.
 
 **Tech Stack:** Frappe v16, MariaDB, Vue 3 + frappe-ui (desk frontend), Python `unittest` via `bench run-tests`.
 
@@ -23,20 +23,19 @@
 
 ---
 
-### Task 1: `HD Product` catalogue and its category child table
+### Task 1: `HD Product` catalogue
 
 **Files:**
 - Create: `helpdesk/helpdesk/doctype/hd_product/__init__.py`
 - Create: `helpdesk/helpdesk/doctype/hd_product/hd_product.json`
 - Create: `helpdesk/helpdesk/doctype/hd_product/hd_product.py`
-- Create: `helpdesk/helpdesk/doctype/hd_product_article_category/__init__.py`
-- Create: `helpdesk/helpdesk/doctype/hd_product_article_category/hd_product_article_category.json`
-- Create: `helpdesk/helpdesk/doctype/hd_product_article_category/hd_product_article_category.py`
 - Test: `helpdesk/tests/test_product_catalogue.py`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: doctype `HD Product` (named by `product_name`) with fields `product_name`, `description`, `disabled`, `default_team`, and child table `article_categories` of `HD Product Article Category` rows each holding `category` → `HD Article Category`.
+- Produces: doctype `HD Product` (named by `product_name`) with fields `product_name`, `description`, `disabled`, `default_team`.
+
+Article→product linkage is done with tags on the article (Task 6), not with a category mapping here. `HD Article.category` is a single Link, so a category can never express "this article covers POS and eTIMS but not TIMS"; and the categories actually in use (`Customers`, `Internal Docs`, `Public Access`, `General`, `Licenses`) are audience- and topic-shaped, so such a mapping would ship empty.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -89,19 +88,6 @@ class TestProductCatalogue(unittest.TestCase):
                 "product_name": PREFIX + "POS",
             }).insert(ignore_permissions=True)
 
-    def test_product_carries_article_categories(self):
-        category = frappe.get_all("HD Article Category", limit=1, pluck="name")
-        if not category:
-            self.skipTest("no HD Article Category on this site")
-        doc = frappe.get_doc({
-            "doctype": "HD Product",
-            "product_name": PREFIX + "TIMS",
-            "article_categories": [{"category": category[0]}],
-        }).insert(ignore_permissions=True)
-        doc.reload()
-        self.assertEqual(len(doc.article_categories), 1)
-        self.assertEqual(doc.article_categories[0].category, category[0])
-
     def test_disabled_defaults_to_zero(self):
         doc = frappe.get_doc({
             "doctype": "HD Product",
@@ -116,56 +102,7 @@ Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app
 
 Expected: FAIL — `DoesNotExistError: DocType HD Product not found`.
 
-- [ ] **Step 3: Create the child doctype**
-
-`helpdesk/helpdesk/doctype/hd_product_article_category/__init__.py` — empty file.
-
-`helpdesk/helpdesk/doctype/hd_product_article_category/hd_product_article_category.json`:
-
-```json
-{
- "actions": [],
- "allow_rename": 1,
- "creation": "2026-08-17 12:00:00.000000",
- "doctype": "DocType",
- "editable_grid": 1,
- "engine": "InnoDB",
- "field_order": ["category"],
- "fields": [
-  {
-   "fieldname": "category",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Category",
-   "options": "HD Article Category",
-   "reqd": 1
-  }
- ],
- "istable": 1,
- "links": [],
- "modified": "2026-08-17 12:00:00.000000",
- "modified_by": "Administrator",
- "module": "Helpdesk",
- "name": "HD Product Article Category",
- "owner": "Administrator",
- "permissions": [],
- "sort_field": "modified",
- "sort_order": "DESC",
- "states": []
-}
-```
-
-`helpdesk/helpdesk/doctype/hd_product_article_category/hd_product_article_category.py`:
-
-```python
-from frappe.model.document import Document
-
-
-class HDProductArticleCategory(Document):
-    pass
-```
-
-- [ ] **Step 4: Create the parent doctype**
+- [ ] **Step 3: Create the doctype**
 
 `helpdesk/helpdesk/doctype/hd_product/__init__.py` — empty file.
 
@@ -184,9 +121,7 @@ class HDProductArticleCategory(Document):
   "description",
   "col_break_1",
   "disabled",
-  "default_team",
-  "section_kb",
-  "article_categories"
+  "default_team"
  ],
  "fields": [
   {
@@ -218,18 +153,6 @@ class HDProductArticleCategory(Document):
    "fieldtype": "Link",
    "label": "Default Team",
    "options": "HD Team"
-  },
-  {
-   "fieldname": "section_kb",
-   "fieldtype": "Section Break",
-   "label": "Knowledge Base"
-  },
-  {
-   "description": "Article categories covering this product. Used to scope bot answers.",
-   "fieldname": "article_categories",
-   "fieldtype": "Table",
-   "label": "Article Categories",
-   "options": "HD Product Article Category"
   }
  ],
  "links": [],
@@ -259,7 +182,7 @@ class HDProduct(Document):
     pass
 ```
 
-- [ ] **Step 5: Apply the schema and run the tests**
+- [ ] **Step 4: Apply the schema and run the tests**
 
 Run:
 ```bash
@@ -268,20 +191,25 @@ bench --site dev.localhost migrate
 bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_product_catalogue
 ```
 
-Expected: PASS, 4 tests.
+Expected: PASS, 3 tests.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add helpdesk/helpdesk/doctype/hd_product helpdesk/helpdesk/doctype/hd_product_article_category helpdesk/tests/test_product_catalogue.py
+git add helpdesk/helpdesk/doctype/hd_product helpdesk/tests/test_product_catalogue.py
 git commit -m "feat(product): add the HD Product catalogue
 
 Flat, 5-15 rows, named by product_name so links read as \"eTIMS\" rather
-than a hash. article_categories maps a product to the KB categories that
-answer questions about it; the bot uses that mapping in a later task.
+than a hash.
+
+Articles are linked to products by tags on the article, not by a category
+mapping here. HD Article.category is a single Link, so a category can
+never express \"covers POS and eTIMS but not TIMS\", and the categories in
+use are audience- and topic-shaped, so a mapping would ship empty.
 
 default_team is a routing hint only. Nothing routes automatically: an
-outage at an out-of-contract customer must not be diverted to a sales desk."
+outage at an out-of-contract customer must not be diverted to a sales
+desk."
 ```
 
 ---
@@ -820,8 +748,6 @@ keep."
   - `get_entitlements(customer: str) -> list[dict]` — each `{"product", "support_expiry", "source", "expired"}`
   - `get_entitlement(customer: str, product: str) -> dict | None`
   - `compute_support_status(customer: str | None, product: str | None) -> str` — one of `Covered`, `Expired`, `Not Entitled`, `Unknown`
-  - `categories_for_product(product: str) -> list[str]` — explicit rows ∪ name match
-  - `unclaimed_categories() -> list[str]`
   - `resolve_product_for_ticket(ticket: str) -> str | None`
 
 - [ ] **Step 1: Write the failing test**
@@ -944,101 +870,6 @@ class TestGetEntitlements(_Base):
     def test_no_customer_returns_empty(self):
         self.assertEqual(entitlement.get_entitlements(None), [])
         self.assertEqual(entitlement.get_entitlements(""), [])
-
-
-class TestCategoriesForProduct(_Base):
-    def category(self, label):
-        doc = frappe.get_doc({
-            "doctype": "HD Article Category", "category_name": label
-        }).insert(ignore_permissions=True)
-        frappe.db.commit()
-        self.addCleanup(
-            frappe.delete_doc, "HD Article Category", doc.name, force=True,
-            ignore_permissions=True
-        )
-        return doc.name
-
-    def test_product_without_categories_returns_empty(self):
-        self.assertEqual(entitlement.categories_for_product(PRODUCT_A), [])
-
-    def test_returns_explicitly_mapped_categories(self):
-        cat = self.category(PREFIX + "explicit")
-        doc = frappe.get_doc("HD Product", PRODUCT_A)
-        doc.append("article_categories", {"category": cat})
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        self.assertEqual(entitlement.categories_for_product(PRODUCT_A), [cat])
-
-    def test_category_named_after_the_product_links_automatically(self):
-        cat = self.category(PRODUCT_A)
-        self.assertIn(cat, entitlement.categories_for_product(PRODUCT_A))
-
-    def test_name_match_is_case_insensitive(self):
-        """sync_outline_docs title-cases collection names, so a collection
-        "eTIMS" becomes a category "Etims". An exact match would silently never
-        fire."""
-        product = frappe.get_doc({
-            "doctype": "HD Product", "product_name": PREFIX + "eTIMS"
-        }).insert(ignore_permissions=True)
-        frappe.db.commit()
-        self.addCleanup(
-            frappe.delete_doc, "HD Product", product.name, force=True,
-            ignore_permissions=True
-        )
-        cat = self.category((PREFIX + "eTIMS").title())
-        self.assertIn(cat, entitlement.categories_for_product(product.name))
-
-    def test_explicit_and_named_are_merged_without_duplicates(self):
-        cat_named = self.category(PRODUCT_A)
-        cat_extra = self.category(PREFIX + "extra")
-        doc = frappe.get_doc("HD Product", PRODUCT_A)
-        doc.append("article_categories", {"category": cat_named})
-        doc.append("article_categories", {"category": cat_extra})
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-
-        out = entitlement.categories_for_product(PRODUCT_A)
-        self.assertEqual(sorted(out), sorted([cat_named, cat_extra]))
-        self.assertEqual(len(out), len(set(out)), "no duplicates")
-
-    def test_blank_product_returns_empty(self):
-        self.assertEqual(entitlement.categories_for_product(None), [])
-
-
-class TestUnclaimedCategories(_Base):
-    def category(self, label):
-        doc = frappe.get_doc({
-            "doctype": "HD Article Category", "category_name": label
-        }).insert(ignore_permissions=True)
-        frappe.db.commit()
-        self.addCleanup(
-            frappe.delete_doc, "HD Article Category", doc.name, force=True,
-            ignore_permissions=True
-        )
-        return doc.name
-
-    def test_a_category_no_product_claims_is_unclaimed(self):
-        cat = self.category(PREFIX + "General")
-        self.assertIn(cat, entitlement.unclaimed_categories())
-
-    def test_an_explicitly_mapped_category_is_claimed(self):
-        cat = self.category(PREFIX + "Mapped")
-        doc = frappe.get_doc("HD Product", PRODUCT_A)
-        doc.append("article_categories", {"category": cat})
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        self.assertNotIn(cat, entitlement.unclaimed_categories())
-
-    def test_a_category_named_after_a_product_is_claimed(self):
-        cat = self.category(PRODUCT_A)
-        self.assertNotIn(cat, entitlement.unclaimed_categories())
-
-    def test_a_category_claimed_by_one_product_is_hidden_from_others(self):
-        """The whole point: PRODUCT_A's category must not be generic."""
-        cat = self.category(PRODUCT_A)
-        self.assertIn(cat, entitlement.categories_for_product(PRODUCT_A))
-        self.assertNotIn(cat, entitlement.categories_for_product(PRODUCT_B))
-        self.assertNotIn(cat, entitlement.unclaimed_categories())
 
 
 class TestResolveProductForTicket(_Base):
@@ -1166,78 +997,6 @@ def compute_support_status(customer: str | None, product: str | None) -> str:
 	return STATUS_EXPIRED if row["expired"] else STATUS_COVERED
 
 
-def categories_for_product(product: str | None) -> list[str]:
-	"""HD Article Categories that answer questions about this product.
-
-	Two sources, unioned: the explicit article_categories rows, and any category
-	whose name matches the product's, compared case-insensitively. Name a
-	collection after a product and the link exists with nothing to configure.
-
-	The case-insensitivity is load-bearing, not cosmetic. sync_outline_docs()
-	builds each category with _get_or_create_category(col_name.title()), so an
-	Outline collection named "eTIMS" becomes a category named "Etims" and "POS"
-	becomes "Pos". An exact match would silently never fire — no error, just
-	scoping that quietly never engages.
-	"""
-	if not product:
-		return []
-
-	explicit = frappe.get_all(
-		"HD Product Article Category",
-		filters={"parent": product, "parenttype": "HD Product"},
-		pluck="category",
-		order_by="idx asc",
-	)
-
-	target = product.strip().lower()
-	named = [
-		row["name"]
-		for row in frappe.get_all("HD Article Category", fields=["name", "category_name"])
-		if (row.get("category_name") or row["name"] or "").strip().lower() == target
-	]
-
-	merged = list(explicit)
-	for name in named:
-		if name not in merged:
-			merged.append(name)
-	return merged
-
-
-def unclaimed_categories() -> list[str]:
-	"""Categories no product lays claim to, explicitly or by name.
-
-	These are generic: visible to every product. Without this, a product listing
-	only ["Pos"] would hide General, Getting Started and Billing from that
-	product's customers, and the only remedy would be listing every shared
-	category on every product — which fails silently the first time somebody
-	adds a product and forgets.
-
-	It also makes rollout safe: with nothing claimed, every category is
-	unclaimed, so stage 1 restricts nothing and the bot behaves exactly as
-	before.
-
-	Comparison is case-insensitive for the same .title() reason as above.
-	"""
-	all_categories = frappe.get_all("HD Article Category", fields=["name", "category_name"])
-	if not all_categories:
-		return []
-
-	claimed = set(
-		frappe.get_all("HD Product Article Category", pluck="category")
-	)
-
-	product_names = {
-		(name or "").strip().lower()
-		for name in frappe.get_all("HD Product", filters={"disabled": 0}, pluck="name")
-	}
-	for row in all_categories:
-		label = (row.get("category_name") or row["name"] or "").strip().lower()
-		if label in product_names:
-			claimed.add(row["name"])
-
-	return [row["name"] for row in all_categories if row["name"] not in claimed]
-
-
 def resolve_product_for_ticket(ticket: str | None) -> str | None:
 	"""Which product a ticket is about.
 
@@ -1275,7 +1034,7 @@ def resolve_product_for_ticket(ticket: str | None) -> str | None:
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_entitlement_logic`
 
-Expected: PASS, 28 tests.
+Expected: PASS, 19 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1295,6 +1054,10 @@ that the customer does not hold the product.
 resolve_product_for_ticket infers the product when a customer holds exactly
 one, so a single-product customer gets scoped answers before an agent tags
 anything. With two or more it returns None rather than guessing.
+
+There is no category-to-product mapping here. Article linkage is done with
+tags on the article; HD Article.category is a single Link and cannot carry
+a many-to-many relationship.
 
 The hd_product read is wrapped in try/except: it is a Custom Field, and on
 an unmigrated site the column does not exist."
@@ -2018,22 +1781,21 @@ answering."
 ### Task 7: Scope the bot's knowledge base to the customer's product
 
 **Files:**
-- Modify: `helpdesk/integrations/bot.py` — add `_scoped_categories`, thread `product` through `_search_kb`, `_filter_outline_by_category`, `_combined_kb_search`, and both call sites
+- Modify: `helpdesk/integrations/bot.py` — thread `product` through `_search_kb`, `_filter_outline_by_category`, `_combined_kb_search`, and both call sites
 - Modify: `helpdesk/integrations/embeddings.py:213-259` (`search_articles`)
 - Test: `helpdesk/tests/test_bot_product_scoping.py`
 
 **Interfaces:**
-- Consumes: `entitlement.categories_for_product`, `resolve_product_for_ticket` (Task 4); `entitlement.filter_articles_for_product` (Task 6).
+- Consumes: `entitlement.resolve_product_for_ticket` (Task 4); `entitlement.filter_articles_for_product` (Task 6).
 - Produces:
-  - `bot._scoped_categories(product: str | None) -> list[str]`
   - `bot._search_kb(query, limit, allowed_categories=None, product=None)`
   - `bot._filter_outline_by_category(results, allowed_categories, product=None)`
   - `bot._combined_kb_search(query, limit, product=None)`
   - `embeddings.search_articles(query, top_k=3, allowed_categories=None, product=None)`
 
-**Two stages, applied together.** Stage 1 is the category ceiling — which topics the bot may read at all. Stage 2 is the product tag filter from Task 6 — whether a specific article is for this product. An article must pass both.
+**The existing global allowlist is untouched.** `_get_allowed_categories()` keeps working exactly as it does today and remains the ceiling; the product filter only ever narrows within it. There is no category→product mapping.
 
-**Stage 2 must run before truncation.** Filtering after a search has already cut to `top_k` would let it return three articles, drop two on product, and answer from one — degrading answers in a way that looks like a weak knowledge base rather than a filtering artefact. Both search paths already overfetch or are made to.
+**Filtering must run before truncation.** Applying it after a search has cut to `top_k` would let it return three articles, drop two on product, and answer from one — degrading answers in a way that looks like a weak knowledge base rather than a filtering artefact. `search_articles` already overfetches `top_k * 4` for exactly this reason; the LIKE fallback needs its `LIMIT` widened to match.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2042,108 +1804,49 @@ Create `helpdesk/tests/test_bot_product_scoping.py`:
 ```python
 """The bot answers from articles covering the customer's product.
 
-Stage 1: the global allowlist in Helpdesk Bot Settings is the ceiling — a
-product narrows it, never widens it.
-Stage 2: articles tagged for other products are dropped; untagged articles are
-generic and always survive.
+Articles tagged for other products are dropped; untagged articles are generic
+and always survive. The global allowlist in Helpdesk Bot Settings is unchanged
+and still bounds everything.
 """
 
 import unittest
-import unittest.mock
 from unittest.mock import patch
 
 from helpdesk.integrations import bot
 
 
-class TestScopedCategories(unittest.TestCase):
-    def test_no_product_falls_back_to_the_global_allowlist(self):
-        with patch.object(bot, "_get_allowed_categories", return_value=["a", "b"]):
-            self.assertEqual(bot._scoped_categories(None), ["a", "b"])
-
-    def test_product_narrows_the_global_allowlist(self):
-        with patch.object(bot, "_get_allowed_categories", return_value=["a", "b"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["b", "c"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["b"])
-
-    def test_product_cannot_widen_the_global_allowlist(self):
-        """A product mapped to a category the bot is not allowed to read must
-        not gain access to it."""
+class TestCombinedSearchPassesProduct(unittest.TestCase):
+    def test_product_is_threaded_into_the_search(self):
         with patch.object(bot, "_get_allowed_categories", return_value=["a"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["a", "secret"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["a"])
-
-    def test_unclaimed_categories_stay_visible_to_every_product(self):
-        """General must not vanish for a product that only lists its own
-        category — the failure this rule exists to prevent."""
-        with patch.object(bot, "_get_allowed_categories", return_value=["Pos", "General"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["Pos"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=["General"]):
-            self.assertEqual(bot._scoped_categories("POS"), ["Pos", "General"])
-
-    def test_a_category_claimed_by_another_product_is_excluded(self):
-        with patch.object(bot, "_get_allowed_categories", return_value=["Pos", "Etims", "General"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["Pos"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=["General"]):
-            self.assertEqual(bot._scoped_categories("POS"), ["Pos", "General"])
-
-    def test_empty_result_falls_back_to_the_global_allowlist(self):
-        """Without this the bot searches nothing and goes silent for exactly the
-        customers whose data is incomplete — worse than being slightly
-        off-topic, and it presents as 'the bot is broken'."""
-        with patch.object(bot, "_get_allowed_categories", return_value=["a"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["z"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["a"])
-
-    def test_product_with_no_categories_falls_back(self):
-        with patch.object(bot, "_get_allowed_categories", return_value=["a"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=[]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["a"])
-
-    def test_unrestricted_global_allowlist_is_narrowed_by_product(self):
-        """An empty global allowlist means 'no restriction'. A product should
-        still scope it."""
-        with patch.object(bot, "_get_allowed_categories", return_value=[]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["b"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["b"])
-
-    def test_unrestricted_and_no_product_stays_unrestricted(self):
-        with patch.object(bot, "_get_allowed_categories", return_value=[]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=[]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=[]):
-            self.assertEqual(bot._scoped_categories(None), [])
-
-    def test_nothing_claimed_means_scoping_is_a_no_op(self):
-        """Rollout safety: before any mapping or tagging exists, every category
-        is unclaimed, so the bot behaves exactly as it did before."""
-        with patch.object(bot, "_get_allowed_categories", return_value=["a", "b", "c"]), \
-             patch("helpdesk.entitlement.categories_for_product", return_value=["a"]), \
-             patch("helpdesk.entitlement.unclaimed_categories", return_value=["a", "b", "c"]):
-            self.assertEqual(bot._scoped_categories("eTIMS"), ["a", "b", "c"])
-
-
-class TestCombinedSearchPassesScope(unittest.TestCase):
-    def test_search_uses_the_scoped_categories_and_product(self):
-        with patch.object(bot, "_scoped_categories", return_value=["b"]) as scoped, \
              patch.object(bot, "_search_kb", return_value=[]) as search_kb:
             bot._combined_kb_search("query", 3, product="eTIMS")
 
-        scoped.assert_called_once_with("eTIMS")
-        self.assertEqual(search_kb.call_args.kwargs["allowed_categories"], ["b"])
+        self.assertEqual(search_kb.call_args.kwargs["allowed_categories"], ["a"])
         self.assertEqual(search_kb.call_args.kwargs["product"], "eTIMS")
 
-    def test_search_without_a_product_still_works(self):
-        """Existing callers pass no product; behaviour must not change."""
+    def test_without_a_product_behaviour_is_unchanged(self):
+        """Existing callers pass no product; the allowlist must still apply."""
         with patch.object(bot, "_get_allowed_categories", return_value=["a"]), \
              patch.object(bot, "_search_kb", return_value=[]) as search_kb:
             bot._combined_kb_search("query", 3)
 
         self.assertEqual(search_kb.call_args.kwargs["allowed_categories"], ["a"])
         self.assertIsNone(search_kb.call_args.kwargs["product"])
+
+    def test_product_alone_still_filters_outline_results(self):
+        """Outline filtering used to run only when categories were configured.
+        A product is a restriction too, so it must trigger it."""
+        with patch.object(bot, "_get_allowed_categories", return_value=[]), \
+             patch.object(bot, "_search_kb", return_value=[]), \
+             patch.object(bot, "_filter_outline_by_category", return_value=[]) as filt, \
+             patch(
+                 "helpdesk.integrations.outline.search",
+                 return_value=[{"outline_doc_id": "x", "title": "t", "content": "c"}],
+             ):
+            bot._combined_kb_search("query", 3, product="eTIMS")
+
+        filt.assert_called_once()
+        self.assertEqual(filt.call_args.kwargs["product"], "eTIMS")
 
 
 class TestLikeFallbackFiltersByProduct(unittest.TestCase):
@@ -2165,69 +1868,58 @@ class TestLikeFallbackFiltersByProduct(unittest.TestCase):
         filt.assert_called_once()
         self.assertEqual(len(out), 3, "must truncate to limit after filtering")
 
-    def test_no_product_does_not_filter(self):
+    def test_no_product_does_not_filter_or_overfetch(self):
         rows = [{"name": "A"}]
         with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]), \
-             patch("frappe.db.sql", return_value=rows), \
+             patch("frappe.db.sql", return_value=rows) as sql, \
              patch("helpdesk.entitlement.filter_articles_for_product") as filt:
             bot._search_kb("q", 3, allowed_categories=None, product=None)
+
+        self.assertEqual(sql.call_args[0][1]["limit"], 3)
         filt.assert_not_called()
+
+    def test_product_is_passed_to_semantic_search(self):
+        with patch(
+            "helpdesk.integrations.embeddings.search_articles", return_value=[{"name": "A"}]
+        ) as semantic:
+            bot._search_kb("q", 3, allowed_categories=["a"], product="eTIMS")
+
+        self.assertEqual(semantic.call_args.kwargs["product"], "eTIMS")
+
+
+class TestOutlineFilterByProduct(unittest.TestCase):
+    def test_unmappable_outline_results_are_still_dropped(self):
+        """Pre-existing conservative behaviour: when a restriction applies, a
+        document that cannot be resolved to a local article never reaches the
+        LLM. A product restriction counts as one."""
+        results = [{"outline_doc_id": "unknown"}]
+        with patch("frappe.db.get_all", return_value=[]):
+            out = bot._filter_outline_by_category(results, [], product="eTIMS")
+        self.assertEqual(out, [])
+
+    def test_product_filter_is_applied_to_resolved_articles(self):
+        results = [{"outline_doc_id": "d1"}, {"outline_doc_id": "d2"}]
+        rows = [
+            {"name": "A1", "outline_doc_id": "d1"},
+            {"name": "A2", "outline_doc_id": "d2"},
+        ]
+        with patch("frappe.db.get_all", return_value=rows), \
+             patch(
+                 "helpdesk.entitlement.filter_articles_for_product",
+                 return_value=[{"name": "A1", "outline_doc_id": "d1"}],
+             ):
+            out = bot._filter_outline_by_category(results, [], product="eTIMS")
+
+        self.assertEqual([r["outline_doc_id"] for r in out], ["d1"])
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_bot_product_scoping`
 
-Expected: FAIL — `AttributeError: module 'helpdesk.integrations.bot' has no attribute '_scoped_categories'`.
+Expected: FAIL — `_search_kb()` and `_combined_kb_search()` do not accept a `product` argument yet (`TypeError: unexpected keyword argument 'product'`).
 
-- [ ] **Step 3: Add `_scoped_categories` to `bot.py`**
-
-Immediately after `_get_allowed_categories()` (which ends at line 43), insert:
-
-```python
-def _scoped_categories(product: str | None) -> list[str]:
-	"""Stage 1: narrow the bot's category allowlist to the customer's product.
-
-	Visible categories are the product's own — explicit rows plus any category
-	named after it — UNION every category no product claims. Unclaimed means
-	generic: without that, a product listing only ["Pos"] would hide General,
-	Getting Started and Billing from its own customers, and the only remedy
-	would be listing every shared category on every product, which fails
-	silently the first time somebody adds a product and forgets.
-
-	The global allowlist in Helpdesk Bot Settings stays the ceiling — a product
-	can only narrow it, never widen it. An empty global list means "no
-	restriction", so a product still scopes it.
-
-	Falling back to the global list when the result is empty is not optional.
-	Searching an empty category set returns nothing, which would mute the bot
-	for exactly the customers whose mapping is incomplete. A slightly off-topic
-	answer is a much better failure than silence that reads as a broken bot.
-	"""
-	global_allowed = _get_allowed_categories()
-
-	from helpdesk import entitlement
-
-	product_categories = entitlement.categories_for_product(product)
-	if not product_categories:
-		return global_allowed
-
-	visible = set(product_categories) | set(entitlement.unclaimed_categories())
-	if not global_allowed:
-		return sorted(visible)
-
-	# Iterate the global list so its order is preserved and the ceiling holds.
-	scoped = [c for c in global_allowed if c in visible]
-	return scoped or global_allowed
-```
-
-Add the import at the top of `helpdesk/integrations/bot.py`, alongside the other `helpdesk` imports:
-
-```python
-from helpdesk import entitlement
-```
-
-- [ ] **Step 4: Filter the semantic search before truncation**
+- [ ] **Step 3: Filter the semantic search before truncation**
 
 In `helpdesk/integrations/embeddings.py`, change the `search_articles` signature (line 213):
 
@@ -2261,9 +1953,8 @@ Change it to:
 		fields=["name", "title", "content", "outline_doc_id"],
 	)
 
-	# Stage 2 runs here, inside the existing `top_k * 4` overfetch, so articles
-	# dropped for the wrong product are backfilled rather than shrinking the
-	# result set.
+	# Filter inside the existing `top_k * 4` overfetch, so articles dropped for
+	# the wrong product are backfilled rather than shrinking the result set.
 	if product:
 		from helpdesk import entitlement
 
@@ -2273,7 +1964,7 @@ Change it to:
 	return [by_name[name] for name in candidates if name in by_name][:top_k]
 ```
 
-- [ ] **Step 5: Thread `product` through `_search_kb`**
+- [ ] **Step 4: Thread `product` through `_search_kb`**
 
 In `helpdesk/integrations/bot.py`, change the `_search_kb` signature (line 47):
 
@@ -2304,8 +1995,8 @@ Then the LIKE fallback. It currently ends the function with a bare `return frapp
 
 ```python
 	category_condition = ""
-	# Overfetch so stage 2 can drop wrong-product articles without shrinking the
-	# result set; SQL LIMIT would otherwise truncate before filtering.
+	# Overfetch so the product filter can drop wrong-product articles without
+	# shrinking the result set; SQL LIMIT would otherwise truncate first.
 	params = {"q": f"%{query}%", "limit": limit * 4 if product else limit}
 	if allowed_categories:
 		category_condition = "AND category IN %(categories)s"
@@ -2333,7 +2024,7 @@ Then the LIKE fallback. It currently ends the function with a bare `return frapp
 	return rows[:limit]
 ```
 
-- [ ] **Step 6: Filter Outline results by product too**
+- [ ] **Step 5: Filter Outline results by product too**
 
 In `helpdesk/integrations/bot.py`, replace `_filter_outline_by_category` (line 88) with:
 
@@ -2343,17 +2034,17 @@ def _filter_outline_by_category(
 	allowed_categories: list[str],
 	product: str | None = None,
 ) -> list[dict]:
-	"""Keep only Outline results whose synced HD Article passes both stages.
+	"""Keep only Outline results whose synced HD Article passes every filter.
 
-	Conservative by design: results that can't be mapped to a local article are
-	dropped — when a restriction is configured, unknown documents must never
-	reach the LLM. A product restriction counts as a restriction, so the same
-	rule applies to it.
+	Conservative by design, and this predates the product work: results that
+	can't be mapped to a local article are dropped — when a restriction is
+	configured, unknown documents must never reach the LLM. A product
+	restriction counts as one, so the same rule applies to it.
 
-	Note this differs from filter_articles_for_product, which lets unidentifiable
-	rows through. The contexts differ: there we cannot tell what a row is, here
-	we are explicitly resolving documents and an unresolvable one is a document
-	we know nothing about.
+	Note this differs from filter_articles_for_product, which lets
+	unidentifiable rows through. The contexts differ: there we cannot tell what
+	a row is, here we are explicitly resolving documents and an unresolvable one
+	is a document we know nothing about.
 	"""
 	doc_ids = [r["outline_doc_id"] for r in results if r.get("outline_doc_id")]
 	if not doc_ids:
@@ -2378,9 +2069,9 @@ def _filter_outline_by_category(
 	return [r for r in results if r.get("outline_doc_id") in allowed_ids]
 ```
 
-- [ ] **Step 7: Wire both stages into `_combined_kb_search`**
+- [ ] **Step 6: Thread `product` through `_combined_kb_search`**
 
-Change the signature and body of `_combined_kb_search` (line 108). It currently begins:
+Change the signature and first body lines of `_combined_kb_search` (line 108). It currently begins:
 
 ```python
 def _combined_kb_search(query: str, limit: int) -> list[dict]:
@@ -2400,11 +2091,10 @@ def _combined_kb_search(query: str, limit: int, product: str | None = None) -> l
 	"""Query both local HD Articles and Outline directly, merge and deduplicate.
 
 	Outline results take precedence for documents that exist in both (fresher content).
-	Both paths respect the Allowed Categories list in Helpdesk Bot Settings,
-	narrowed to the ticket's product when one is known (stage 1), and both drop
-	articles tagged for a different product (stage 2).
+	Both paths respect the Allowed Categories list in Helpdesk Bot Settings, and
+	both drop articles tagged for a different product when one is known.
 	"""
-	allowed_categories = _scoped_categories(product)
+	allowed_categories = _get_allowed_categories()
 	hd_articles = _search_kb(
 		query, limit, allowed_categories=allowed_categories, product=product
 	)
@@ -2428,7 +2118,13 @@ Change it to:
 
 Leave the rest of the function unchanged.
 
-- [ ] **Step 8: Pass the product at both call sites**
+- [ ] **Step 7: Pass the product at both call sites**
+
+Add the import at the top of `helpdesk/integrations/bot.py`, alongside the other `helpdesk` imports:
+
+```python
+from helpdesk import entitlement
+```
 
 At `helpdesk/integrations/bot.py:582`, inside `process_message()`, `ticket_name` is already in scope. Change:
 
@@ -2464,19 +2160,19 @@ to:
 	)
 ```
 
-- [ ] **Step 9: Run the test to verify it passes**
+- [ ] **Step 8: Run the test to verify it passes**
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_bot_product_scoping`
 
-Expected: PASS, 14 tests.
+Expected: PASS, 8 tests.
 
-- [ ] **Step 10: Run the full suite**
+- [ ] **Step 9: Run the full suite**
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk`
 
 Expected: OK. `test_no_erpnext.py` must still pass — check it appears in the output.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add helpdesk/integrations/bot.py helpdesk/integrations/embeddings.py helpdesk/tests/test_bot_product_scoping.py
@@ -2486,22 +2182,20 @@ _combined_kb_search took no customer context, so the global allowlist in
 Helpdesk Bot Settings applied identically to every conversation and a
 POS-only customer could be answered from eTIMS articles.
 
-Two stages. Stage 1 narrows the category allowlist; the global list stays
-the ceiling, so mapping a product to a category the bot may not read
-cannot grant access to it, and an empty intersection falls back to the
-global list rather than searching nothing — silence reads as a broken bot.
-Stage 2 drops articles tagged for other products, with untagged articles
-treated as generic.
+Articles tagged for other products are now dropped; untagged articles are
+generic and always survive, so the filter is inert until tagging happens
+and accuracy improves in proportion to it. The global allowlist is
+unchanged and still bounds everything.
 
-Stage 2 runs before truncation everywhere: inside the existing top_k * 4
+Filtering runs before truncation everywhere: inside the existing top_k * 4
 overfetch in search_articles, and behind a widened SQL LIMIT in the LIKE
 fallback. Filtering after truncation would let a search return three
-articles, drop two, and answer from one — which looks like a weak
-knowledge base rather than a filtering artefact.
+articles, drop two, and answer from one — which reads as a weak knowledge
+base rather than a filtering artefact.
 
 Outline results keep their conservative rule: a document that cannot be
-mapped to a local article is dropped whenever a restriction is
-configured, and a product restriction now counts as one."
+mapped to a local article is dropped whenever a restriction is configured,
+and a product restriction now counts as one."
 ```
 
 ---
@@ -3049,9 +2743,7 @@ unresolvable product still records the gap — the gap is the valuable part."
 
 | Spec section | Task |
 |---|---|
-| `HD Product` + `HD Product Article Category` | 1 |
-| Case-insensitive category↔product name linking (the `.title()` hazard) | 4 |
-| Unclaimed categories are generic | 4, 7 |
+| `HD Product` catalogue | 1 |
 | Outline-synced articles keep their tags | 6 (test) |
 | `HD Customer Product`, hash naming, composite unique index | 2 |
 | Standalone-not-child-table rationale, `source` ownership rule | 2 |
@@ -3062,8 +2754,8 @@ unresolvable product still records the gap — the gap is the valuable part."
 | `support_status`, four states, stamped on first-known, frozen | 5 |
 | Live badge distinct from the frozen stamp | 8 |
 | `HD Article Product`, untagged-is-generic eligibility rule | 6 |
-| Bot KB scoping stage 1 — category ceiling, unclaimed union, empty fallback | 7 |
-| Bot KB scoping stage 2 — product tags, hard filter, before truncation | 7 |
+| Bot KB scoping — product tags, hard filter, before truncation | 7 |
+| Global allowlist unchanged and still the ceiling | 7 |
 | Single-entitlement inference | 4 |
 | KB gap tracking by product | 9 |
 | Upstream `product` Select left alone | 3 (test) |
@@ -3077,17 +2769,17 @@ Out-of-scope items in the spec (ERPNext calls, account standing, the contact gua
 **Type consistency:**
 
 - `compute_support_status(customer, product)` — same argument order in Tasks 5 and 8.
-- `categories_for_product(product)`, `unclaimed_categories()` and `resolve_product_for_ticket(ticket)` — signatures unchanged across Tasks 4, 7, 8 and 9. `unclaimed_categories` is defined in Task 4 and patched by name in Task 7's tests, so the two must stay in step.
+- `resolve_product_for_ticket(ticket)` — signature unchanged across Tasks 4, 7, 8 and 9.
 - `filter_articles_for_product(rows, product)` and `products_for_articles(names)` — defined in Task 6, called with that order in Task 7 (three call sites) and by each other.
 - The four status strings `Covered`, `Expired`, `Not Entitled`, `Unknown` are identical in the Select options (Task 3), the module constants (Task 4), the stamping tests (Task 5) and the badge tones (Task 8).
-- `_scoped_categories(product)`, `_search_kb(query, limit, allowed_categories=None, product=None)`, `_filter_outline_by_category(results, allowed_categories, product=None)`, `_combined_kb_search(query, limit, product=None)` and `search_articles(query, top_k=3, allowed_categories=None, product=None)` all match between definition and call sites in Task 7.
+- `_search_kb(query, limit, allowed_categories=None, product=None)`, `_filter_outline_by_category(results, allowed_categories, product=None)`, `_combined_kb_search(query, limit, product=None)` and `search_articles(query, top_k=3, allowed_categories=None, product=None)` all match between definition and call sites in Task 7.
 
 **Two deliberate inconsistencies, both documented in the code they affect:**
 
 1. `filter_articles_for_product` lets rows without a `name` pass through; `_filter_outline_by_category` drops documents it cannot map. The contexts differ — the first cannot identify a row at all, the second is explicitly resolving documents, where an unresolvable one is a document we know nothing about. The second preserves behaviour that predates this plan.
 2. The fixture `fieldname` list ends up containing both `products` (a table on `HD Article`) and `product` (a link on `HD Bot Missing KB Query`). Similar names, different doctypes, both required.
 
-**Rollout property worth preserving:** until some category is claimed by a product, `unclaimed_categories()` returns everything, so stage 1 restricts nothing and the bot answers exactly as it does today. Product scoping switches on gradually as mapping and tagging happen. Task 7 has a test pinning this (`test_nothing_claimed_means_scoping_is_a_no_op`) — if it ever fails, deploying this feature would change bot behaviour on day one rather than on demand.
+**Rollout property worth preserving:** an untagged article is generic, so before any tagging exists the filter removes nothing and the bot answers exactly as it does today. Accuracy improves in proportion to how much of the 189-article backlog gets tagged. Deploying this cannot make bot answers worse.
 
 **Outline context:** `docs.cecypo.tech` currently syncs 189 articles into five categories — `Customers`, `Internal Docs`, `Public Access`, `General`, `Licenses` — none of which are product-shaped. Decision taken: tag in Helpdesk, leave Outline's structure alone. The name-matching rule costs nothing now and starts working automatically if a product-named collection is ever created.
 

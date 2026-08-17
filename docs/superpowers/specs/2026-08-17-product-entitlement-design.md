@@ -72,23 +72,6 @@ Three new doctypes.
 | `description` | Small Text | |
 | `disabled` | Check | retire a product without deleting history |
 | `default_team` | Link → HD Team | routing hint, not enforced |
-| `article_categories` | Table → HD Product Article Category | KB categories this product covers |
-
-**`HD Product Article Category`** — child table, single `category` Link →
-`HD Article Category`. Structurally identical to the existing
-`HD Bot Allowed Category` (`istable: 1`, one Link field), which is the pattern to
-copy. This is the **coarse** signal: it maps a whole category of articles to a
-product in one action.
-
-A category is also linked to a product **implicitly when their names match,
-compared case-insensitively**. Name a collection after a product and the link
-exists with nothing to configure; the child table remains for exceptions.
-
-The case-insensitivity is not cosmetic. `sync_outline_docs()` derives each
-category from its Outline collection via `_get_or_create_category(col_name.title())`
-(`integrations/outline.py:155`), and `.title()` turns a collection named `eTIMS`
-into a category named `Etims` and `POS` into `Pos`. An exact match would silently
-never fire — no error, just scoping that quietly never engages.
 
 **`HD Article Product`** — child table on `HD Article`, single `product` Link →
 `HD Product`. This is the **precise** signal, and it exists because
@@ -215,46 +198,32 @@ customer covered *right now*. Both exist; neither replaces the other.
 
 ### Bot knowledge-base scoping (`helpdesk/integrations/bot.py`)
 
-Two independent stages. Each is understandable on its own, and an article must
-pass both.
+One mechanism: the product tag filter. The existing global allowlist in
+`Helpdesk Bot Settings.allowed_categories` is untouched and still applies exactly
+as it does today — it remains the ceiling, and product scoping only ever narrows
+within it.
 
-**Stage 1 — category ceiling.** Which topics the bot may read at all. The global
-allowlist remains the ceiling; a product can never widen the bot's reach beyond
-what `Helpdesk Bot Settings.allowed_categories` permits.
+A category→product mapping layer was designed and then deliberately dropped. The
+five categories in use (`Customers`, `Internal Docs`, `Public Access`, `General`,
+`Licenses`) are audience- and topic-shaped, so such a mapping would have shipped
+empty and stayed empty — dead configuration plus a second failure mode. If Outline
+collections are ever renamed after products, a mapping layer is a small,
+self-contained addition at that point.
 
-```
-claimed    = every category linked to ANY product, explicitly or by name
-unclaimed  = every other category                    → generic
-visible    = categories_of(resolved_product) ∪ unclaimed
-categories = global_allowlist ∩ visible
-if not categories:
-    categories = global_allowlist        # fallback — never search an empty set
-```
+Filtering applies the eligibility rule above: an article tagged for other products
+is dropped; an untagged article is generic and always survives.
 
-**Unclaimed categories are generic.** Without this rule, a product listing only
-`["Pos"]` would hide the General, Getting Started and Billing categories from
-that product's customers entirely, and the only remedy would be listing every
-shared category on every product — which fails silently the first time somebody
-adds a product and forgets. Treating unclaimed as generic means you map only the
-product-specific categories and everything else keeps working untouched. It is
-the same instinct as untagged-articles-are-generic, applied one level up.
+It is a **hard filter, not a ranking boost.** Boosting tolerates mistagging but
+can still hand a POS customer eTIMS instructions, which is the precise confusion
+this feature exists to prevent. The untagged-is-generic escape hatch already
+covers the mistagging risk, so the extra tolerance buys little.
 
-It also makes rollout safe: until some category is claimed, every category is
-unclaimed, so stage 1 restricts nothing and the bot behaves exactly as it does
-today. Scoping switches on only as mapping and tagging happen.
-
-**Stage 2 — product tags.** Whether a specific article is for this product,
-applying the eligibility rule above. Untagged articles always pass.
-
-Filtering is a **hard filter, not a ranking boost.** Boosting tolerates
-mistagging but can still hand a POS customer eTIMS instructions, which is the
-precise confusion this feature exists to prevent. The untagged-is-generic escape
-hatch already covers the mistagging risk, so the extra tolerance buys little.
-
-Stage 2 must be applied **before** results are truncated to `top_k`, not after.
-Filtering afterwards would let a semantic search return three articles, drop two
-on product, and answer from one — silently degrading answer quality in a way that
-looks like a weak knowledge base rather than a filtering artefact.
+Filtering must run **before** results are truncated to `top_k`, not after.
+Afterwards, a semantic search could return three articles, drop two on product and
+answer from one — silently degrading answers in a way that looks like a weak
+knowledge base rather than a filtering artefact. `search_articles` already
+overfetches `top_k * 4` for exactly this reason; the LIKE fallback needs its
+`LIMIT` widened to match.
 
 Product resolution order:
 
@@ -265,16 +234,15 @@ Product resolution order:
 Rule 2 earns its place: a customer who owns only eTIMS gets correctly scoped
 answers before any agent touches the ticket.
 
-The empty-intersection fallback is not optional. Without it the bot goes silent for
-precisely the customers whose data is incomplete — a worse failure than being
-slightly off-topic, and one that would present as "the bot is broken".
+Rollout is inert by construction. Until articles are tagged, every article is
+generic, so the filter removes nothing and the bot answers exactly as it does
+today. Accuracy improves in proportion to tagging.
 
-`_combined_kb_search()` gains an optional product argument. Stage 1 stays
-contained to `bot.py:114`, the only site resolving categories today. Stage 2
-applies at three points, each of which already filters by category and so has the
-article data to hand: `embeddings.py:251` (semantic search, which re-fetches
-article rows at query time), `_search_kb`'s LIKE fallback, and
-`_filter_outline_by_category`.
+`_combined_kb_search()` gains an optional product argument, and the filter applies
+at three points — each already filters by category and so has the article rows to
+hand: `embeddings.py:251` (semantic search, which re-fetches article data at query
+time), `_search_kb`'s LIKE fallback, and `_filter_outline_by_category`.
+
 
 ### Outline-synced articles
 
@@ -333,16 +301,14 @@ conflict on every upstream merge for no benefit.
   when `hd_product` is changed from one product to another after the first stamp.
 - An unentitled product is accepted by the server and yields `Not Entitled` rather
   than a validation error.
-- Bot scoping stage 1: correct intersection; empty-intersection falls back to the
-  global allowlist; single-entitlement inference; global allowlist is never widened.
-- Stage 1 name linking: a category matches a product case-insensitively
-  (`Etims` ↔ `eTIMS`), and the explicit table still adds categories on top.
-- Unclaimed categories are visible to every product; a category claimed by one
-  product is hidden from the others; with nothing claimed, scoping is a no-op.
-- A product tag applied to an Outline-synced article survives `sync_outline_docs()`.
-- Bot scoping stage 2: a tagged article is excluded for a non-matching product;
-  an untagged article is returned for every product; filtering happens before
+- Bot scoping: a tagged article is excluded for a non-matching product; an
+  untagged article is returned for every product; filtering happens before
   `top_k` truncation, so a product filter cannot quietly shrink the result set.
+- The global allowlist is unchanged — product scoping narrows within it and can
+  never widen it.
+- Single-entitlement inference resolves the product before an agent tags a ticket.
+- With no article tagged anywhere, search results are identical to today.
+- A product tag applied to an Outline-synced article survives `sync_outline_docs()`.
 - A KB gap records the resolved product.
 - Regression: `hd_product` queries survive an unmigrated site (`OperationalError`
   path).
@@ -358,7 +324,11 @@ conflict on every upstream merge for no benefit.
   to hang them.
 - Product versions, and therefore version-scoped articles. Support answers do not
   currently differ by version.
-- Ranking or boosting by product. Stage 2 is a hard filter.
+- Ranking or boosting by product. Filtering is hard.
+- A category→product mapping layer. Designed, then dropped: the categories in
+  use are audience- and topic-shaped, so it would have shipped empty. It is a
+  small, self-contained addition later if Outline collections are ever renamed
+  after products.
 - Automatic routing on expiry. `default_team` is a hint agents can act on; nothing
   routes automatically, because an outage at an out-of-contract customer must not
   be diverted to a sales desk.
