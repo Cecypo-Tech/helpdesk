@@ -39,5 +39,35 @@
   "in_list_view": 0,
   "in_filter": 0,
   "permlevel": 0
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "HD Ticket-hd_product",
+  "dt": "HD Ticket",
+  "fieldname": "hd_product",
+  "fieldtype": "Link",
+  "options": "HD Product",
+  "label": "Product",
+  "insert_after": "ticket_type",
+  "description": "What this ticket is about. Defaults to the customer's entitled products, but any active product may be chosen.",
+  "read_only": 0,
+  "in_list_view": 0,
+  "in_filter": 0,
+  "permlevel": 0
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "HD Ticket-support_status",
+  "dt": "HD Ticket",
+  "fieldname": "support_status",
+  "fieldtype": "Select",
+  "options": "\nCovered\nExpired\nNot Entitled\nUnknown",
+  "label": "Support Status",
+  "insert_after": "hd_product",
+  "description": "Stamped once, when the product first becomes known. Frozen afterwards so renewals do not rewrite history.",
+  "read_only": 1,
+  "in_list_view": 0,
+  "in_filter": 0,
+  "permlevel": 0
  }
 ]

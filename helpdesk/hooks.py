@@ -179,7 +179,17 @@ fixtures = [
         "doctype": "Custom Field",
         "filters": [
             ["dt", "in", ["HD Ticket", "Customer", "HD Task"]],
-            ["fieldname", "in", ["baileys_jid", "baileys_line", "helpdesk_notes"]],
+            [
+                "fieldname",
+                "in",
+                [
+                    "baileys_jid",
+                    "baileys_line",
+                    "helpdesk_notes",
+                    "hd_product",
+                    "support_status",
+                ],
+            ],
         ],
     },
     {
