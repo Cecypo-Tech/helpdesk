@@ -80,6 +80,16 @@ Three new doctypes.
 copy. This is the **coarse** signal: it maps a whole category of articles to a
 product in one action.
 
+A category is also linked to a product **implicitly when their names match,
+compared case-insensitively**. Name a collection after a product and the link
+exists with nothing to configure; the child table remains for exceptions.
+
+The case-insensitivity is not cosmetic. `sync_outline_docs()` derives each
+category from its Outline collection via `_get_or_create_category(col_name.title())`
+(`integrations/outline.py:155`), and `.title()` turns a collection named `eTIMS`
+into a category named `Etims` and `POS` into `Pos`. An exact match would silently
+never fire — no error, just scoping that quietly never engages.
+
 **`HD Article Product`** — child table on `HD Article`, single `product` Link →
 `HD Product`. This is the **precise** signal, and it exists because
 `HD Article.category` is a single Link: an article belongs to exactly one
@@ -213,10 +223,25 @@ allowlist remains the ceiling; a product can never widen the bot's reach beyond
 what `Helpdesk Bot Settings.allowed_categories` permits.
 
 ```
-categories = global_allowlist ∩ categories_of(resolved_product)
+claimed    = every category linked to ANY product, explicitly or by name
+unclaimed  = every other category                    → generic
+visible    = categories_of(resolved_product) ∪ unclaimed
+categories = global_allowlist ∩ visible
 if not categories:
     categories = global_allowlist        # fallback — never search an empty set
 ```
+
+**Unclaimed categories are generic.** Without this rule, a product listing only
+`["Pos"]` would hide the General, Getting Started and Billing categories from
+that product's customers entirely, and the only remedy would be listing every
+shared category on every product — which fails silently the first time somebody
+adds a product and forgets. Treating unclaimed as generic means you map only the
+product-specific categories and everything else keeps working untouched. It is
+the same instinct as untagged-articles-are-generic, applied one level up.
+
+It also makes rollout safe: until some category is claimed, every category is
+unclaimed, so stage 1 restricts nothing and the bot behaves exactly as it does
+today. Scoping switches on only as mapping and tagging happen.
 
 **Stage 2 — product tags.** Whether a specific article is for this product,
 applying the eligibility rule above. Untagged articles always pass.
@@ -251,6 +276,34 @@ article data to hand: `embeddings.py:251` (semantic search, which re-fetches
 article rows at query time), `_search_kb`'s LIKE fallback, and
 `_filter_outline_by_category`.
 
+### Outline-synced articles
+
+`docs.cecypo.tech` syncs into `HD Article` hourly via `sync_outline_docs()`, and
+Outline carries no product information. Two facts make this safe.
+
+**Product tags survive the sync.** The update path is
+`frappe.db.set_value("HD Article", existing, {...})` with an explicit field dict —
+`title`, `content`, `category`, `source_url`, `internal`, `status`
+(`integrations/outline.py:168-186`). It never loads or saves the document, so it
+cannot touch child tables. Tags applied in Helpdesk persist across every re-sync,
+and archiving is likewise a single `status` write, so tags survive a document
+disappearing from Outline and returning.
+
+**Helpdesk owns routing metadata; Outline owns content.** That split is the
+design, not a workaround. Tagging happens once, in Helpdesk, and is never
+overwritten.
+
+Current state (2026-08-17): 189 synced articles across five categories —
+`Customers`, `Internal Docs`, `Public Access`, `General`, `Licenses`. These are
+audience- and topic-shaped rather than product-shaped, so **no name link exists
+today** and scoping will come from tags. Decision taken: tag in Helpdesk, leave
+Outline's structure alone. The name-matching rule above then costs nothing now
+and starts working automatically if a product-named collection is ever created.
+
+Note that `Public Access` / `Internal Docs` / `Customers` encode *who may read*,
+an axis the sync already handles separately through the `internal` flag. Product
+scoping is orthogonal to it and must not be conflated with it.
+
 ### Knowledge-base gap tracking
 
 `HD Bot Missing KB Query` already records `suggested_category` when the bot
@@ -282,6 +335,11 @@ conflict on every upstream merge for no benefit.
   than a validation error.
 - Bot scoping stage 1: correct intersection; empty-intersection falls back to the
   global allowlist; single-entitlement inference; global allowlist is never widened.
+- Stage 1 name linking: a category matches a product case-insensitively
+  (`Etims` ↔ `eTIMS`), and the explicit table still adds categories on top.
+- Unclaimed categories are visible to every product; a category claimed by one
+  product is hidden from the others; with nothing claimed, scoping is a no-op.
+- A product tag applied to an Outline-synced article survives `sync_outline_docs()`.
 - Bot scoping stage 2: a tagged article is excluded for a non-matching product;
   an untagged article is returned for every product; filtering happens before
   `top_k` truncation, so a product filter cannot quietly shrink the result set.
