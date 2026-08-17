@@ -44,5 +44,9 @@ docs/*
 !docs/superpowers/
 docs/superpowers/*
 !docs/superpowers/specs/
+
+# Server Scripts that run on the ERPNext bench. Not app code, but they are a
+# deployment artifact we need versioned — they get pasted into a live site.
+!docs/erpnext-server-scripts/
 !docs/superpowers/plans/
 .gstack/
