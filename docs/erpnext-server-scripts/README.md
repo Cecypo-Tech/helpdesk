@@ -88,10 +88,16 @@ RestrictedPython and `safe_exec` impose rules that are easy to trip:
 
 ## Known caveats
 
-- **Multi-currency.** `helpdesk_customer_standing` uses `MAX(currency)` and sums
-  across invoices. That is only correct when a customer transacts in one
-  currency. Invoicing the same customer in KES and USD adds unlike units — group
-  by currency before trusting the total.
+- **Single currency, by decision (2026-08-17).** `helpdesk_customer_standing`
+  uses `MAX(currency)` and sums across invoices, which is correct only while a
+  customer transacts in one currency. Confirmed acceptable: this business
+  invoices in KES only.
+
+  This is a live assumption, not a solved problem. **If you ever raise an invoice
+  for an existing customer in a second currency, these totals silently add unlike
+  units** — no error, just a wrong number on an agent's screen. The fix is to add
+  `currency` to the `GROUP BY` and return one row per currency; do that before
+  the first foreign-currency invoice, not after.
 - **`has_more` is a heuristic** in the sync endpoint: it reports whether the page
   came back full, so a final page of exactly `limit` rows costs one extra empty call.
 - **Paging.** Use `modified_after` plus the largest `modified` from the previous
