@@ -150,3 +150,48 @@ class TestSupportStatusStamp(unittest.TestCase):
 		doc = self.ticket(hd_product=OTHER)
 		self.assertTrue(doc.name)
 		self.assertEqual(doc.support_status, "Not Entitled")
+
+	def test_product_without_customer_stamps_unknown(self):
+		"""The WhatsApp case: a fresh number has no customer yet, but an agent
+		may still tag hd_product before the contact is linked. Unknown must be
+		stamped, not skipped, so the hook keeps retrying on later saves."""
+		doc = self.ticket(customer=None, hd_product=PRODUCT)
+		self.assertEqual(doc.support_status, "Unknown")
+
+	def test_unknown_stamp_is_not_frozen_and_recomputes_once_customer_is_set(self):
+		"""Unknown must never freeze the field: it means we could not yet
+		answer, not that we answered. Once both customer and hd_product are
+		known, the next save must replace Unknown with the real status."""
+		self.entitle(PRODUCT)
+		doc = self.ticket(customer=None, hd_product=PRODUCT)
+		self.assertEqual(doc.support_status, "Unknown")
+
+		doc.reload()
+		doc.customer = CUSTOMER
+		doc.save(ignore_permissions=True)
+		frappe.db.commit()
+		doc.reload()
+		self.assertEqual(doc.support_status, "Covered")
+
+	def test_real_status_still_freezes_after_the_unknown_fix(self):
+		"""Regression guard: a ticket already stamped with a real status must
+		still not re-stamp on a later save, even though Unknown no longer
+		freezes."""
+		self.entitle(PRODUCT)
+		doc = self.ticket(hd_product=PRODUCT)
+		self.assertEqual(doc.support_status, "Covered")
+
+		row = frappe.get_all(
+			"HD Customer Product",
+			filters={"customer": CUSTOMER, "product": PRODUCT},
+			pluck="name",
+		)[0]
+		frappe.delete_doc("HD Customer Product", row, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+		doc.reload()
+		doc.subject = PREFIX + "t edited again"
+		doc.save(ignore_permissions=True)
+		frappe.db.commit()
+		doc.reload()
+		self.assertEqual(doc.support_status, "Covered", "stamp must stay frozen")

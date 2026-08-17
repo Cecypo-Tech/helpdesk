@@ -160,7 +160,7 @@ import { copyToClipboard } from "@/utils";
 import dayjs from "dayjs";
 import { Avatar, Tooltip, createResource } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, inject } from "vue";
+import { computed, inject, watch } from "vue";
 import { CopyIcon } from "../icons";
 import EmailIcon from "../icons/EmailIcon.vue";
 import PhoneIcon from "../icons/PhoneIcon.vue";
@@ -176,8 +176,22 @@ const dateFormat = window.date_format;
 const entitlement = createResource({
   url: "helpdesk.api.entitlement.get_ticket_entitlement",
   makeParams: () => ({ ticket: ticket.value?.doc?.name }),
-  auto: true,
 });
+
+// `TicketAgent` is reused across ticket navigation (no route `:key`), so the
+// subtree never unmounts. `makeParams` alone is not reactively tracked and
+// `auto: true` only fires once on first mount, so without this watcher the
+// badge keeps showing the previous ticket's product/coverage. On the
+// WhatsApp page the sidebar can mount before the ticket doc resolves, so the
+// watcher (not a one-shot auto fetch) is also what lets it retry once the
+// name becomes available.
+watch(
+  () => ticket.value?.doc?.name,
+  (name) => {
+    if (name) entitlement.reload();
+  },
+  { immediate: true }
+);
 
 const statusTone = computed(() => {
   switch (entitlement.data?.status) {

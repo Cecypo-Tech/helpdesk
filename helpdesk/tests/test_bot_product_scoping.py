@@ -84,14 +84,27 @@ class TestLikeFallbackFiltersByProduct(unittest.TestCase):
 
 
 class TestOutlineFilterByProduct(unittest.TestCase):
-    def test_unmappable_outline_results_are_still_dropped(self):
-        """Pre-existing conservative behaviour: when a restriction applies, a
-        document that cannot be resolved to a local article never reaches the
-        LLM. A product restriction counts as one."""
+    def test_unmappable_outline_results_are_dropped_with_category_allowlist(self):
+        """Pre-existing conservative behaviour: when a category allowlist is
+        configured, a document that cannot be resolved to a local article
+        never reaches the LLM."""
+        results = [{"outline_doc_id": "unknown"}]
+        with patch("frappe.db.get_all", return_value=[]):
+            out = bot._filter_outline_by_category(
+                results, ["some-category"], product="eTIMS"
+            )
+        self.assertEqual(out, [])
+
+    def test_unmappable_outline_results_pass_through_with_product_only(self):
+        """No category allowlist configured: an unresolvable document is not
+        evidence of a wrong product, so it must pass through untouched.
+        Otherwise a site with an empty allowlist and no tagged articles yet
+        would go quieter the moment a product is set, before any tagging
+        happened - rollout must stay inert until tagging."""
         results = [{"outline_doc_id": "unknown"}]
         with patch("frappe.db.get_all", return_value=[]):
             out = bot._filter_outline_by_category(results, [], product="eTIMS")
-        self.assertEqual(out, [])
+        self.assertEqual(out, results)
 
     def test_product_filter_is_applied_to_resolved_articles(self):
         results = [{"outline_doc_id": "d1"}, {"outline_doc_id": "d2"}]

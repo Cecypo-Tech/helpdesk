@@ -3,9 +3,11 @@
 import frappe
 
 from helpdesk import entitlement
+from helpdesk.utils import agent_only
 
 
 @frappe.whitelist()
+@agent_only
 def get_ticket_entitlement(ticket: str | int) -> dict:
 	"""Live coverage for a ticket, plus everything the customer holds.
 
@@ -27,6 +29,7 @@ def get_ticket_entitlement(ticket: str | int) -> dict:
 		"customer": None,
 		"product": None,
 		"status": entitlement.STATUS_UNKNOWN,
+		"stamped_status": None,
 		"support_expiry": None,
 		"entitlements": [],
 	}

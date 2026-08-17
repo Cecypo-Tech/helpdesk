@@ -119,4 +119,43 @@ class TestEntitlementApi(unittest.TestCase):
     def test_unknown_ticket_returns_an_empty_payload(self):
         out = get_ticket_entitlement("no-such-ticket")
         self.assertEqual(out["status"], "Unknown")
+        self.assertIsNone(out["stamped_status"])
         self.assertEqual(out["entitlements"], [])
+
+    def test_non_agent_is_refused(self):
+        """A logged-in portal contact must not be able to read another
+        customer's entitlement data (name, product, expiry, source) by
+        POSTing an arbitrary ticket id."""
+        frappe.get_doc({
+            "doctype": "HD Customer Product",
+            "customer": CUSTOMER,
+            "product": PRODUCT,
+        }).insert(ignore_permissions=True)
+        frappe.db.commit()
+        doc = self.ticket(hd_product=PRODUCT)
+
+        # No roles assigned -> Frappe defaults User.user_type to "Website
+        # User" (a portal contact), not "System User". That's the profile a
+        # logged-in portal contact actually has - no Agent/Agent Manager role
+        # and no HD Agent record, which is exactly what is_agent() checks.
+        user_email = PREFIX + "portal@example.com"
+        if not frappe.db.exists("User", user_email):
+            frappe.get_doc({
+                "doctype": "User",
+                "email": user_email,
+                "first_name": "Portal",
+                "send_welcome_email": 0,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        def _delete_test_user():
+            frappe.set_user("Administrator")
+            if frappe.db.exists("User", user_email):
+                frappe.delete_doc("User", user_email, force=True, ignore_permissions=True)
+                frappe.db.commit()
+
+        self.addCleanup(_delete_test_user)
+        self.addCleanup(lambda: frappe.set_user("Administrator"))
+
+        frappe.set_user(user_email)
+        self.assertRaises(frappe.PermissionError, get_ticket_entitlement, doc.name)

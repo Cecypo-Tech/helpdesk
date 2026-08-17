@@ -33,8 +33,26 @@ def after_install():
     add_property_setters()
     add_website_settings_permission()
     add_default_views()
+    add_hd_customer_product_unique_index()
     # Always keep this at last, because sql_ddl makes the db commit
     add_fts_index()
+
+
+def add_hd_customer_product_unique_index():
+    """Run the patch's own logic at install time too.
+
+    `install_app(..., set_as_patched=True)` marks every entry in patches.txt
+    as already run WITHOUT executing it, so a fresh `bench install-app` never
+    gets this composite UNIQUE index - the three create_custom_fields patches
+    survive that because fixtures carry the same fields, but nothing else
+    carries an index. Imported locally to avoid import-order problems between
+    helpdesk.patches and helpdesk.setup.install. Calling this twice (patch +
+    install) is safe: the patch itself is guarded by table_exists plus a SHOW
+    INDEX check.
+    """
+    from helpdesk.patches.add_hd_customer_product_unique_index import execute
+
+    execute()
 
 
 def add_default_categories_and_articles():

@@ -16,16 +16,20 @@ def stamp_support_status(doc, method=None):
 	Stamping only at creation would leave support_status permanently Unknown on
 	the WhatsApp channel, which is exactly where it matters most.
 
-	Once set the value is frozen. It records what coverage WAS when the customer
-	asked — the figure that matters for renewal conversations and for measuring
-	absorbed out-of-contract support. Recomputing it would silently rewrite
-	history the moment somebody renewed.
+	Once set to a real status the value is frozen. It records what coverage WAS
+	when the customer asked — the figure that matters for renewal conversations
+	and for measuring absorbed out-of-contract support. Recomputing it would
+	silently rewrite history the moment somebody renewed.
+
+	A stamp of Unknown does NOT freeze: it means we could not yet answer (e.g.
+	hd_product set before the ticket has a customer), and the whole point of
+	this hook is to keep trying until it can.
 
 	Advisory only: this never blocks a save. An unentitled product is a recorded
 	outcome, not an error.
 	"""
 	try:
-		if doc.get("support_status"):
+		if doc.get("support_status") and doc.support_status != entitlement.STATUS_UNKNOWN:
 			return  # frozen
 		product = doc.get("hd_product")
 		if not product:

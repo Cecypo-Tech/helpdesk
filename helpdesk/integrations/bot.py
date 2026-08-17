@@ -96,8 +96,6 @@ def _search_kb(
 	)
 
 	if product:
-		from helpdesk import entitlement
-
 		rows = entitlement.filter_articles_for_product(rows, product)
 
 	return rows[:limit]
@@ -110,37 +108,52 @@ def _filter_outline_by_category(
 ) -> list[dict]:
 	"""Keep only Outline results whose synced HD Article passes every filter.
 
-	Conservative by design, and this predates the product work: results that
-	can't be mapped to a local article are dropped — when a restriction is
-	configured, unknown documents must never reach the LLM. A product
-	restriction counts as one, so the same rule applies to it.
+	Conservative by design, and this predates the product work: when a category
+	allowlist is configured, results that can't be mapped to a local article are
+	dropped — unknown documents must never reach the LLM past a configured
+	restriction. That drop rule fires ONLY when allowed_categories is non-empty.
 
-	Note this differs from filter_articles_for_product, which lets
-	unidentifiable rows through. The contexts differ: there we cannot tell what
-	a row is, here we are explicitly resolving documents and an unresolvable one
-	is a document we know nothing about.
+	When allowed_categories is empty and only a product is set, unmapped rows
+	pass through untouched, matching filter_articles_for_product: an
+	unidentifiable row is not evidence of a wrong product, and rollout must stay
+	inert until articles are actually tagged. Rows that DO resolve to an HD
+	Article are still filtered by product.
 	"""
 	doc_ids = [r["outline_doc_id"] for r in results if r.get("outline_doc_id")]
 	if not doc_ids:
-		return []
+		return results if not allowed_categories else []
 
 	filters = {"outline_doc_id": ["in", doc_ids]}
 	if allowed_categories:
 		filters["category"] = ["in", allowed_categories]
 
+	# Rows that resolve to a local HD Article (category-filtered already when an
+	# allowlist is configured; otherwise every resolvable row).
 	rows = frappe.db.get_all(
 		"HD Article",
 		filters=filters,
 		fields=["name", "outline_doc_id"],
 	)
+	mapped_ids = {r.get("outline_doc_id") for r in rows}
 
 	if product:
-		from helpdesk import entitlement
-
 		rows = entitlement.filter_articles_for_product(rows, product)
 
 	allowed_ids = {r.get("outline_doc_id") for r in rows}
-	return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+
+	if allowed_categories:
+		# Conservative path: a document that can't be resolved at all is an
+		# unknown document, drop it.
+		return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+
+	# No category allowlist: a document that can't be resolved to any HD
+	# Article is not evidence of a wrong product — let it through. A document
+	# that DOES resolve is still subject to the product filter above.
+	return [
+		r
+		for r in results
+		if r.get("outline_doc_id") not in mapped_ids or r.get("outline_doc_id") in allowed_ids
+	]
 
 
 def _combined_kb_search(query: str, limit: int, product: str | None = None) -> list[dict]:
