@@ -77,7 +77,33 @@ Three new doctypes.
 **`HD Product Article Category`** — child table, single `category` Link →
 `HD Article Category`. Structurally identical to the existing
 `HD Bot Allowed Category` (`istable: 1`, one Link field), which is the pattern to
-copy.
+copy. This is the **coarse** signal: it maps a whole category of articles to a
+product in one action.
+
+**`HD Article Product`** — child table on `HD Article`, single `product` Link →
+`HD Product`. This is the **precise** signal, and it exists because
+`HD Article.category` is a single Link: an article belongs to exactly one
+category.
+
+That constraint makes category-only mapping degrade badly. An article relevant to
+POS *and* eTIMS but not TIMS must live in a category mapped to exactly those two,
+so as the catalogue grows the taxonomy stops describing subjects and starts
+describing audience intersections ("POS+eTIMS"). And a genuinely generic article
+can only live in one place, so it needs a "General" category mapped to every
+product — which fails silently the first time someone adds a product and forgets
+to include it.
+
+**Eligibility rule:**
+
+```
+article has product tags  → eligible only for those products
+article has NO tags       → eligible for every product (generic)
+```
+
+Untagged-means-generic is the load-bearing half. It makes the safe state the
+default: a newly written article is visible everywhere until somebody narrows it,
+rather than invisible until somebody remembers to tag it. Same fail-open instinct
+as the empty-intersection fallback below.
 
 **`HD Customer Product`** — one row per entitlement. A standalone doctype, not a
 child table on `HD Customer`.
@@ -86,10 +112,14 @@ child table on `HD Customer`.
 |---|---|---|
 | `customer` | Link → HD Customer | |
 | `product` | Link → HD Product | |
-| `version` | Data | e.g. "eTIMS v2", "POS Pro" |
 | `support_expiry` | Date | **blank = no expiry = permanently covered** |
 | `source` | Select | `Manual` / `ERPNext` / `POS` — default `Manual` |
 | `notes` | Small Text | |
+
+There is deliberately **no `version` field**. The catalogue is flat by decision
+and support answers do not currently differ by version; adding one "just in case"
+would invite version-scoped articles and a materially more complex KB design for
+no present benefit. If versions start to matter, this doctype is where they go.
 
 Naming is hash-based, with a **composite unique index on `(customer, product)`**
 added in a patch (`frappe.db.add_index` with `unique=True`).
@@ -175,14 +205,31 @@ customer covered *right now*. Both exist; neither replaces the other.
 
 ### Bot knowledge-base scoping (`helpdesk/integrations/bot.py`)
 
-The global allowlist remains the ceiling — a product can never widen the bot's
-reach beyond what `Helpdesk Bot Settings.allowed_categories` permits.
+Two independent stages. Each is understandable on its own, and an article must
+pass both.
+
+**Stage 1 — category ceiling.** Which topics the bot may read at all. The global
+allowlist remains the ceiling; a product can never widen the bot's reach beyond
+what `Helpdesk Bot Settings.allowed_categories` permits.
 
 ```
 categories = global_allowlist ∩ categories_of(resolved_product)
 if not categories:
     categories = global_allowlist        # fallback — never search an empty set
 ```
+
+**Stage 2 — product tags.** Whether a specific article is for this product,
+applying the eligibility rule above. Untagged articles always pass.
+
+Filtering is a **hard filter, not a ranking boost.** Boosting tolerates
+mistagging but can still hand a POS customer eTIMS instructions, which is the
+precise confusion this feature exists to prevent. The untagged-is-generic escape
+hatch already covers the mistagging risk, so the extra tolerance buys little.
+
+Stage 2 must be applied **before** results are truncated to `top_k`, not after.
+Filtering afterwards would let a semantic search return three articles, drop two
+on product, and answer from one — silently degrading answer quality in a way that
+looks like a weak knowledge base rather than a filtering artefact.
 
 Product resolution order:
 
@@ -197,8 +244,21 @@ The empty-intersection fallback is not optional. Without it the bot goes silent 
 precisely the customers whose data is incomplete — a worse failure than being
 slightly off-topic, and one that would present as "the bot is broken".
 
-`_combined_kb_search()` gains an optional product argument. `bot.py:114` is the
-only site that resolves categories today, so the change stays contained.
+`_combined_kb_search()` gains an optional product argument. Stage 1 stays
+contained to `bot.py:114`, the only site resolving categories today. Stage 2
+applies at three points, each of which already filters by category and so has the
+article data to hand: `embeddings.py:251` (semantic search, which re-fetches
+article rows at query time), `_search_kb`'s LIKE fallback, and
+`_filter_outline_by_category`.
+
+### Knowledge-base gap tracking
+
+`HD Bot Missing KB Query` already records `suggested_category` when the bot
+cannot answer. Add `product`, populated from the same resolution used for
+scoping. This turns "the bot could not answer this" into "we have no eTIMS
+article about X", which is directly actionable for whoever writes articles — and
+once articles carry product tags, article-count-per-product becomes an ordinary
+report that shows where the bot is weakest before customers discover it.
 
 ### Upstream `HD Ticket.product`
 
@@ -220,8 +280,12 @@ conflict on every upstream merge for no benefit.
   when `hd_product` is changed from one product to another after the first stamp.
 - An unentitled product is accepted by the server and yields `Not Entitled` rather
   than a validation error.
-- Bot scoping: correct intersection; empty-intersection falls back to the global
-  allowlist; single-entitlement inference; global allowlist is never widened.
+- Bot scoping stage 1: correct intersection; empty-intersection falls back to the
+  global allowlist; single-entitlement inference; global allowlist is never widened.
+- Bot scoping stage 2: a tagged article is excluded for a non-matching product;
+  an untagged article is returned for every product; filtering happens before
+  `top_k` truncation, so a product filter cannot quietly shrink the result set.
+- A KB gap records the resolved product.
 - Regression: `hd_product` queries survive an unmigrated site (`OperationalError`
   path).
 
@@ -234,6 +298,9 @@ conflict on every upstream merge for no benefit.
 - Per-branch or per-site product instances. The catalogue is flat by decision; if
   multi-site deployments later matter, `HD Customer Product` is the natural place
   to hang them.
+- Product versions, and therefore version-scoped articles. Support answers do not
+  currently differ by version.
+- Ranking or boosting by product. Stage 2 is a hard filter.
 - Automatic routing on expiry. `default_team` is a hint agents can act on; nothing
   routes automatically, because an outage at an out-of-contract customer must not
   be diverted to a sales desk.

@@ -4,7 +4,7 @@
 
 **Goal:** Record what each customer bought, show it on the ticket, scope the bot's knowledge base to it, and freeze whether support was in contract when the ticket was raised.
 
-**Architecture:** Three new doctypes (a flat `HD Product` catalogue, its KB-category child table, and a standalone `HD Customer Product` entitlement row), two custom fields on `HD Ticket` added via fixtures, one pure-logic module `helpdesk/entitlement.py` that every consumer calls, a `before_save` doc_event that stamps status once, and a narrowing of the bot's existing category allowlist.
+**Architecture:** Four new doctypes (a flat `HD Product` catalogue, its KB-category child table, a standalone `HD Customer Product` entitlement row, and an `HD Article Product` tag table), four custom fields added via fixtures, one pure-logic module `helpdesk/entitlement.py` that every consumer calls, a `before_save` doc_event that stamps status once, and a two-stage narrowing of the bot's knowledge-base search — category ceiling first, then per-article product tags.
 
 **Tech Stack:** Frappe v16, MariaDB, Vue 3 + frappe-ui (desk frontend), Python `unittest` via `bench run-tests`.
 
@@ -15,10 +15,10 @@
 - **Nothing refuses service.** Entitlement and expiry are advisory. No code path may block ticket creation, reply, or bot response on entitlement state.
 - **WhatsApp support must work with no ERPNext installed.** `helpdesk/integrations/tests/test_no_erpnext.py` must keep passing. No task here may import from `helpdesk.integrations.erpnext` or from `erpnext`.
 - **No ERPNext calls at all in this sub-project.** Entitlements are local-only; syncing is sub-project B.
-- **`hd_product` and `support_status` are Custom Fields via fixtures**, never edits to `hd_ticket.json`. Editing that file conflicts on every `git merge upstream/develop`.
-- **Every query filtering `HD Ticket` on `hd_product` or `support_status` must be wrapped in `try/except`.** On a site that has not migrated since the fixtures landed, the column does not exist and Frappe raises `OperationalError`. This is the documented `baileys_jid` hazard in `CLAUDE.md`.
+- **Every new field on an upstream doctype is a Custom Field via fixtures** — `hd_product` and `support_status` on `HD Ticket`, `products` on `HD Article`, `product` on `HD Bot Missing KB Query`. Never edit the upstream `.json`; that conflicts on every `git merge upstream/develop`.
+- **Every query touching one of those custom fields must be wrapped in `try/except`.** On a site that has not migrated since the fixtures landed, the column or child table does not exist and Frappe raises `OperationalError`. This is the documented `baileys_jid` hazard in `CLAUDE.md`. Each fallback must fail *open*: an unmigrated site should behave as though nothing is tagged, never as though everything is excluded.
 - **Leave upstream's dead `HD Ticket.product` Select alone.** Do not repurpose, rename, or delete it.
-- **Blank `support_expiry` means permanently covered**, not expired.
+- **Blank `support_expiry` means permanently covered**, not expired. **An article with no product tags is generic**, eligible for every product — not hidden from all of them.
 - Run the full suite with `bench --site dev.localhost run-tests --app helpdesk`. Baseline before this plan: **187 tests, OK (skipped=2)**.
 
 ---
@@ -298,7 +298,9 @@ outage at an out-of-contract customer must not be diverted to a sales desk."
 
 **Interfaces:**
 - Consumes: `HD Product` from Task 1.
-- Produces: doctype `HD Customer Product` with fields `customer`, `product`, `version`, `support_expiry`, `source` (`Manual`/`ERPNext`/`POS`, default `Manual`), `notes`; and a UNIQUE index named `hd_customer_product_customer_product` on `(customer, product)`.
+- Produces: doctype `HD Customer Product` with fields `customer`, `product`, `support_expiry`, `source` (`Manual`/`ERPNext`/`POS`, default `Manual`), `notes`; and a UNIQUE index named `hd_customer_product_customer_product` on `(customer, product)`.
+
+There is deliberately **no `version` field**. The catalogue is flat by decision and support answers do not differ by version today; adding one speculatively would invite version-scoped articles and a materially more complex KB design for no present benefit.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -427,7 +429,6 @@ Expected: FAIL — `DoesNotExistError: DocType HD Customer Product not found`.
  "field_order": [
   "customer",
   "product",
-  "version",
   "col_break_1",
   "support_expiry",
   "source",
@@ -452,11 +453,6 @@ Expected: FAIL — `DoesNotExistError: DocType HD Customer Product not found`.
    "label": "Product",
    "options": "HD Product",
    "reqd": 1
-  },
-  {
-   "fieldname": "version",
-   "fieldtype": "Data",
-   "label": "Version"
   },
   {
    "fieldname": "col_break_1",
@@ -821,7 +817,7 @@ keep."
 - Consumes: `HD Product`, `HD Customer Product` from Tasks 1-2; `HD Ticket.hd_product` from Task 3.
 - Produces:
   - `is_expired(support_expiry) -> bool`
-  - `get_entitlements(customer: str) -> list[dict]` — each `{"product", "version", "support_expiry", "source", "expired"}`
+  - `get_entitlements(customer: str) -> list[dict]` — each `{"product", "support_expiry", "source", "expired"}`
   - `get_entitlement(customer: str, product: str) -> dict | None`
   - `compute_support_status(customer: str | None, product: str | None) -> str` — one of `Covered`, `Expired`, `Not Entitled`, `Unknown`
   - `categories_for_product(product: str) -> list[str]`
@@ -1053,7 +1049,7 @@ def get_entitlements(customer: str | None) -> list[dict]:
 	rows = frappe.get_all(
 		"HD Customer Product",
 		filters={"customer": customer},
-		fields=["name", "product", "version", "support_expiry", "source"],
+		fields=["name", "product", "support_expiry", "source"],
 		order_by="product asc",
 	)
 	for row in rows:
@@ -1068,7 +1064,7 @@ def get_entitlement(customer: str | None, product: str | None) -> dict | None:
 	row = frappe.db.get_value(
 		"HD Customer Product",
 		{"customer": customer, "product": product},
-		["name", "product", "version", "support_expiry", "source"],
+		["name", "product", "support_expiry", "source"],
 		as_dict=True,
 	)
 	if not row:
@@ -1435,29 +1431,457 @@ ticket save over."
 
 ---
 
-### Task 6: Scope the bot's knowledge base to the customer's product
+### Task 6: Tag knowledge-base articles with products
 
 **Files:**
-- Modify: `helpdesk/integrations/bot.py:108` (`_combined_kb_search` signature and body)
-- Modify: `helpdesk/integrations/bot.py:582` and `:689` (the two call sites)
-- Create: `helpdesk/tests/test_bot_product_scoping.py`
+- Create: `helpdesk/helpdesk/doctype/hd_article_product/__init__.py`
+- Create: `helpdesk/helpdesk/doctype/hd_article_product/hd_article_product.json`
+- Create: `helpdesk/helpdesk/doctype/hd_article_product/hd_article_product.py`
+- Create: `helpdesk/patches/add_hd_article_products_field.py`
+- Modify: `helpdesk/patches.txt` (append one line)
+- Modify: `helpdesk/hooks.py` — extend the Custom Field fixture filter again
+- Modify: `helpdesk/entitlement.py` (add `filter_articles_for_product`)
+- Test: `helpdesk/tests/test_article_product_tags.py`
 
 **Interfaces:**
-- Consumes: `helpdesk.entitlement.categories_for_product` and `resolve_product_for_ticket` from Task 4.
-- Produces: `bot._scoped_categories(product: str | None) -> list[str]`; `bot._combined_kb_search(query: str, limit: int, product: str | None = None)`.
+- Consumes: `HD Product` from Task 1; `helpdesk.entitlement` from Task 4.
+- Produces:
+  - child doctype `HD Article Product` with a single `product` Link → `HD Product`
+  - Custom Field `HD Article.products` (Table → `HD Article Product`)
+  - `entitlement.products_for_articles(article_names: list[str]) -> dict[str, list[str]]`
+  - `entitlement.filter_articles_for_product(rows: list[dict], product: str | None) -> list[dict]`
+
+**Why this exists:** `HD Article.category` is a single Link — an article belongs to exactly one category. So mapping products to *categories* alone forces the taxonomy to describe audience intersections ("POS+eTIMS") rather than subjects, and a generic article can only live in one place. Product tags are the precise signal; the category mapping from Task 1 remains the coarse one.
+
+**Eligibility rule:** an article with product tags is eligible only for those products; an article with **no** tags is eligible for every product. Untagged-means-generic makes the safe state the default — a new article is visible everywhere until somebody narrows it, rather than invisible until somebody remembers to tag it.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `helpdesk/tests/test_article_product_tags.py`:
+
+```python
+"""Articles carry product tags; untagged articles are generic.
+
+HD Article.category is a single Link, so category-only mapping cannot express
+"this article covers POS and eTIMS but not TIMS" without inventing a
+"POS+eTIMS" category. Product tags can.
+"""
+
+import unittest
+
+import frappe
+
+from helpdesk import entitlement
+
+PREFIX = "_test-artprod-"
+PRODUCT_A = PREFIX + "prodA"
+PRODUCT_B = PREFIX + "prodB"
+
+
+def cleanup():
+    for name in frappe.get_all(
+        "HD Article", filters={"title": ["like", PREFIX + "%"]}, pluck="name"
+    ):
+        frappe.delete_doc("HD Article", name, force=True, ignore_permissions=True)
+    for name in frappe.get_all(
+        "HD Product", filters={"name": ["like", PREFIX + "%"]}, pluck="name"
+    ):
+        frappe.delete_doc("HD Product", name, force=True, ignore_permissions=True)
+    frappe.db.commit()
+
+
+class TestArticleProductTags(unittest.TestCase):
+    def setUp(self):
+        frappe.set_user("Administrator")
+        cleanup()
+        for p in (PRODUCT_A, PRODUCT_B):
+            frappe.get_doc({"doctype": "HD Product", "product_name": p}).insert(
+                ignore_permissions=True
+            )
+        category = frappe.get_all("HD Article Category", limit=1, pluck="name")
+        if not category:
+            self.skipTest("no HD Article Category on this site")
+        self.category = category[0]
+        frappe.db.commit()
+
+    def tearDown(self):
+        cleanup()
+
+    def article(self, suffix, products=None):
+        doc = frappe.get_doc({
+            "doctype": "HD Article",
+            "title": PREFIX + suffix,
+            "category": self.category,
+            "content": "body",
+            "status": "Published",
+            "products": [{"product": p} for p in (products or [])],
+        }).insert(ignore_permissions=True)
+        frappe.db.commit()
+        return doc
+
+    def test_custom_field_exists(self):
+        self.assertTrue(
+            frappe.db.exists("Custom Field", {"dt": "HD Article", "fieldname": "products"})
+        )
+
+    def test_tags_round_trip(self):
+        doc = self.article("tagged", [PRODUCT_A])
+        doc.reload()
+        self.assertEqual([r.product for r in doc.products], [PRODUCT_A])
+
+    def test_products_for_articles_maps_names_to_tags(self):
+        tagged = self.article("t1", [PRODUCT_A, PRODUCT_B])
+        untagged = self.article("t2")
+        out = entitlement.products_for_articles([tagged.name, untagged.name])
+        self.assertEqual(sorted(out[tagged.name]), sorted([PRODUCT_A, PRODUCT_B]))
+        self.assertEqual(out.get(untagged.name, []), [])
+
+    def test_products_for_articles_handles_empty_input(self):
+        self.assertEqual(entitlement.products_for_articles([]), {})
+
+
+class TestFilterArticlesForProduct(unittest.TestCase):
+    """Pure filtering behaviour, driven by an injected tag map."""
+
+    def setUp(self):
+        frappe.set_user("Administrator")
+
+    def rows(self):
+        return [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+
+    def test_no_product_returns_everything(self):
+        with unittest.mock.patch.object(entitlement, "products_for_articles") as tags:
+            out = entitlement.filter_articles_for_product(self.rows(), None)
+        self.assertEqual([r["name"] for r in out], ["A", "B", "C"])
+        tags.assert_not_called()
+
+    def test_tagged_article_is_kept_for_a_matching_product(self):
+        with unittest.mock.patch.object(
+            entitlement, "products_for_articles", return_value={"A": ["p1"], "B": [], "C": ["p2"]}
+        ):
+            out = entitlement.filter_articles_for_product(self.rows(), "p1")
+        self.assertEqual([r["name"] for r in out], ["A", "B"])
+
+    def test_untagged_article_is_generic(self):
+        """B has no tags and must survive every product filter."""
+        with unittest.mock.patch.object(
+            entitlement, "products_for_articles", return_value={"A": ["p1"], "B": [], "C": ["p2"]}
+        ):
+            out = entitlement.filter_articles_for_product(self.rows(), "p9")
+        self.assertEqual([r["name"] for r in out], ["B"])
+
+    def test_rows_without_an_article_name_pass_through(self):
+        """Outline results that never synced to an HD Article are treated as
+        generic rather than silently dropped."""
+        rows = [{"title": "outline only"}, {"name": "A"}]
+        with unittest.mock.patch.object(
+            entitlement, "products_for_articles", return_value={"A": ["p2"]}
+        ):
+            out = entitlement.filter_articles_for_product(rows, "p1")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["title"], "outline only")
+
+    def test_empty_rows_returns_empty(self):
+        self.assertEqual(entitlement.filter_articles_for_product([], "p1"), [])
+```
+
+Add `import unittest.mock` at the top of the file, immediately after `import unittest`:
+
+```python
+import unittest
+import unittest.mock
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_article_product_tags`
+
+Expected: FAIL — the Custom Field does not exist and `entitlement.products_for_articles` is not defined.
+
+- [ ] **Step 3: Create the child doctype**
+
+`helpdesk/helpdesk/doctype/hd_article_product/__init__.py` — empty file.
+
+`helpdesk/helpdesk/doctype/hd_article_product/hd_article_product.json`:
+
+```json
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-17 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["product"],
+ "fields": [
+  {
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Product",
+   "options": "HD Product",
+   "reqd": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-17 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Article Product",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
+```
+
+`helpdesk/helpdesk/doctype/hd_article_product/hd_article_product.py`:
+
+```python
+from frappe.model.document import Document
+
+
+class HDArticleProduct(Document):
+    pass
+```
+
+- [ ] **Step 4: Add the `products` custom field to `HD Article`**
+
+`helpdesk/patches/add_hd_article_products_field.py`:
+
+```python
+import frappe
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+
+def execute():
+	"""Add HD Article.products, a table of HD Article Product rows.
+
+	A Custom Field rather than an edit to hd_article.json, for the same reason
+	as hd_product on HD Ticket: that file is upstream's and every edit conflicts
+	on `git merge upstream/develop`.
+
+	Leaving an article untagged is meaningful — it marks the article as generic,
+	eligible for every product — so there is nothing to backfill here.
+
+	create_custom_fields is idempotent, so re-running is safe.
+	"""
+	create_custom_fields(
+		{
+			"HD Article": [
+				{
+					"fieldname": "products",
+					"label": "Products",
+					"fieldtype": "Table",
+					"options": "HD Article Product",
+					"insert_after": "category",
+					"description": "Which products this article covers. Leave empty for an article that applies to every product.",
+				},
+			]
+		},
+		ignore_validate=True,
+	)
+	frappe.db.commit()
+```
+
+Append to the end of `helpdesk/patches.txt`:
+
+```
+helpdesk.patches.add_hd_article_products_field
+```
+
+In `helpdesk/hooks.py`, the first fixture entry now needs `HD Article` in its `dt` list and `products` in its `fieldname` list. After Task 3 it reads:
+
+```python
+        "filters": [
+            ["dt", "in", ["HD Ticket", "Customer", "HD Task"]],
+            [
+                "fieldname",
+                "in",
+                [
+                    "baileys_jid",
+                    "baileys_line",
+                    "helpdesk_notes",
+                    "hd_product",
+                    "support_status",
+                ],
+            ],
+        ],
+```
+
+Change it to:
+
+```python
+        "filters": [
+            ["dt", "in", ["HD Ticket", "Customer", "HD Task", "HD Article"]],
+            [
+                "fieldname",
+                "in",
+                [
+                    "baileys_jid",
+                    "baileys_line",
+                    "helpdesk_notes",
+                    "hd_product",
+                    "support_status",
+                    "products",
+                ],
+            ],
+        ],
+```
+
+- [ ] **Step 5: Add the filter helpers to `helpdesk/entitlement.py`**
+
+Append to `helpdesk/entitlement.py`:
+
+```python
+def products_for_articles(article_names: list[str]) -> dict[str, list[str]]:
+	"""Map each article name to the products it is tagged with.
+
+	Articles absent from the result, or present with an empty list, carry no
+	tags and are generic.
+
+	Wrapped in try/except because `products` is a Custom Field: on a site that
+	has not migrated since the fixtures landed the child table does not exist.
+	Returning {} there makes every article generic, which keeps the bot
+	answering rather than silently muting it.
+	"""
+	if not article_names:
+		return {}
+
+	try:
+		rows = frappe.get_all(
+			"HD Article Product",
+			filters={"parent": ["in", article_names], "parenttype": "HD Article"},
+			fields=["parent", "product"],
+		)
+	except Exception:
+		return {}
+
+	mapped: dict[str, list[str]] = {}
+	for row in rows:
+		mapped.setdefault(row["parent"], []).append(row["product"])
+	return mapped
+
+
+def filter_articles_for_product(rows: list[dict], product: str | None) -> list[dict]:
+	"""Drop articles tagged for other products. Untagged articles always pass.
+
+	Untagged-means-generic is deliberate: it makes the safe state the default,
+	so a newly written article is visible everywhere until somebody narrows it,
+	rather than invisible until somebody remembers to tag it.
+
+	Rows with no `name` are Outline results that never synced to an HD Article.
+	They pass through rather than being dropped — we have no tags for them, and
+	silently discarding them would shrink the bot's knowledge for no stated
+	reason.
+	"""
+	if not product or not rows:
+		return rows
+
+	names = [r["name"] for r in rows if r.get("name")]
+	tags = products_for_articles(names)
+
+	kept = []
+	for row in rows:
+		name = row.get("name")
+		if not name:
+			kept.append(row)
+			continue
+		article_products = tags.get(name) or []
+		if not article_products or product in article_products:
+			kept.append(row)
+	return kept
+```
+
+- [ ] **Step 6: Apply and run the tests**
+
+Run:
+```bash
+cd /home/kushal/frappe-bench
+bench --site dev.localhost migrate
+bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_article_product_tags
+```
+
+Expected: PASS, 9 tests.
+
+- [ ] **Step 7: Export the fixtures**
+
+Run:
+```bash
+cd /home/kushal/frappe-bench
+bench --site dev.localhost export-fixtures --app helpdesk
+cd apps/helpdesk
+python3 -c "
+import json
+names = [e['fieldname'] for e in json.load(open('helpdesk/fixtures/custom_field.json'))]
+assert 'products' in names, 'fixture export missed HD Article.products'
+print('OK')
+"
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add helpdesk/helpdesk/doctype/hd_article_product helpdesk/patches/add_hd_article_products_field.py helpdesk/patches.txt helpdesk/hooks.py helpdesk/fixtures/custom_field.json helpdesk/entitlement.py helpdesk/tests/test_article_product_tags.py
+git commit -m "feat(kb): tag knowledge-base articles with products
+
+HD Article.category is a single Link, so an article belongs to exactly one
+category. Mapping products to categories alone therefore forces the
+taxonomy to describe audience intersections — a \"POS+eTIMS\" category —
+rather than subjects, and a generic article can only live in one place,
+needing a General category mapped to every product that fails silently the
+first time someone adds a product and forgets it.
+
+Product tags are the precise signal; the category mapping stays as the
+coarse one for bulk assignment.
+
+An article with no tags is generic and eligible for every product. That
+makes the safe state the default: a new article is visible everywhere
+until somebody narrows it, rather than invisible until somebody remembers
+to tag it. products_for_articles fails the same way, returning {} on an
+unmigrated site so every article reads as generic and the bot keeps
+answering."
+```
+
+---
+
+### Task 7: Scope the bot's knowledge base to the customer's product
+
+**Files:**
+- Modify: `helpdesk/integrations/bot.py` — add `_scoped_categories`, thread `product` through `_search_kb`, `_filter_outline_by_category`, `_combined_kb_search`, and both call sites
+- Modify: `helpdesk/integrations/embeddings.py:213-259` (`search_articles`)
+- Test: `helpdesk/tests/test_bot_product_scoping.py`
+
+**Interfaces:**
+- Consumes: `entitlement.categories_for_product`, `resolve_product_for_ticket` (Task 4); `entitlement.filter_articles_for_product` (Task 6).
+- Produces:
+  - `bot._scoped_categories(product: str | None) -> list[str]`
+  - `bot._search_kb(query, limit, allowed_categories=None, product=None)`
+  - `bot._filter_outline_by_category(results, allowed_categories, product=None)`
+  - `bot._combined_kb_search(query, limit, product=None)`
+  - `embeddings.search_articles(query, top_k=3, allowed_categories=None, product=None)`
+
+**Two stages, applied together.** Stage 1 is the category ceiling — which topics the bot may read at all. Stage 2 is the product tag filter from Task 6 — whether a specific article is for this product. An article must pass both.
+
+**Stage 2 must run before truncation.** Filtering after a search has already cut to `top_k` would let it return three articles, drop two on product, and answer from one — degrading answers in a way that looks like a weak knowledge base rather than a filtering artefact. Both search paths already overfetch or are made to.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `helpdesk/tests/test_bot_product_scoping.py`:
 
 ```python
-"""The bot answers from the categories covering the customer's product.
+"""The bot answers from articles covering the customer's product.
 
-The global allowlist in Helpdesk Bot Settings stays the ceiling: a product can
-narrow what the bot reads, never widen it.
+Stage 1: the global allowlist in Helpdesk Bot Settings is the ceiling — a
+product narrows it, never widens it.
+Stage 2: articles tagged for other products are dropped; untagged articles are
+generic and always survive.
 """
 
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 from helpdesk.integrations import bot
@@ -1474,8 +1898,8 @@ class TestScopedCategories(unittest.TestCase):
             self.assertEqual(bot._scoped_categories("eTIMS"), ["b"])
 
     def test_product_cannot_widen_the_global_allowlist(self):
-        """The ceiling: a product mapped to a category the bot is not allowed to
-        read must not gain access to it."""
+        """A product mapped to a category the bot is not allowed to read must
+        not gain access to it."""
         with patch.object(bot, "_get_allowed_categories", return_value=["a"]), \
              patch("helpdesk.entitlement.categories_for_product", return_value=["a", "secret"]):
             self.assertEqual(bot._scoped_categories("eTIMS"), ["a"])
@@ -1507,13 +1931,14 @@ class TestScopedCategories(unittest.TestCase):
 
 
 class TestCombinedSearchPassesScope(unittest.TestCase):
-    def test_search_uses_the_scoped_categories(self):
+    def test_search_uses_the_scoped_categories_and_product(self):
         with patch.object(bot, "_scoped_categories", return_value=["b"]) as scoped, \
              patch.object(bot, "_search_kb", return_value=[]) as search_kb:
             bot._combined_kb_search("query", 3, product="eTIMS")
 
         scoped.assert_called_once_with("eTIMS")
         self.assertEqual(search_kb.call_args.kwargs["allowed_categories"], ["b"])
+        self.assertEqual(search_kb.call_args.kwargs["product"], "eTIMS")
 
     def test_search_without_a_product_still_works(self):
         """Existing callers pass no product; behaviour must not change."""
@@ -1522,6 +1947,35 @@ class TestCombinedSearchPassesScope(unittest.TestCase):
             bot._combined_kb_search("query", 3)
 
         self.assertEqual(search_kb.call_args.kwargs["allowed_categories"], ["a"])
+        self.assertIsNone(search_kb.call_args.kwargs["product"])
+
+
+class TestLikeFallbackFiltersByProduct(unittest.TestCase):
+    """The LIKE fallback runs when semantic search is unavailable. It truncates
+    with SQL LIMIT, so it must overfetch and filter before cutting to `limit`."""
+
+    def test_overfetches_then_filters_then_truncates(self):
+        rows = [{"name": f"A{i}"} for i in range(8)]
+
+        with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]), \
+             patch("frappe.db.sql", return_value=rows) as sql, \
+             patch(
+                 "helpdesk.entitlement.filter_articles_for_product",
+                 side_effect=lambda r, p: r[:5],
+             ) as filt:
+            out = bot._search_kb("q", 3, allowed_categories=None, product="eTIMS")
+
+        self.assertEqual(sql.call_args[0][1]["limit"], 12, "must overfetch limit * 4")
+        filt.assert_called_once()
+        self.assertEqual(len(out), 3, "must truncate to limit after filtering")
+
+    def test_no_product_does_not_filter(self):
+        rows = [{"name": "A"}]
+        with patch("helpdesk.integrations.embeddings.search_articles", return_value=[]), \
+             patch("frappe.db.sql", return_value=rows), \
+             patch("helpdesk.entitlement.filter_articles_for_product") as filt:
+            bot._search_kb("q", 3, allowed_categories=None, product=None)
+        filt.assert_not_called()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1530,13 +1984,13 @@ Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app
 
 Expected: FAIL — `AttributeError: module 'helpdesk.integrations.bot' has no attribute '_scoped_categories'`.
 
-- [ ] **Step 3: Add `_scoped_categories` and thread the product through**
+- [ ] **Step 3: Add `_scoped_categories` to `bot.py`**
 
-In `helpdesk/integrations/bot.py`, immediately after `_get_allowed_categories()` (which ends at line 43), insert:
+Immediately after `_get_allowed_categories()` (which ends at line 43), insert:
 
 ```python
 def _scoped_categories(product: str | None) -> list[str]:
-	"""Narrow the bot's category allowlist to the customer's product.
+	"""Stage 1: narrow the bot's category allowlist to the customer's product.
 
 	The global allowlist in Helpdesk Bot Settings is the ceiling — a product can
 	only narrow it, never widen it. An empty global list means "no restriction",
@@ -1562,7 +2016,166 @@ def _scoped_categories(product: str | None) -> list[str]:
 	return scoped or global_allowed
 ```
 
-Then change `_combined_kb_search` (line 108). Its current signature and first body line are:
+Add the import at the top of `helpdesk/integrations/bot.py`, alongside the other `helpdesk` imports:
+
+```python
+from helpdesk import entitlement
+```
+
+- [ ] **Step 4: Filter the semantic search before truncation**
+
+In `helpdesk/integrations/embeddings.py`, change the `search_articles` signature (line 213):
+
+```python
+def search_articles(
+	query: str,
+	top_k: int = 3,
+	allowed_categories: list[str] | None = None,
+	product: str | None = None,
+) -> list[dict]:
+```
+
+Then, in the body, the block currently reads:
+
+```python
+	rows = frappe.db.get_all(
+		"HD Article",
+		filters=filters,
+		fields=["name", "title", "content", "outline_doc_id"],
+	)
+	by_name = {r.name: r for r in rows}
+	return [by_name[name] for name in candidates if name in by_name][:top_k]
+```
+
+Change it to:
+
+```python
+	rows = frappe.db.get_all(
+		"HD Article",
+		filters=filters,
+		fields=["name", "title", "content", "outline_doc_id"],
+	)
+
+	# Stage 2 runs here, inside the existing `top_k * 4` overfetch, so articles
+	# dropped for the wrong product are backfilled rather than shrinking the
+	# result set.
+	if product:
+		from helpdesk import entitlement
+
+		rows = entitlement.filter_articles_for_product(rows, product)
+
+	by_name = {r.name: r for r in rows}
+	return [by_name[name] for name in candidates if name in by_name][:top_k]
+```
+
+- [ ] **Step 5: Thread `product` through `_search_kb`**
+
+In `helpdesk/integrations/bot.py`, change the `_search_kb` signature (line 47):
+
+```python
+def _search_kb(
+	query: str,
+	limit: int,
+	allowed_categories: list[str] | None = None,
+	product: str | None = None,
+) -> list[dict]:
+```
+
+Pass `product` to the semantic search — the call currently reads:
+
+```python
+		results = search_articles(query, top_k=limit, allowed_categories=allowed_categories)
+```
+
+Change it to:
+
+```python
+		results = search_articles(
+			query, top_k=limit, allowed_categories=allowed_categories, product=product
+		)
+```
+
+Then the LIKE fallback. It currently ends the function with a bare `return frappe.db.sql(...)` using `"limit": limit`. Replace the whole fallback block — from `category_condition = ""` to the end of the function — with:
+
+```python
+	category_condition = ""
+	# Overfetch so stage 2 can drop wrong-product articles without shrinking the
+	# result set; SQL LIMIT would otherwise truncate before filtering.
+	params = {"q": f"%{query}%", "limit": limit * 4 if product else limit}
+	if allowed_categories:
+		category_condition = "AND category IN %(categories)s"
+		params["categories"] = tuple(allowed_categories)
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT name, title, content, outline_doc_id
+		FROM `tabHD Article`
+		WHERE status = 'Published'
+		  AND (internal = 0 OR internal IS NULL)
+		  {category_condition}
+		  AND (title LIKE %(q)s OR content LIKE %(q)s)
+		LIMIT %(limit)s
+		""",
+		params,
+		as_dict=True,
+	)
+
+	if product:
+		from helpdesk import entitlement
+
+		rows = entitlement.filter_articles_for_product(rows, product)
+
+	return rows[:limit]
+```
+
+- [ ] **Step 6: Filter Outline results by product too**
+
+In `helpdesk/integrations/bot.py`, replace `_filter_outline_by_category` (line 88) with:
+
+```python
+def _filter_outline_by_category(
+	results: list[dict],
+	allowed_categories: list[str],
+	product: str | None = None,
+) -> list[dict]:
+	"""Keep only Outline results whose synced HD Article passes both stages.
+
+	Conservative by design: results that can't be mapped to a local article are
+	dropped — when a restriction is configured, unknown documents must never
+	reach the LLM. A product restriction counts as a restriction, so the same
+	rule applies to it.
+
+	Note this differs from filter_articles_for_product, which lets unidentifiable
+	rows through. The contexts differ: there we cannot tell what a row is, here
+	we are explicitly resolving documents and an unresolvable one is a document
+	we know nothing about.
+	"""
+	doc_ids = [r["outline_doc_id"] for r in results if r.get("outline_doc_id")]
+	if not doc_ids:
+		return []
+
+	filters = {"outline_doc_id": ["in", doc_ids]}
+	if allowed_categories:
+		filters["category"] = ["in", allowed_categories]
+
+	rows = frappe.db.get_all(
+		"HD Article",
+		filters=filters,
+		fields=["name", "outline_doc_id"],
+	)
+
+	if product:
+		from helpdesk import entitlement
+
+		rows = entitlement.filter_articles_for_product(rows, product)
+
+	allowed_ids = {r.outline_doc_id for r in rows}
+	return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+```
+
+- [ ] **Step 7: Wire both stages into `_combined_kb_search`**
+
+Change the signature and body of `_combined_kb_search` (line 108). It currently begins:
 
 ```python
 def _combined_kb_search(query: str, limit: int) -> list[dict]:
@@ -1572,9 +2185,10 @@ def _combined_kb_search(query: str, limit: int) -> list[dict]:
 	Both paths respect the Allowed Categories list in Helpdesk Bot Settings.
 	"""
 	allowed_categories = _get_allowed_categories()
+	hd_articles = _search_kb(query, limit, allowed_categories=allowed_categories)
 ```
 
-Replace those with:
+Replace those lines with:
 
 ```python
 def _combined_kb_search(query: str, limit: int, product: str | None = None) -> list[dict]:
@@ -1582,14 +2196,34 @@ def _combined_kb_search(query: str, limit: int, product: str | None = None) -> l
 
 	Outline results take precedence for documents that exist in both (fresher content).
 	Both paths respect the Allowed Categories list in Helpdesk Bot Settings,
-	narrowed to the ticket's product when one is known — see _scoped_categories.
+	narrowed to the ticket's product when one is known (stage 1), and both drop
+	articles tagged for a different product (stage 2).
 	"""
 	allowed_categories = _scoped_categories(product)
+	hd_articles = _search_kb(
+		query, limit, allowed_categories=allowed_categories, product=product
+	)
 ```
 
-Leave the rest of the function unchanged — it already uses `allowed_categories` throughout.
+Further down the same function, the Outline filter call currently reads:
 
-- [ ] **Step 4: Pass the product at both call sites**
+```python
+		if allowed_categories:
+			outline_results = _filter_outline_by_category(outline_results, allowed_categories)
+```
+
+Change it to:
+
+```python
+		if allowed_categories or product:
+			outline_results = _filter_outline_by_category(
+				outline_results, allowed_categories, product=product
+			)
+```
+
+Leave the rest of the function unchanged.
+
+- [ ] **Step 8: Pass the product at both call sites**
 
 At `helpdesk/integrations/bot.py:582`, inside `process_message()`, `ticket_name` is already in scope. Change:
 
@@ -1625,47 +2259,49 @@ to:
 	)
 ```
 
-Add the import at the top of `helpdesk/integrations/bot.py`, alongside the other `helpdesk` imports:
-
-```python
-from helpdesk import entitlement
-```
-
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 9: Run the test to verify it passes**
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_bot_product_scoping`
 
-Expected: PASS, 9 tests.
+Expected: PASS, 11 tests.
 
-- [ ] **Step 6: Run the full suite**
+- [ ] **Step 10: Run the full suite**
 
 Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk`
 
 Expected: OK. `test_no_erpnext.py` must still pass — check it appears in the output.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add helpdesk/integrations/bot.py helpdesk/tests/test_bot_product_scoping.py
+git add helpdesk/integrations/bot.py helpdesk/integrations/embeddings.py helpdesk/tests/test_bot_product_scoping.py
 git commit -m "feat(bot): scope knowledge base answers to the customer's product
 
 _combined_kb_search took no customer context, so the global allowlist in
 Helpdesk Bot Settings applied identically to every conversation and a
 POS-only customer could be answered from eTIMS articles.
 
-The global allowlist stays the ceiling: a product narrows it, never widens
-it, so mapping a product to a category the bot is not allowed to read
-cannot grant access to it.
+Two stages. Stage 1 narrows the category allowlist; the global list stays
+the ceiling, so mapping a product to a category the bot may not read
+cannot grant access to it, and an empty intersection falls back to the
+global list rather than searching nothing — silence reads as a broken bot.
+Stage 2 drops articles tagged for other products, with untagged articles
+treated as generic.
 
-When the intersection is empty the search falls back to the global list.
-That fallback is load-bearing — searching an empty category set returns
-nothing, which would mute the bot for exactly the customers whose product
-mapping is incomplete, and silence reads as a broken bot."
+Stage 2 runs before truncation everywhere: inside the existing top_k * 4
+overfetch in search_articles, and behind a widened SQL LIMIT in the LIKE
+fallback. Filtering after truncation would let a search return three
+articles, drop two, and answer from one — which looks like a weak
+knowledge base rather than a filtering artefact.
+
+Outline results keep their conservative rule: a document that cannot be
+mapped to a local article is dropped whenever a restriction is
+configured, and a product restriction now counts as one."
 ```
 
 ---
 
-### Task 7: Show coverage to the agent
+### Task 8: Show coverage to the agent
 
 **Files:**
 - Create: `helpdesk/api/entitlement.py`
@@ -1674,7 +2310,7 @@ mapping is incomplete, and silence reads as a broken bot."
 
 **Interfaces:**
 - Consumes: `helpdesk.entitlement` from Task 4.
-- Produces: whitelisted `helpdesk.api.entitlement.get_ticket_entitlement(ticket: str) -> dict` returning `{"customer", "product", "status", "support_expiry", "version", "entitlements": [...]}`.
+- Produces: whitelisted `helpdesk.api.entitlement.get_ticket_entitlement(ticket: str) -> dict` returning `{"customer", "product", "status", "stamped_status", "support_expiry", "entitlements": [...]}`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1841,7 +2477,6 @@ def get_ticket_entitlement(ticket: str) -> dict:
 		"product": None,
 		"status": entitlement.STATUS_UNKNOWN,
 		"support_expiry": None,
-		"version": None,
 		"entitlements": [],
 	}
 	if not ticket:
@@ -1866,7 +2501,6 @@ def get_ticket_entitlement(ticket: str) -> dict:
 		"status": entitlement.compute_support_status(row.get("customer"), product),
 		"stamped_status": row.get("support_status") or None,
 		"support_expiry": current.get("support_expiry") if current else None,
-		"version": current.get("version") if current else None,
 		"entitlements": entitlement.get_entitlements(row.get("customer")),
 	}
 ```
@@ -1977,6 +2611,233 @@ class of bug already fixed in WhatsAppAnalytics.vue."
 
 ---
 
+### Task 9: Record the product on knowledge-base gaps
+
+**Files:**
+- Create: `helpdesk/patches/add_missing_kb_query_product_field.py`
+- Modify: `helpdesk/patches.txt` (append one line)
+- Modify: `helpdesk/hooks.py` — extend the Custom Field fixture filter once more
+- Modify: `helpdesk/integrations/bot.py` — `_record_gap` signature and its caller
+- Test: `helpdesk/tests/test_kb_gap_product.py`
+
+**Interfaces:**
+- Consumes: `entitlement.resolve_product_for_ticket` (Task 4).
+- Produces: Custom Field `HD Bot Missing KB Query.product` (Link → `HD Product`), populated by `bot._record_gap`.
+
+**Why:** `HD Bot Missing KB Query` already stores `suggested_category`. Adding the product turns "the bot could not answer this" into "we have no eTIMS article about X", which is directly actionable for whoever writes articles. Combined with Task 6's tags, article-count-per-product becomes an ordinary report showing where the bot is weakest before customers find out.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `helpdesk/tests/test_kb_gap_product.py`:
+
+```python
+"""A recorded KB gap says which product it was about."""
+
+import unittest
+from unittest.mock import patch
+
+import frappe
+
+from helpdesk.integrations import bot
+
+PREFIX = "_test-gap-"
+
+
+def cleanup():
+    for name in frappe.get_all(
+        "HD Bot Missing KB Query", filters={"query_text": ["like", PREFIX + "%"]}, pluck="name"
+    ):
+        frappe.delete_doc(
+            "HD Bot Missing KB Query", name, force=True, ignore_permissions=True
+        )
+    for name in frappe.get_all(
+        "HD Product", filters={"name": ["like", PREFIX + "%"]}, pluck="name"
+    ):
+        frappe.delete_doc("HD Product", name, force=True, ignore_permissions=True)
+    frappe.db.commit()
+
+
+class TestKbGapProduct(unittest.TestCase):
+    def setUp(self):
+        frappe.set_user("Administrator")
+        cleanup()
+        frappe.get_doc({"doctype": "HD Product", "product_name": PREFIX + "eTIMS"}).insert(
+            ignore_permissions=True
+        )
+        frappe.db.commit()
+
+    def tearDown(self):
+        cleanup()
+
+    def test_custom_field_exists(self):
+        self.assertTrue(
+            frappe.db.exists(
+                "Custom Field", {"dt": "HD Bot Missing KB Query", "fieldname": "product"}
+            )
+        )
+
+    def test_gap_records_the_resolved_product(self):
+        with patch(
+            "helpdesk.entitlement.resolve_product_for_ticket",
+            return_value=PREFIX + "eTIMS",
+        ):
+            bot._record_gap(None, "waba", PREFIX + "how do I file", "", "")
+        frappe.db.commit()
+
+        row = frappe.get_all(
+            "HD Bot Missing KB Query",
+            filters={"query_text": PREFIX + "how do I file"},
+            fields=["product"],
+        )
+        self.assertTrue(row)
+        self.assertEqual(row[0]["product"], PREFIX + "eTIMS")
+
+    def test_gap_without_a_product_is_still_recorded(self):
+        """An unresolvable product must never stop the gap being logged — the
+        gap is the valuable part."""
+        with patch("helpdesk.entitlement.resolve_product_for_ticket", return_value=None):
+            bot._record_gap(None, "waba", PREFIX + "unknown product", "", "")
+        frappe.db.commit()
+
+        row = frappe.get_all(
+            "HD Bot Missing KB Query",
+            filters={"query_text": PREFIX + "unknown product"},
+            fields=["product"],
+        )
+        self.assertTrue(row, "gap was not recorded at all")
+        self.assertFalse(row[0]["product"])
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd /home/kushal/frappe-bench && bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_kb_gap_product`
+
+Expected: FAIL — the Custom Field does not exist.
+
+- [ ] **Step 3: Add the custom field**
+
+`helpdesk/patches/add_missing_kb_query_product_field.py`:
+
+```python
+import frappe
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+
+def execute():
+	"""Add HD Bot Missing KB Query.product.
+
+	A gap that names its product tells you what to write next; without it you
+	only know the bot failed. Custom Field rather than a doctype edit, for
+	consistency with the other fields this feature adds.
+
+	create_custom_fields is idempotent, so re-running is safe.
+	"""
+	create_custom_fields(
+		{
+			"HD Bot Missing KB Query": [
+				{
+					"fieldname": "product",
+					"label": "Product",
+					"fieldtype": "Link",
+					"options": "HD Product",
+					"insert_after": "suggested_category",
+					"read_only": 1,
+					"description": "Product the question was about, when it could be resolved.",
+				},
+			]
+		},
+		ignore_validate=True,
+	)
+	frappe.db.commit()
+```
+
+Append to the end of `helpdesk/patches.txt`:
+
+```
+helpdesk.patches.add_missing_kb_query_product_field
+```
+
+In `helpdesk/hooks.py`, extend the first fixture entry once more — after Task 6 it lists four doctypes and six fieldnames. Add `"HD Bot Missing KB Query"` to the `dt` list. The `fieldname` list already contains `"products"`; add `"product"` as well (they are different fields on different doctypes):
+
+```python
+        "filters": [
+            [
+                "dt",
+                "in",
+                [
+                    "HD Ticket",
+                    "Customer",
+                    "HD Task",
+                    "HD Article",
+                    "HD Bot Missing KB Query",
+                ],
+            ],
+            [
+                "fieldname",
+                "in",
+                [
+                    "baileys_jid",
+                    "baileys_line",
+                    "helpdesk_notes",
+                    "hd_product",
+                    "support_status",
+                    "products",
+                    "product",
+                ],
+            ],
+        ],
+```
+
+- [ ] **Step 4: Populate it in `_record_gap`**
+
+In `helpdesk/integrations/bot.py`, find `_record_gap` (defined near line 139, called near line 768). Add a `product` field to the document it inserts, resolved from the ticket.
+
+The function currently builds a document including `"suggested_category": suggested_category`. Add immediately after that key:
+
+```python
+				"product": entitlement.resolve_product_for_ticket(ticket_name),
+```
+
+`entitlement` is already imported at module level from Task 7. `resolve_product_for_ticket` returns `None` for an unknown or missing ticket and never raises, so no extra guard is needed and a gap is always recorded.
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run:
+```bash
+cd /home/kushal/frappe-bench
+bench --site dev.localhost migrate
+bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_kb_gap_product
+```
+
+Expected: PASS, 3 tests.
+
+- [ ] **Step 6: Export fixtures and run the full suite**
+
+Run:
+```bash
+cd /home/kushal/frappe-bench
+bench --site dev.localhost export-fixtures --app helpdesk
+bench --site dev.localhost run-tests --app helpdesk
+```
+
+Expected: OK, with `test_no_erpnext.py` still passing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add helpdesk/patches/add_missing_kb_query_product_field.py helpdesk/patches.txt helpdesk/hooks.py helpdesk/fixtures/custom_field.json helpdesk/integrations/bot.py helpdesk/tests/test_kb_gap_product.py
+git commit -m "feat(kb): record which product a knowledge-base gap was about
+
+HD Bot Missing KB Query already stored suggested_category, which tells you
+the bot failed but not what to write. The product turns it into \"we have
+no eTIMS article about X\".
+
+resolve_product_for_ticket returns None rather than raising, so an
+unresolvable product still records the gap — the gap is the valuable part."
+```
+
+---
+
 ## Plan Self-Review
 
 **Spec coverage** — every section of `2026-08-17-product-entitlement-design.md` maps to a task:
@@ -1986,19 +2847,36 @@ class of bug already fixed in WhatsAppAnalytics.vue."
 | `HD Product` + `HD Product Article Category` | 1 |
 | `HD Customer Product`, hash naming, composite unique index | 2 |
 | Standalone-not-child-table rationale, `source` ownership rule | 2 |
+| No `version` field | 2 |
 | `HD Ticket.hd_product` custom field via fixtures | 3 |
-| `try/except` on unmigrated sites | 4, 7 |
-| Selection constrained but overridable; server accepts any product | 5 (test), 7 (UI) |
+| `try/except` on unmigrated sites | 4, 6, 8 |
+| Selection constrained but overridable; server accepts any product | 5 (test), 8 (UI) |
 | `support_status`, four states, stamped on first-known, frozen | 5 |
-| Live badge distinct from the frozen stamp | 7 |
-| Bot KB scoping, global ceiling, empty-intersection fallback | 6 |
+| Live badge distinct from the frozen stamp | 8 |
+| `HD Article Product`, untagged-is-generic eligibility rule | 6 |
+| Bot KB scoping stage 1 — category ceiling, empty-intersection fallback | 7 |
+| Bot KB scoping stage 2 — product tags, hard filter, before truncation | 7 |
 | Single-entitlement inference | 4 |
+| KB gap tracking by product | 9 |
 | Upstream `product` Select left alone | 3 (test) |
-| Standing invariant: no ERPNext | Global Constraints; 6 and 7 re-run the guard suite |
+| Standing invariant: no ERPNext | Global Constraints; 7, 8 and 9 re-run the guard suite |
 | Sync-readiness (`source`, unique index) | 2 |
 
-Out-of-scope items in the spec (ERPNext calls, account standing, the contact guard, per-branch instances, automatic routing) correctly have no task.
+Out-of-scope items in the spec (ERPNext calls, account standing, the contact guard, per-branch instances, product versions, ranking/boosting, automatic routing) correctly have no task.
 
 **Placeholder scan:** no TBD/TODO, no "add error handling", no "similar to Task N". Every code step carries real code.
 
-**Type consistency:** `compute_support_status(customer, product)` is called with that argument order in Tasks 5 and 7. `categories_for_product(product)` and `resolve_product_for_ticket(ticket)` keep their signatures across Tasks 4, 6 and 7. The four status strings — `Covered`, `Expired`, `Not Entitled`, `Unknown` — are identical in the Select options (Task 3), the module constants (Task 4), the stamping tests (Task 5) and the badge tones (Task 7). `_scoped_categories` and `_combined_kb_search(query, limit, product=None)` match between definition and call sites in Task 6.
+**Type consistency:**
+
+- `compute_support_status(customer, product)` — same argument order in Tasks 5 and 8.
+- `categories_for_product(product)` and `resolve_product_for_ticket(ticket)` — signatures unchanged across Tasks 4, 7, 8 and 9.
+- `filter_articles_for_product(rows, product)` and `products_for_articles(names)` — defined in Task 6, called with that order in Task 7 (three call sites) and by each other.
+- The four status strings `Covered`, `Expired`, `Not Entitled`, `Unknown` are identical in the Select options (Task 3), the module constants (Task 4), the stamping tests (Task 5) and the badge tones (Task 8).
+- `_scoped_categories(product)`, `_search_kb(query, limit, allowed_categories=None, product=None)`, `_filter_outline_by_category(results, allowed_categories, product=None)`, `_combined_kb_search(query, limit, product=None)` and `search_articles(query, top_k=3, allowed_categories=None, product=None)` all match between definition and call sites in Task 7.
+
+**Two deliberate inconsistencies, both documented in the code they affect:**
+
+1. `filter_articles_for_product` lets rows without a `name` pass through; `_filter_outline_by_category` drops documents it cannot map. The contexts differ — the first cannot identify a row at all, the second is explicitly resolving documents, where an unresolvable one is a document we know nothing about. The second preserves behaviour that predates this plan.
+2. The fixture `fieldname` list ends up containing both `products` (a table on `HD Article`) and `product` (a link on `HD Bot Missing KB Query`). Similar names, different doctypes, both required.
+
+**Migration note:** Tasks 1, 2, 3, 6 and 9 each require `bench --site dev.localhost migrate`, which also applies any other pending patches on that site. Take a database snapshot before starting.
