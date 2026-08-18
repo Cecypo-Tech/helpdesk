@@ -63,6 +63,30 @@
             "
           />
         </div>
+        <!-- Support Coverage -->
+        <div
+          v-if="entitlement.data?.product"
+          class="mt-3 border-t border-outline-gray-2 pt-3"
+        >
+          <div class="mb-1.5 text-xs font-medium text-ink-gray-5">Support</div>
+          <div class="flex items-center gap-2">
+            <span class="truncate text-sm text-ink-gray-8">
+              {{ entitlement.data.product }}
+            </span>
+            <span
+              class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="statusTone"
+            >
+              {{ entitlement.data.status }}
+            </span>
+          </div>
+          <div
+            v-if="entitlement.data.support_expiry"
+            class="mt-1 text-xs text-ink-gray-5"
+          >
+            Support until {{ entitlement.data.support_expiry }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -127,12 +151,16 @@
 <script setup lang="ts">
 import { useTelephonyStore } from "@/stores/telephony";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
-import { RecentSimilarTicketsSymbol, TicketContactSymbol } from "@/types";
+import {
+  RecentSimilarTicketsSymbol,
+  TicketContactSymbol,
+  TicketSymbol,
+} from "@/types";
 import { copyToClipboard } from "@/utils";
 import dayjs from "dayjs";
-import { Avatar, Tooltip } from "frappe-ui";
+import { Avatar, Tooltip, createResource } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, inject } from "vue";
+import { computed, inject, watch } from "vue";
 import { CopyIcon } from "../icons";
 import EmailIcon from "../icons/EmailIcon.vue";
 import PhoneIcon from "../icons/PhoneIcon.vue";
@@ -142,7 +170,41 @@ const { isCallingEnabled } = storeToRefs(telephonyStore);
 
 const contact = inject(TicketContactSymbol);
 const recentSimilarTickets = inject(RecentSimilarTicketsSymbol);
+const ticket = inject(TicketSymbol);
 const dateFormat = window.date_format;
+
+const entitlement = createResource({
+  url: "helpdesk.api.entitlement.get_ticket_entitlement",
+  makeParams: () => ({ ticket: ticket.value?.doc?.name }),
+});
+
+// `TicketAgent` is reused across ticket navigation (no route `:key`), so the
+// subtree never unmounts. `makeParams` alone is not reactively tracked and
+// `auto: true` only fires once on first mount, so without this watcher the
+// badge keeps showing the previous ticket's product/coverage. On the
+// WhatsApp page the sidebar can mount before the ticket doc resolves, so the
+// watcher (not a one-shot auto fetch) is also what lets it retry once the
+// name becomes available.
+watch(
+  () => ticket.value?.doc?.name,
+  (name) => {
+    if (name) entitlement.reload();
+  },
+  { immediate: true }
+);
+
+const statusTone = computed(() => {
+  switch (entitlement.data?.status) {
+    case "Covered":
+      return "bg-surface-green-2 text-ink-green-3";
+    case "Expired":
+      return "bg-surface-amber-2 text-ink-amber-3";
+    case "Not Entitled":
+      return "bg-surface-gray-3 text-ink-gray-7";
+    default:
+      return "bg-surface-gray-2 text-ink-gray-5";
+  }
+});
 
 const { getStatus, colorMap } = useTicketStatusStore();
 

@@ -2,6 +2,8 @@
 import re
 import frappe
 
+from helpdesk import entitlement
+
 try:
 	from helpdesk.integrations.wa import send_wa_reply
 except Exception:
@@ -44,7 +46,12 @@ def _get_allowed_categories() -> list[str]:
 		return []
 
 
-def _search_kb(query: str, limit: int, allowed_categories: list[str] | None = None) -> list[dict]:
+def _search_kb(
+	query: str,
+	limit: int,
+	allowed_categories: list[str] | None = None,
+	product: str | None = None,
+) -> list[dict]:
 	"""Semantic search against published, non-internal HD Article records.
 
 	Falls back to a single whole-query LIKE when no embeddings are available
@@ -58,19 +65,23 @@ def _search_kb(query: str, limit: int, allowed_categories: list[str] | None = No
 	try:
 		from helpdesk.integrations.embeddings import search_articles
 
-		results = search_articles(query, top_k=limit, allowed_categories=allowed_categories)
+		results = search_articles(
+			query, top_k=limit, allowed_categories=allowed_categories, product=product
+		)
 		if results:
 			return results
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: semantic KB search failed")
 
 	category_condition = ""
-	params = {"q": f"%{query}%", "limit": limit}
+	# Overfetch so the product filter can drop wrong-product articles without
+	# shrinking the result set; SQL LIMIT would otherwise truncate first.
+	params = {"q": f"%{query}%", "limit": limit * 4 if product else limit}
 	if allowed_categories:
 		category_condition = "AND category IN %(categories)s"
 		params["categories"] = tuple(allowed_categories)
 
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		f"""
 		SELECT name, title, content, outline_doc_id
 		FROM `tabHD Article`
@@ -84,43 +95,88 @@ def _search_kb(query: str, limit: int, allowed_categories: list[str] | None = No
 		as_dict=True,
 	)
 
+	if product:
+		rows = entitlement.filter_articles_for_product(rows, product)
 
-def _filter_outline_by_category(results: list[dict], allowed_categories: list[str]) -> list[dict]:
-	"""Keep only Outline results whose synced HD Article is in an allowed category.
+	return rows[:limit]
 
-	Conservative by design: results that can't be mapped to a local article are
-	dropped — when a restriction is configured, unknown documents must never
-	reach the LLM.
+
+def _filter_outline_by_category(
+	results: list[dict],
+	allowed_categories: list[str],
+	product: str | None = None,
+) -> list[dict]:
+	"""Keep only Outline results whose synced HD Article passes every filter.
+
+	Conservative by design, and this predates the product work: when a category
+	allowlist is configured, results that can't be mapped to a local article are
+	dropped — unknown documents must never reach the LLM past a configured
+	restriction. That drop rule fires ONLY when allowed_categories is non-empty.
+
+	When allowed_categories is empty and only a product is set, unmapped rows
+	pass through untouched, matching filter_articles_for_product: an
+	unidentifiable row is not evidence of a wrong product, and rollout must stay
+	inert until articles are actually tagged. Rows that DO resolve to an HD
+	Article are still filtered by product.
 	"""
 	doc_ids = [r["outline_doc_id"] for r in results if r.get("outline_doc_id")]
 	if not doc_ids:
-		return []
+		return results if not allowed_categories else []
 
+	filters = {"outline_doc_id": ["in", doc_ids]}
+	if allowed_categories:
+		filters["category"] = ["in", allowed_categories]
+
+	# Rows that resolve to a local HD Article (category-filtered already when an
+	# allowlist is configured; otherwise every resolvable row).
 	rows = frappe.db.get_all(
 		"HD Article",
-		filters={"outline_doc_id": ["in", doc_ids], "category": ["in", allowed_categories]},
-		fields=["outline_doc_id"],
+		filters=filters,
+		fields=["name", "outline_doc_id"],
 	)
-	allowed_ids = {r.outline_doc_id for r in rows}
-	return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+	mapped_ids = {r.get("outline_doc_id") for r in rows}
+
+	if product:
+		rows = entitlement.filter_articles_for_product(rows, product)
+
+	allowed_ids = {r.get("outline_doc_id") for r in rows}
+
+	if allowed_categories:
+		# Conservative path: a document that can't be resolved at all is an
+		# unknown document, drop it.
+		return [r for r in results if r.get("outline_doc_id") in allowed_ids]
+
+	# No category allowlist: a document that can't be resolved to any HD
+	# Article is not evidence of a wrong product — let it through. A document
+	# that DOES resolve is still subject to the product filter above.
+	return [
+		r
+		for r in results
+		if r.get("outline_doc_id") not in mapped_ids or r.get("outline_doc_id") in allowed_ids
+	]
 
 
-def _combined_kb_search(query: str, limit: int) -> list[dict]:
+def _combined_kb_search(query: str, limit: int, product: str | None = None) -> list[dict]:
 	"""Query both local HD Articles and Outline directly, merge and deduplicate.
 
 	Outline results take precedence for documents that exist in both (fresher content).
-	Both paths respect the Allowed Categories list in Helpdesk Bot Settings.
+	Both paths respect the Allowed Categories list in Helpdesk Bot Settings, and
+	both drop articles tagged for a different product when one is known.
 	"""
 	allowed_categories = _get_allowed_categories()
-	hd_articles = _search_kb(query, limit, allowed_categories=allowed_categories)
+	hd_articles = _search_kb(
+		query, limit, allowed_categories=allowed_categories, product=product
+	)
 
 	outline_results: list[dict] = []
 	try:
 		from helpdesk.integrations.outline import search as _outline_search
 
 		outline_results = _outline_search(query, limit=limit, exclude_internal=True)
-		if allowed_categories:
-			outline_results = _filter_outline_by_category(outline_results, allowed_categories)
+		if allowed_categories or product:
+			outline_results = _filter_outline_by_category(
+				outline_results, allowed_categories, product=product
+			)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: Outline search failed")
 
@@ -148,6 +204,7 @@ def _record_gap(
 				"query_text": query_text,
 				"suggested_title": suggested_title,
 				"suggested_category": suggested_category,
+				"product": entitlement.resolve_product_for_ticket(ticket_name),
 				"status": "Pending",
 			}
 		).insert(ignore_permissions=True)
@@ -579,7 +636,11 @@ def process_message(msg_name: str, channel: str) -> None:
 			images.append(img_bytes)
 
 	# KB search (local HD Articles + live Outline query, deduped)
-	articles = _combined_kb_search(text, settings.kb_search_limit or 3)
+	articles = _combined_kb_search(
+		text,
+		settings.kb_search_limit or 3,
+		product=entitlement.resolve_product_for_ticket(ticket_name),
+	)
 
 	# Semantic search over resolved tickets (RAG — same Gemini API key)
 	resolved_context = ""
@@ -686,7 +747,13 @@ def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
 		(h["content"] for h in reversed(history) if h["role"] == "user"), ""
 	)
 
-	articles = _combined_kb_search(last_customer_msg, 3) if last_customer_msg else []
+	articles = (
+		_combined_kb_search(
+			last_customer_msg, 3, product=entitlement.resolve_product_for_ticket(ticket)
+		)
+		if last_customer_msg
+		else []
+	)
 	kb_context = "\n\n".join(f"Article: {a['title']}\n{a['content']}" for a in articles)
 
 	resolved_context = ""

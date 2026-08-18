@@ -109,6 +109,9 @@ doc_events = {
     "WA Message": {
         "after_insert": "helpdesk.integrations.bot.handle_wa_message",
     },
+    "HD Ticket": {
+        "before_save": "helpdesk.overrides.ticket_product.stamp_support_status",
+    },
     "HD Article": {
         "on_update": "helpdesk.integrations.embeddings.on_article_update",
     },
@@ -178,8 +181,30 @@ fixtures = [
     {
         "doctype": "Custom Field",
         "filters": [
-            ["dt", "in", ["HD Ticket", "Customer", "HD Task"]],
-            ["fieldname", "in", ["baileys_jid", "baileys_line", "helpdesk_notes"]],
+            [
+                "dt",
+                "in",
+                [
+                    "HD Ticket",
+                    "Customer",
+                    "HD Task",
+                    "HD Article",
+                    "HD Bot Missing KB Query",
+                ],
+            ],
+            [
+                "fieldname",
+                "in",
+                [
+                    "baileys_jid",
+                    "baileys_line",
+                    "helpdesk_notes",
+                    "hd_product",
+                    "support_status",
+                    "products",
+                    "product",
+                ],
+            ],
         ],
     },
     {

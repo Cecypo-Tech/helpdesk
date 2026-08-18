@@ -210,7 +210,12 @@ def _load_article_embeddings() -> list[dict]:
 	return result
 
 
-def search_articles(query: str, top_k: int = 3, allowed_categories: list[str] | None = None) -> list[dict]:
+def search_articles(
+	query: str,
+	top_k: int = 3,
+	allowed_categories: list[str] | None = None,
+	product: str | None = None,
+) -> list[dict]:
 	"""Return up to top_k published KB articles semantically similar to query.
 
 	Article data (title, content, category, internal, status) is fetched fresh from
@@ -256,6 +261,14 @@ def search_articles(query: str, top_k: int = 3, allowed_categories: list[str] | 
 		filters=filters,
 		fields=["name", "title", "content", "outline_doc_id"],
 	)
+
+	# Filter inside the existing `top_k * 4` overfetch, so articles dropped for
+	# the wrong product are backfilled rather than shrinking the result set.
+	if product:
+		from helpdesk import entitlement
+
+		rows = entitlement.filter_articles_for_product(rows, product)
+
 	by_name = {r.name: r for r in rows}
 	return [by_name[name] for name in candidates if name in by_name][:top_k]
 

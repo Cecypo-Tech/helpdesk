@@ -72,12 +72,31 @@ Three new doctypes.
 | `description` | Small Text | |
 | `disabled` | Check | retire a product without deleting history |
 | `default_team` | Link → HD Team | routing hint, not enforced |
-| `article_categories` | Table → HD Product Article Category | KB categories this product covers |
 
-**`HD Product Article Category`** — child table, single `category` Link →
-`HD Article Category`. Structurally identical to the existing
-`HD Bot Allowed Category` (`istable: 1`, one Link field), which is the pattern to
-copy.
+**`HD Article Product`** — child table on `HD Article`, single `product` Link →
+`HD Product`. This is the **precise** signal, and it exists because
+`HD Article.category` is a single Link: an article belongs to exactly one
+category.
+
+That constraint makes category-only mapping degrade badly. An article relevant to
+POS *and* eTIMS but not TIMS must live in a category mapped to exactly those two,
+so as the catalogue grows the taxonomy stops describing subjects and starts
+describing audience intersections ("POS+eTIMS"). And a genuinely generic article
+can only live in one place, so it needs a "General" category mapped to every
+product — which fails silently the first time someone adds a product and forgets
+to include it.
+
+**Eligibility rule:**
+
+```
+article has product tags  → eligible only for those products
+article has NO tags       → eligible for every product (generic)
+```
+
+Untagged-means-generic is the load-bearing half. It makes the safe state the
+default: a newly written article is visible everywhere until somebody narrows it,
+rather than invisible until somebody remembers to tag it. Same fail-open instinct
+as the empty-intersection fallback below.
 
 **`HD Customer Product`** — one row per entitlement. A standalone doctype, not a
 child table on `HD Customer`.
@@ -86,10 +105,14 @@ child table on `HD Customer`.
 |---|---|---|
 | `customer` | Link → HD Customer | |
 | `product` | Link → HD Product | |
-| `version` | Data | e.g. "eTIMS v2", "POS Pro" |
 | `support_expiry` | Date | **blank = no expiry = permanently covered** |
 | `source` | Select | `Manual` / `ERPNext` / `POS` — default `Manual` |
 | `notes` | Small Text | |
+
+There is deliberately **no `version` field**. The catalogue is flat by decision
+and support answers do not currently differ by version; adding one "just in case"
+would invite version-scoped articles and a materially more complex KB design for
+no present benefit. If versions start to matter, this doctype is where they go.
 
 Naming is hash-based, with a **composite unique index on `(customer, product)`**
 added in a patch (`frappe.db.add_index` with `unique=True`).
@@ -175,14 +198,32 @@ customer covered *right now*. Both exist; neither replaces the other.
 
 ### Bot knowledge-base scoping (`helpdesk/integrations/bot.py`)
 
-The global allowlist remains the ceiling — a product can never widen the bot's
-reach beyond what `Helpdesk Bot Settings.allowed_categories` permits.
+One mechanism: the product tag filter. The existing global allowlist in
+`Helpdesk Bot Settings.allowed_categories` is untouched and still applies exactly
+as it does today — it remains the ceiling, and product scoping only ever narrows
+within it.
 
-```
-categories = global_allowlist ∩ categories_of(resolved_product)
-if not categories:
-    categories = global_allowlist        # fallback — never search an empty set
-```
+A category→product mapping layer was designed and then deliberately dropped. The
+five categories in use (`Customers`, `Internal Docs`, `Public Access`, `General`,
+`Licenses`) are audience- and topic-shaped, so such a mapping would have shipped
+empty and stayed empty — dead configuration plus a second failure mode. If Outline
+collections are ever renamed after products, a mapping layer is a small,
+self-contained addition at that point.
+
+Filtering applies the eligibility rule above: an article tagged for other products
+is dropped; an untagged article is generic and always survives.
+
+It is a **hard filter, not a ranking boost.** Boosting tolerates mistagging but
+can still hand a POS customer eTIMS instructions, which is the precise confusion
+this feature exists to prevent. The untagged-is-generic escape hatch already
+covers the mistagging risk, so the extra tolerance buys little.
+
+Filtering must run **before** results are truncated to `top_k`, not after.
+Afterwards, a semantic search could return three articles, drop two on product and
+answer from one — silently degrading answers in a way that looks like a weak
+knowledge base rather than a filtering artefact. `search_articles` already
+overfetches `top_k * 4` for exactly this reason; the LIKE fallback needs its
+`LIMIT` widened to match.
 
 Product resolution order:
 
@@ -193,12 +234,52 @@ Product resolution order:
 Rule 2 earns its place: a customer who owns only eTIMS gets correctly scoped
 answers before any agent touches the ticket.
 
-The empty-intersection fallback is not optional. Without it the bot goes silent for
-precisely the customers whose data is incomplete — a worse failure than being
-slightly off-topic, and one that would present as "the bot is broken".
+Rollout is inert by construction. Until articles are tagged, every article is
+generic, so the filter removes nothing and the bot answers exactly as it does
+today. Accuracy improves in proportion to tagging.
 
-`_combined_kb_search()` gains an optional product argument. `bot.py:114` is the
-only site that resolves categories today, so the change stays contained.
+`_combined_kb_search()` gains an optional product argument, and the filter applies
+at three points — each already filters by category and so has the article rows to
+hand: `embeddings.py:251` (semantic search, which re-fetches article data at query
+time), `_search_kb`'s LIKE fallback, and `_filter_outline_by_category`.
+
+
+### Outline-synced articles
+
+`docs.cecypo.tech` syncs into `HD Article` hourly via `sync_outline_docs()`, and
+Outline carries no product information. Two facts make this safe.
+
+**Product tags survive the sync.** The update path is
+`frappe.db.set_value("HD Article", existing, {...})` with an explicit field dict —
+`title`, `content`, `category`, `source_url`, `internal`, `status`
+(`integrations/outline.py:168-186`). It never loads or saves the document, so it
+cannot touch child tables. Tags applied in Helpdesk persist across every re-sync,
+and archiving is likewise a single `status` write, so tags survive a document
+disappearing from Outline and returning.
+
+**Helpdesk owns routing metadata; Outline owns content.** That split is the
+design, not a workaround. Tagging happens once, in Helpdesk, and is never
+overwritten.
+
+Current state (2026-08-17): 189 synced articles across five categories —
+`Customers`, `Internal Docs`, `Public Access`, `General`, `Licenses`. These are
+audience- and topic-shaped rather than product-shaped, so **no name link exists
+today** and scoping will come from tags. Decision taken: tag in Helpdesk, leave
+Outline's structure alone. The name-matching rule above then costs nothing now
+and starts working automatically if a product-named collection is ever created.
+
+Note that `Public Access` / `Internal Docs` / `Customers` encode *who may read*,
+an axis the sync already handles separately through the `internal` flag. Product
+scoping is orthogonal to it and must not be conflated with it.
+
+### Knowledge-base gap tracking
+
+`HD Bot Missing KB Query` already records `suggested_category` when the bot
+cannot answer. Add `product`, populated from the same resolution used for
+scoping. This turns "the bot could not answer this" into "we have no eTIMS
+article about X", which is directly actionable for whoever writes articles — and
+once articles carry product tags, article-count-per-product becomes an ordinary
+report that shows where the bot is weakest before customers discover it.
 
 ### Upstream `HD Ticket.product`
 
@@ -220,8 +301,15 @@ conflict on every upstream merge for no benefit.
   when `hd_product` is changed from one product to another after the first stamp.
 - An unentitled product is accepted by the server and yields `Not Entitled` rather
   than a validation error.
-- Bot scoping: correct intersection; empty-intersection falls back to the global
-  allowlist; single-entitlement inference; global allowlist is never widened.
+- Bot scoping: a tagged article is excluded for a non-matching product; an
+  untagged article is returned for every product; filtering happens before
+  `top_k` truncation, so a product filter cannot quietly shrink the result set.
+- The global allowlist is unchanged — product scoping narrows within it and can
+  never widen it.
+- Single-entitlement inference resolves the product before an agent tags a ticket.
+- With no article tagged anywhere, search results are identical to today.
+- A product tag applied to an Outline-synced article survives `sync_outline_docs()`.
+- A KB gap records the resolved product.
 - Regression: `hd_product` queries survive an unmigrated site (`OperationalError`
   path).
 
@@ -234,6 +322,13 @@ conflict on every upstream merge for no benefit.
 - Per-branch or per-site product instances. The catalogue is flat by decision; if
   multi-site deployments later matter, `HD Customer Product` is the natural place
   to hang them.
+- Product versions, and therefore version-scoped articles. Support answers do not
+  currently differ by version.
+- Ranking or boosting by product. Filtering is hard.
+- A category→product mapping layer. Designed, then dropped: the categories in
+  use are audience- and topic-shaped, so it would have shipped empty. It is a
+  small, self-contained addition later if Outline collections are ever renamed
+  after products.
 - Automatic routing on expiry. `default_team` is a hint agents can act on; nothing
   routes automatically, because an outage at an out-of-contract customer must not
   be diverted to a sales desk.
