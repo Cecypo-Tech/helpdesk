@@ -88,8 +88,18 @@ ValueError: Global test record '...' had been deleted resulting in
             inconsistent global state.
 ```
 
-Delete the cache and re-run; it is rebuilt automatically:
+The two symptoms need different handling, and getting them the wrong way round
+turns one broken run into two:
 
 ```bash
+# "Global test record ... had been deleted" -> the file's contents are stale
 rm -f sites/dev.localhost/.test_records.jsonl
+
+# "No such file or directory: 'dev.localhost/.test_records.jsonl'" -> the file
+# is MISSING. _remove_from_log opens it for READ and crashes if it is absent,
+# so deleting it (above) fixes the first symptom and causes this one.
+touch sites/dev.localhost/.test_records.jsonl
 ```
+
+An empty file satisfies both: nothing stale to trip over, and something to open.
+Note the path in the error is relative — the runner resolves it from `sites/`.
