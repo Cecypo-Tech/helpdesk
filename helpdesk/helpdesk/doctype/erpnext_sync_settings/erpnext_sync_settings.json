@@ -14,6 +14,7 @@
   "test_connection",
   "section_schedule",
   "sync_interval_hours",
+  "sync_now",
   "col_break_sched",
   "last_customer_sync",
   "last_entitlement_sync"
@@ -69,6 +70,13 @@
    "fieldname": "sync_interval_hours",
    "fieldtype": "Int",
    "label": "Sync Interval (hours)"
+  },
+  {
+   "depends_on": "eval:doc.enabled",
+   "description": "Mirrors customers now, in the background. Safe to run repeatedly: it only asks for rows changed since the last successful run.",
+   "fieldname": "sync_now",
+   "fieldtype": "Button",
+   "label": "Sync Customers Now"
   },
   {
    "fieldname": "col_break_sched",

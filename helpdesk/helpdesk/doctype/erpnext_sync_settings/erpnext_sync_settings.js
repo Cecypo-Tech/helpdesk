@@ -3,6 +3,24 @@
 // own answer. Building a settings page in Vue for one button would be work
 // without a payoff.
 frappe.ui.form.on("ERPNext Sync Settings", {
+	sync_now(frm) {
+		if (frm.is_dirty()) {
+			frappe.msgprint(__("Save the settings first, then sync."));
+			return;
+		}
+		frappe.call({
+			method: "helpdesk.integrations.erpnext_sync.enqueue_customer_sync",
+			callback() {
+				// Queued, not finished. Saying "synced" here would be a lie the
+				// first time somebody syncs a few thousand customers.
+				frappe.show_alert({
+					message: __("Customer sync queued. Last Customer Sync updates when it finishes."),
+					indicator: "blue",
+				});
+			},
+		});
+	},
+
 	test_connection(frm) {
 		if (frm.is_dirty()) {
 			frappe.msgprint(__("Save the settings first, then test."));
