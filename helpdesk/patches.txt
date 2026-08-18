@@ -61,3 +61,4 @@ helpdesk.patches.add_hd_customer_product_unique_index
 helpdesk.patches.add_hd_ticket_product_fields
 helpdesk.patches.add_hd_article_products_field
 helpdesk.patches.add_missing_kb_query_product_field
+helpdesk.patches.add_product_fields_to_ticket_template

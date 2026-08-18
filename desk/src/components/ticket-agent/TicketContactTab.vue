@@ -65,27 +65,61 @@
         </div>
         <!-- Support Coverage -->
         <div
-          v-if="entitlement.data?.product"
+          v-if="entitlement.data?.customer"
           class="mt-3 border-t border-outline-gray-2 pt-3"
         >
-          <div class="mb-1.5 text-xs font-medium text-ink-gray-5">Support</div>
-          <div class="flex items-center gap-2">
+          <div class="mb-1.5 flex items-baseline gap-1.5">
+            <span class="text-xs font-medium text-ink-gray-5">Support</span>
+            <span class="truncate text-xs text-ink-gray-4">
+              {{ entitlement.data.customer }}
+            </span>
+          </div>
+
+          <!-- Ticket is tagged with a product the company does not hold -->
+          <div
+            v-if="unheldTicketProduct"
+            class="mb-1.5 flex items-center gap-2"
+          >
             <span class="truncate text-sm text-ink-gray-8">
-              {{ entitlement.data.product }}
+              {{ unheldTicketProduct }}
             </span>
             <span
               class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-              :class="statusTone"
+              :class="toneFor('Not Entitled')"
             >
-              {{ entitlement.data.status }}
+              Not Entitled
             </span>
           </div>
-          <div
-            v-if="entitlement.data.support_expiry"
-            class="mt-1 text-xs text-ink-gray-5"
-          >
-            Support until {{ entitlement.data.support_expiry }}
+
+          <div v-if="heldProducts.length" class="space-y-1.5">
+            <div
+              v-for="row in heldProducts"
+              :key="row.product"
+              class="flex items-center gap-2"
+            >
+              <span
+                class="truncate text-sm"
+                :class="
+                  row.product === entitlement.data.product
+                    ? 'font-medium text-ink-gray-8'
+                    : 'text-ink-gray-7'
+                "
+              >
+                {{ row.product }}
+              </span>
+              <span
+                class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+                :class="toneFor(row.status)"
+              >
+                {{ row.status }}
+              </span>
+              <span class="shrink-0 text-xs text-ink-gray-5">
+                {{ expiryLabel(row) }}
+              </span>
+            </div>
           </div>
+
+          <div v-else class="text-xs text-ink-gray-5">No products recorded</div>
         </div>
       </div>
     </div>
@@ -193,8 +227,8 @@ watch(
   { immediate: true }
 );
 
-const statusTone = computed(() => {
-  switch (entitlement.data?.status) {
+function toneFor(status) {
+  switch (status) {
     case "Covered":
       return "bg-surface-green-2 text-ink-green-3";
     case "Expired":
@@ -204,6 +238,37 @@ const statusTone = computed(() => {
     default:
       return "bg-surface-gray-2 text-ink-gray-5";
   }
+}
+
+// A blank support_expiry means permanently covered, not missing data — say so
+// rather than rendering an empty cell an agent would read as "unknown".
+function expiryLabel(row) {
+  if (!row.support_expiry) return "no expiry";
+  const when = dayjs(row.support_expiry).format("D MMM YYYY");
+  return row.expired ? `expired ${when}` : `until ${when}`;
+}
+
+// The ticket's own product first, then the rest alphabetically. Agents look
+// for "what is this ticket about" before "what else do they run".
+const heldProducts = computed(() => {
+  const rows = [...(entitlement.data?.entitlements ?? [])];
+  const current = entitlement.data?.product;
+  rows.sort((a, b) => {
+    if (a.product === current) return -1;
+    if (b.product === current) return 1;
+    return a.product.localeCompare(b.product);
+  });
+  return rows;
+});
+
+// A ticket tagged with a product the company does not hold. Worth surfacing:
+// it is either pre-sales, an evaluation, or stale data — all things an agent
+// should see rather than have silently omitted.
+const unheldTicketProduct = computed(() => {
+  const current = entitlement.data?.product;
+  if (!current) return null;
+  const held = entitlement.data?.entitlements ?? [];
+  return held.some((r) => r.product === current) ? null : current;
 });
 
 const { getStatus, colorMap } = useTicketStatusStore();
