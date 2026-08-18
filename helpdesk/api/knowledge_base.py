@@ -4,7 +4,7 @@ from frappe import _
 from frappe.rate_limiter import rate_limit
 from frappe.utils import get_user_info_for_avatar
 
-from helpdesk.utils import is_agent
+from helpdesk.utils import agent_only, is_agent
 
 
 @frappe.whitelist(allow_guest=True)
@@ -40,6 +40,9 @@ def get_article(name: str):
         ),
         "category_id": article.category,
         "feedback": int(feedback),
+        # Agents only. Product tags are routing metadata for the support bot,
+        # not something the customer portal needs, and get_article allows guests.
+        "products": article_products(name) if is_agent() else [],
     }
 
     return article
@@ -157,3 +160,52 @@ def increment_views(article: str):
     views = frappe.db.get_value("HD Article", article, "views") or 0
     views += 1
     frappe.db.set_value("HD Article", article, "views", views, update_modified=False)
+
+
+def article_products(article: str) -> list[str]:
+	"""Product names this article is tagged with.
+
+	Wrapped because `products` is a Custom Field: on a site that has not
+	migrated since the fixtures landed the child table does not exist and Frappe
+	raises OperationalError. Returning [] there reads the article as generic,
+	which keeps the bot answering — the same fail-open rule the scoping uses.
+	"""
+	try:
+		return frappe.get_all(
+			"HD Article Product",
+			filters={"parent": article, "parenttype": "HD Article"},
+			pluck="product",
+			order_by="idx asc",
+		)
+	except Exception:
+		return []
+
+
+@frappe.whitelist()
+@agent_only
+def set_article_products(article: str, products: list[str] | None = None):
+	"""Replace an article's product tags.
+
+	Replace, not merge: an empty list is a deliberate action that makes the
+	article generic again — untagged articles answer for every product — so it
+	must be possible to clear tags, not only add them.
+	"""
+	if isinstance(products, str):
+		products = frappe.parse_json(products)
+	products = products or []
+
+	seen = []
+	for product in products:
+		if product in seen:
+			continue
+		if not frappe.db.exists("HD Product", product):
+			frappe.throw(_("Unknown product: {0}").format(product))
+		seen.append(product)
+
+	doc = frappe.get_doc("HD Article", article)
+	doc.set("products", [])
+	for product in seen:
+		doc.append("products", {"product": product})
+	doc.save(ignore_permissions=True)
+
+	return seen

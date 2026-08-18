@@ -83,6 +83,26 @@
             autofocus
             :disabled="!editable"
           />
+
+          <!-- Product tags. Agent-only: these route the support bot, and the
+               customer portal has no use for them. Saved immediately rather
+               than as part of the edit session, matching how moving an article
+               between categories already behaves. -->
+          <div v-if="!isCustomerPortal" class="flex items-center gap-2">
+            <span class="shrink-0 text-xs text-ink-gray-5">Products</span>
+            <SearchMultiSelect
+              class="min-w-0 flex-1"
+              :options="productOptions"
+              :model-value="article.data?.products || []"
+              :placeholder="__('All products')"
+              :label="__('Products')"
+              selection-text="products"
+              @update:model-value="handleProductsUpdate"
+            />
+          </div>
+          <p v-if="!isCustomerPortal" class="-mt-1 text-xs text-ink-gray-4">
+            Leave empty to answer for every product.
+          </p>
         </div>
         <!-- Article Content -->
         <TextEditor
@@ -127,6 +147,7 @@ import {
   updateRes as updateArticle,
 } from "@/stores/knowledgeBase";
 import { capture } from "@/telemetry";
+import SearchMultiSelect from "@/components/SearchMultiSelect.vue";
 import { ComponentUtils } from "@/tiptap-extensions";
 import { Article, Breadcrumb, Error, FeedbackAction, Resource } from "@/types";
 import {
@@ -247,6 +268,48 @@ const toggleStatus = debounce(() => {
 const isDirty = ref(false);
 
 const moveToModal = ref(false);
+
+// Catalogue is flat and small (5-15 rows), so one unfiltered fetch is fine.
+const products = createResource({
+  url: "frappe.client.get_list",
+  params: {
+    doctype: "HD Product",
+    filters: { disabled: 0 },
+    fields: ["name"],
+    limit_page_length: 0,
+    order_by: "name asc",
+  },
+  auto: !isCustomerPortal.value,
+});
+
+const productOptions = computed(() =>
+  (products.data || []).map((p) => ({ label: p.name, value: p.name }))
+);
+
+const setArticleProducts = createResource({
+  url: "helpdesk.api.knowledge_base.set_article_products",
+});
+
+// An empty selection is a real action, not a no-op: an untagged article answers
+// for every product, so this is how an agent widens one that was over-narrowed.
+function handleProductsUpdate(values: string[]) {
+  setArticleProducts.submit(
+    { article: props.articleId, products: values },
+    {
+      onSuccess: () => {
+        article.reload();
+        toast.success(
+          values.length
+            ? __("Products updated")
+            : __("Products cleared — this article now answers for every product")
+        );
+      },
+      onError: (error: Error) => {
+        toast.error(error?.messages?.[0] || error.message);
+      },
+    }
+  );
+}
 
 function handleMoveToCategory(category: string) {
   moveToCategory.submit(
