@@ -19,6 +19,32 @@ bench --site dev.localhost run-tests --app helpdesk 2>&1 \
   | grep -E "^Running|Ran [0-9]+ tests|^(OK|FAILED)"
 ```
 
+## A full three-block run cannot complete on this bench (Frappe v16.28 bug)
+
+The run aborts after block 1 with:
+
+```
+FileNotFoundError: [Errno 2] No such file or directory: 'dev.localhost/.test_records.jsonl'
+```
+
+Cause is in Frappe, not this app: `_clear_test_log()` deletes the log file while
+`TestRecordManager._log` still holds entries in memory, so the next `remove()`
+opens a file that is no longer there (`frappe/tests/utils/generators.py:405`).
+It trips when the runner moves between category blocks. Re-creating the file
+does not help — the runner deletes it again mid-run.
+
+`--test-category` only accepts `unit | integration | all`, so the two failing
+blocks cannot be selected and run on their own either.
+
+**Verify per module instead.** It is slower but it actually completes, and the
+output is unambiguous:
+
+```bash
+for m in tests.test_entitlement_logic tests.test_support_status_stamp ... ; do
+  bench --site dev.localhost run-tests --app helpdesk --module helpdesk.$m
+done
+```
+
 ## Two environment problems that look like flaky tests
 
 Both produce failures that move around between runs, which makes them read as
