@@ -116,6 +116,62 @@ class TestEntitlementApi(unittest.TestCase):
         out = get_ticket_entitlement(doc.name)
         self.assertEqual([e["product"] for e in out["entitlements"]], [PRODUCT])
 
+    def test_every_entitlement_row_carries_a_status(self):
+        """The panel lists every product the company holds, each with its own
+        status. Deriving Covered/Expired in JavaScript instead would duplicate
+        coverage logic in a second language — the drift helpdesk/entitlement.py
+        exists to prevent."""
+        frappe.get_doc({
+            "doctype": "HD Customer Product",
+            "customer": CUSTOMER,
+            "product": PRODUCT,
+        }).insert(ignore_permissions=True)
+        other = frappe.get_doc({
+            "doctype": "HD Product", "product_name": PREFIX + "lapsed"
+        }).insert(ignore_permissions=True)
+        frappe.get_doc({
+            "doctype": "HD Customer Product",
+            "customer": CUSTOMER,
+            "product": other.name,
+            "support_expiry": add_days(today(), -1),
+        }).insert(ignore_permissions=True)
+        frappe.db.commit()
+        doc = self.ticket()
+
+        rows = {r["product"]: r for r in get_ticket_entitlement(doc.name)["entitlements"]}
+        self.assertEqual(rows[PRODUCT]["status"], "Covered")
+        self.assertEqual(rows[other.name]["status"], "Expired")
+
+    def test_entitlements_are_returned_even_with_no_ticket_product(self):
+        """The panel is gated on the customer, not the ticket's product — a
+        company holding three products must not render blank just because
+        nobody tagged the ticket."""
+        second = frappe.get_doc({
+            "doctype": "HD Product", "product_name": PREFIX + "second"
+        }).insert(ignore_permissions=True)
+        for prod in (PRODUCT, second.name):
+            frappe.get_doc({
+                "doctype": "HD Customer Product",
+                "customer": CUSTOMER,
+                "product": prod,
+            }).insert(ignore_permissions=True)
+        frappe.db.commit()
+        doc = self.ticket()
+
+        out = get_ticket_entitlement(doc.name)
+        # Two entitlements, so the single-entitlement inference deliberately
+        # does not fire and no product resolves — the panel must still list both.
+        self.assertIsNone(out["product"])
+        self.assertEqual(len(out["entitlements"]), 2)
+        self.assertEqual(out["customer"], CUSTOMER)
+
+    def test_customer_with_no_entitlements_still_reports_the_customer(self):
+        """A known customer holding nothing is information, not an empty panel."""
+        doc = self.ticket()
+        out = get_ticket_entitlement(doc.name)
+        self.assertEqual(out["customer"], CUSTOMER)
+        self.assertEqual(out["entitlements"], [])
+
     def test_unknown_ticket_returns_an_empty_payload(self):
         out = get_ticket_entitlement("no-such-ticket")
         self.assertEqual(out["status"], "Unknown")

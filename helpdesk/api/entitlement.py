@@ -49,11 +49,21 @@ def get_ticket_entitlement(ticket: str | int) -> dict:
 	product = entitlement.resolve_product_for_ticket(ticket)
 	current = entitlement.get_entitlement(row.get("customer"), product)
 
+	# Every row carries its own status so the side panel can render the whole
+	# company's coverage. Derived here rather than in the Vue component: doing
+	# it client-side would put coverage logic in a second language, which is
+	# exactly the drift helpdesk/entitlement.py exists to prevent.
+	entitlements = entitlement.get_entitlements(row.get("customer"))
+	for held in entitlements:
+		held["status"] = (
+			entitlement.STATUS_EXPIRED if held["expired"] else entitlement.STATUS_COVERED
+		)
+
 	return {
 		"customer": row.get("customer"),
 		"product": product,
 		"status": entitlement.compute_support_status(row.get("customer"), product),
 		"stamped_status": row.get("support_status") or None,
 		"support_expiry": current.get("support_expiry") if current else None,
-		"entitlements": entitlement.get_entitlements(row.get("customer")),
+		"entitlements": entitlements,
 	}
