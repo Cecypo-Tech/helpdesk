@@ -530,10 +530,20 @@ def sync_entitlements() -> dict:
 		if not customer:
 			continue
 
-		expiry = entitlement_expiry(row)
+		# Rank on (expiry, order date). The tie-break is not cosmetic: every
+		# order sharing an Auto Repeat computes the SAME expiry, because the
+		# endpoint joins the schedule's CURRENT next_schedule_date onto all of
+		# that contract's historical orders. So on the day a renewal is raised,
+		# the old paid order and the new unpaid one tie exactly — and whichever
+		# wins decides renewal_unpaid. Newest order must win, or a renewal
+		# nobody has paid yet inherits last year's per_billed = 100 and looks
+		# settled.
+		rank = (str(entitlement_expiry(row) or ""), str(row.get("ordered_on") or ""))
 		key = (customer, product)
 		current = best.get(key)
-		if current is None or str(expiry or "") > str(entitlement_expiry(current) or ""):
+		if current is None or rank > (
+			str(entitlement_expiry(current) or ""), str(current.get("ordered_on") or "")
+		):
 			best[key] = row
 
 	created = updated = unchanged = 0

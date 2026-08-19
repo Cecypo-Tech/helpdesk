@@ -32,6 +32,14 @@ PREFIX = "_test-entsync-"
 CUSTOMER = PREFIX + "co"
 PRODUCT = PREFIX + "eTIMS"
 
+# Item codes are prefixed so they cannot collide with the real catalogue. A live
+# sync on this bench created genuine "TimsParser" and "FrappeCloud Hosting
+# [Subscription]" products; bare codes here silently mapped onto those instead
+# of the fixture, and every assertion about the fixture's row went None.
+ITEM = PREFIX + "TimsParser"
+ITEM_ALT = PREFIX + "TimsParserAnnual"
+ITEM_UNMAPPED = PREFIX + "SomeRandomSKU"
+
 
 def payload(rows):
     return {"ok": True, "error": None,
@@ -39,7 +47,7 @@ def payload(rows):
                      "count": len(rows), "truncated": False, "entitlements": rows}}
 
 
-def ent(item_code, expiry, per_billed=100.0, customer=None, so="SO-1"):
+def ent(item_code, expiry, per_billed=100.0, customer=None, so="SO-1", ordered_on="2026-01-01"):
     """One endpoint row that will resolve to `expiry`.
 
     The schedule date is set a month earlier, because that is the shape of the
@@ -56,7 +64,7 @@ def ent(item_code, expiry, per_billed=100.0, customer=None, so="SO-1"):
         "so_status": "Completed" if per_billed >= 100 else "To Bill",
         "per_billed": per_billed,
         "sales_order": so,
-        "ordered_on": "2026-01-01",
+        "ordered_on": ordered_on,
         "currency": "KES",
     }
 
@@ -79,6 +87,11 @@ class _Base(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.saved = frappe.db.get_single_value(erpnext_sync.DOCTYPE, "last_entitlement_sync")
+        # Pin auto-create rather than inherit whatever the site is set to, so
+        # the suite gives the same answer on a bench where it has been switched
+        # on. TestAutoCreateProducts opts back in explicitly.
+        self.saved_auto = frappe.db.get_single_value(erpnext_sync.DOCTYPE, "auto_create_products")
+        frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", 0)
         self.addCleanup(self.restore)
 
         frappe.get_doc({
@@ -87,12 +100,13 @@ class _Base(unittest.TestCase):
         }).insert(ignore_permissions=True)
         self.product = frappe.get_doc({
             "doctype": "HD Product", "product_name": PRODUCT,
-            "erpnext_items": [{"item_code": "TimsParser"}],
+            "erpnext_items": [{"item_code": ITEM}],
         }).insert(ignore_permissions=True).name
         frappe.db.commit()
 
     def restore(self):
         frappe.db.set_single_value(erpnext_sync.DOCTYPE, "last_entitlement_sync", self.saved)
+        frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", self.saved_auto)
         frappe.db.commit()
 
     def tearDown(self):
@@ -111,7 +125,7 @@ class _Base(unittest.TestCase):
 
 class TestMapping(_Base):
     def test_creates_an_entitlement_from_a_mapped_item(self):
-        result = self.run_sync([ent("TimsParser", "2027-07-01")])
+        result = self.run_sync([ent(ITEM, "2027-07-01")])
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["created"], 1)
@@ -122,7 +136,7 @@ class TestMapping(_Base):
     def test_unmapped_item_is_ignored_and_counted(self):
         """The catalogue is a deliberate 5-15 rows. Auto-creating a product per
         billing SKU would fill it with noise."""
-        result = self.run_sync([ent("SomeRandomSKU", "2027-07-01")])
+        result = self.run_sync([ent(ITEM_UNMAPPED, "2027-07-01")])
 
         self.assertEqual(result["created"], 0)
         self.assertEqual(result["unmapped"], 1)
@@ -130,13 +144,13 @@ class TestMapping(_Base):
 
     def test_several_item_codes_can_mean_one_product(self):
         doc = frappe.get_doc("HD Product", self.product)
-        doc.append("erpnext_items", {"item_code": "TimsParserAnnual"})
+        doc.append("erpnext_items", {"item_code": ITEM_ALT})
         doc.save(ignore_permissions=True)
         frappe.db.commit()
 
         result = self.run_sync([
-            ent("TimsParser", "2026-07-01", so="SO-A"),
-            ent("TimsParserAnnual", "2027-07-01", so="SO-B"),
+            ent(ITEM, "2026-07-01", so="SO-A"),
+            ent(ITEM_ALT, "2027-07-01", so="SO-B"),
         ])
 
         self.assertEqual(result["created"], 1, "both codes fold into one product")
@@ -148,28 +162,43 @@ class TestExpiryAndRenewal(_Base):
         """Auto Repeat issues a fresh order each period, so a customer
         accumulates orders and the newest is their current cover."""
         self.run_sync([
-            ent("TimsParser", "2025-07-01", so="SO-OLD"),
-            ent("TimsParser", "2027-07-01", so="SO-NEW"),
+            ent(ITEM, "2025-07-01", so="SO-OLD"),
+            ent(ITEM, "2027-07-01", so="SO-NEW"),
         ])
         row = self.row()
         self.assertEqual(str(row.support_expiry), "2027-07-01")
         self.assertEqual(row.source_document, "SO-NEW")
 
+    def test_renewal_day_tie_is_broken_by_the_newest_order(self):
+        """The day a renewal is raised, both orders share one Auto Repeat and so
+        compute the SAME expiry — the endpoint joins the schedule's current
+        next_schedule_date onto every historical order. The newest must win, or
+        the unpaid renewal inherits last year's per_billed and looks settled."""
+        self.run_sync([
+            ent(ITEM, "2028-02-02", per_billed=100.0, so="SO-OLD",
+                ordered_on="2026-01-02"),
+            ent(ITEM, "2028-02-02", per_billed=0.0, so="SO-RENEWAL",
+                ordered_on="2027-01-02"),
+        ])
+        row = self.row()
+        self.assertEqual(row.source_document, "SO-RENEWAL")
+        self.assertEqual(row.renewal_unpaid, 1, "unpaid renewal must not look settled")
+
     def test_unbilled_winning_order_is_flagged_unpaid(self):
         """The renewal order is submitted a month before expiry, before anyone
         pays. Without this flag that silently grants another year of cover."""
-        self.run_sync([ent("TimsParser", "2027-07-01", per_billed=0.0, so="SO-NEW")])
+        self.run_sync([ent(ITEM, "2027-07-01", per_billed=0.0, so="SO-NEW")])
         self.assertEqual(self.row().renewal_unpaid, 1)
 
     def test_fully_billed_order_is_not_flagged(self):
-        self.run_sync([ent("TimsParser", "2027-07-01", per_billed=100.0)])
+        self.run_sync([ent(ITEM, "2027-07-01", per_billed=100.0)])
         self.assertEqual(self.row().renewal_unpaid, 0)
 
     def test_flag_follows_the_winning_order_not_an_older_one(self):
         """An old paid order must not make an unpaid renewal look settled."""
         self.run_sync([
-            ent("TimsParser", "2025-07-01", per_billed=100.0, so="SO-OLD"),
-            ent("TimsParser", "2027-07-01", per_billed=0.0, so="SO-NEW"),
+            ent(ITEM, "2025-07-01", per_billed=100.0, so="SO-OLD"),
+            ent(ITEM, "2027-07-01", per_billed=0.0, so="SO-NEW"),
         ])
         row = self.row()
         self.assertEqual(row.renewal_unpaid, 1)
@@ -187,14 +216,14 @@ class TestOwnershipAndFailure(_Base):
         }).insert(ignore_permissions=True)
         frappe.db.commit()
 
-        self.run_sync([ent("TimsParser", "2027-07-01")])
+        self.run_sync([ent(ITEM, "2027-07-01")])
 
         row = self.row()
         self.assertEqual(str(row.support_expiry), "2030-01-01")
         self.assertEqual(row.source, "Manual")
 
     def test_unreachable_erpnext_changes_nothing(self):
-        self.run_sync([ent("TimsParser", "2027-07-01")])
+        self.run_sync([ent(ITEM, "2027-07-01")])
         fail = {"ok": False, "data": None, "error": "connection refused"}
         with patch.object(erpnext_sync, "fetch_entitlements", return_value=fail):
             result = erpnext_sync.sync_entitlements()
@@ -203,12 +232,12 @@ class TestOwnershipAndFailure(_Base):
         self.assertEqual(str(self.row().support_expiry), "2027-07-01")
 
     def test_unknown_customer_is_skipped_not_fatal(self):
-        result = self.run_sync([ent("TimsParser", "2027-07-01", customer="_test-entsync-nobody")])
+        result = self.run_sync([ent(ITEM, "2027-07-01", customer="_test-entsync-nobody")])
         self.assertTrue(result["ok"])
         self.assertEqual(result["created"], 0)
 
     def test_running_twice_is_idempotent(self):
-        rows = [ent("TimsParser", "2027-07-01")]
+        rows = [ent(ITEM, "2027-07-01")]
         first = self.run_sync(rows)
         second = self.run_sync(rows)
         self.assertEqual(first["created"], 1)
@@ -233,9 +262,7 @@ class TestAutoCreateProducts(_Base):
     def enable_auto(self, on=True):
         frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", 1 if on else 0)
         frappe.db.commit()
-        self.addCleanup(
-            lambda: frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", 0)
-        )
+        # _Base.restore puts the site setting back; nothing to undo here.
 
     def test_product_is_named_after_the_item_code(self):
         self.enable_auto()
