@@ -1,6 +1,6 @@
 <template>
   <div class="flex gap-2 px-5 pb-1 leading-5 first:mt-3 items-center">
-    <div class="w-[106px] shrink-0 truncate text-sm text-gray-600">
+    <div class="w-[106px] shrink-0 truncate text-sm text-ink-gray-6">
       <Tooltip :text="field.label">
         <span>{{ field.label }}</span>
       </Tooltip>
@@ -158,7 +158,12 @@ function emitUpdate(fieldname: Field["fieldname"], value: FieldValue) {
 :deep(.form-control textarea),
 :deep(.form-control button) {
   border-color: transparent;
-  background: white;
+  /* Theme-aware, not a raw colour. `white` here stayed white under
+     [data-theme="dark"], so every template-driven field (Product, Support
+     Status) rendered as a white slab in an otherwise dark sidebar while the
+     core fields above it themed correctly. --surface-white resolves to
+     #FFFFFF in light and #0F0F0F in dark. */
+  background: var(--surface-white);
 }
 
 :deep(.form-control button) {
@@ -176,7 +181,10 @@ function emitUpdate(fieldname: Field["fieldname"], value: FieldValue) {
 }
 
 :deep(.form-control button svg) {
-  color: white;
+  /* Collapsed to zero width by design; the colour still has to track the
+     theme, or it is a white glyph on a dark control the moment anything
+     gives it width back. */
+  color: var(--surface-white);
   width: 0;
 }
 </style>
