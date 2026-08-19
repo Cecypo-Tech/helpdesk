@@ -143,6 +143,25 @@ class TestWaIngestEnqueue(_SettingsMixin, unittest.TestCase):
 		self.assertEqual(passed.reference_doctype, "HD Ticket")
 		self.assertTrue(passed.reference_name)
 
+	def test_verification_runs_on_the_linked_message(self):
+		# The wiring, asserted without any WABA transport mock: spying on
+		# handle_incoming proves the call exists, that it is reached after the
+		# bot block rather than being unreachable behind it, and that it gets a
+		# doc that already carries its ticket. Everything the verification state
+		# machine does past that point is covered in test_contact_verification.
+		with patch("frappe.enqueue"):
+			doc = _insert(PREFIX + "verify")
+
+		with patch(
+			"helpdesk.integrations.wa_verification.handle_incoming"
+		) as verification_hook:
+			wa_ingest.process_incoming_message(doc.name)
+
+		self.assertTrue(verification_hook.called)
+		passed = verification_hook.call_args.args[0]
+		self.assertEqual(passed.reference_doctype, "HD Ticket")
+		self.assertTrue(passed.reference_name)
+
 
 class TestWaIngestSweeper(_SettingsMixin, unittest.TestCase):
 	@classmethod
