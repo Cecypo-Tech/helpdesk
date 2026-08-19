@@ -13,6 +13,7 @@
   "api_secret",
   "test_connection",
   "section_schedule",
+  "auto_create_products",
   "sync_interval_hours",
   "sync_now",
   "col_break_sched",
@@ -64,6 +65,13 @@
    "fieldname": "section_schedule",
    "fieldtype": "Section Break",
    "label": "Sync"
+  },
+  {
+   "default": "1",
+   "description": "Create an HD Product for an ERPNext item code that has no mapping yet. Safe because only items on Sales Orders carrying an Auto Repeat are considered \u2014 a support-contract SKU list, not the whole item master.",
+   "fieldname": "auto_create_products",
+   "fieldtype": "Check",
+   "label": "Auto-create Products from Item Codes"
   },
   {
    "default": "6",

@@ -436,18 +436,47 @@ def sync_entitlements() -> dict:
 	"""Derive HD Customer Product rows from recurring Sales Orders."""
 	if not is_configured():
 		return {"ok": False, "error": "ERPNext sync is not configured",
-		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0}
+		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0,
+		        "products_created": 0}
 
 	result = fetch_entitlements()
 	if not result.get("ok"):
 		return {"ok": False, "error": result.get("error"),
-		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0}
+		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0,
+		        "products_created": 0}
 
 	data = result.get("data") or {}
 	rows = data.get("entitlements") or []
 
 	items = item_to_product_map()
 	customers = erp_customer_map()
+	products_created = 0
+
+	if settings().get("auto_create_products"):
+		# Keyed on item CODE, never item name. In this data one code
+		# ("FrappeCloud Hosting [Subscription]") appears under two different
+		# item names, and creating by name would produce two products for one
+		# thing. First name seen wins as the label; it can be renamed later.
+		unmapped_first_seen: dict[str, str] = {}
+		for row in rows:
+			code = (row.get("item_code") or "").strip()
+			if not code or code in items or code in unmapped_first_seen:
+				continue
+			unmapped_first_seen[code] = (row.get("item_name") or "").strip() or code
+
+		for code, label in unmapped_first_seen.items():
+			try:
+				product = ensure_product_for_item(code, label)
+			except Exception:
+				frappe.log_error(
+					frappe.get_traceback(),
+					f"ERPNext sync: could not create a product for item {code}",
+				)
+				continue
+			if product:
+				if product["created"]:
+					products_created += 1
+				items[code] = product["name"]
 
 	# Fold to one winner per (customer, product): the order with the latest
 	# delivery_date. Its per_billed is what the flag reflects — an older paid
@@ -500,7 +529,8 @@ def sync_entitlements() -> dict:
 	frappe.db.commit()
 
 	return {"ok": True, "error": None, "created": created, "updated": updated,
-	        "unchanged": unchanged, "unmapped": len(unmapped_codes)}
+	        "unchanged": unchanged, "unmapped": len(unmapped_codes),
+	        "products_created": products_created}
 
 
 def apply_entitlement(customer: str, product: str, row: dict) -> str:
@@ -557,3 +587,29 @@ def enqueue_entitlement_sync() -> dict:
 		queue="long", timeout=1800, job_id="erpnext_entitlement_sync", deduplicate=True,
 	)
 	return {"status": "queued"}
+
+
+def ensure_product_for_item(item_code: str, label: str) -> dict | None:
+	"""Map an ERPNext item code to an HD Product, creating one if needed.
+
+	If a product of that name already exists — somebody created it by hand —
+	the code is mapped onto it rather than making a near-duplicate. That makes
+	auto-creation safe to leave on: it fills gaps, it does not fork the
+	catalogue.
+	"""
+	existing = frappe.db.exists("HD Product", label)
+	if existing:
+		doc = frappe.get_doc("HD Product", label)
+		codes = {(r.item_code or "").strip() for r in (doc.get("erpnext_items") or [])}
+		if item_code not in codes:
+			doc.append("erpnext_items", {"item_code": item_code})
+			doc.save(ignore_permissions=True)
+		return {"name": doc.name, "created": False}
+
+	doc = frappe.get_doc({
+		"doctype": "HD Product",
+		"product_name": label,
+		"erpnext_items": [{"item_code": item_code}],
+	})
+	doc.insert(ignore_permissions=True)
+	return {"name": doc.name, "created": True}

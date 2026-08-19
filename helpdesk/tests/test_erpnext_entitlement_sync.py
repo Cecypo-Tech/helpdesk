@@ -204,3 +204,83 @@ class TestOwnershipAndFailure(_Base):
         self.assertEqual(first["created"], 1)
         self.assertEqual(second["created"], 0)
         self.assertEqual(second["updated"], 0)
+
+
+class TestAutoCreateProducts(_Base):
+    """Create a product for an unmapped item code, rather than making someone
+    hand-map every SKU.
+
+    Safe here because the source is already curated: only items on Sales Orders
+    carrying an Auto Repeat are considered, which is a support-contract SKU list,
+    not the whole item master.
+
+    Keyed on ITEM CODE, never item name: FrappeCloud Hosting [Subscription]
+    appears under two different item names in this data but is one code, and
+    creating by name would produce two products for one thing.
+    """
+
+    def enable_auto(self, on=True):
+        frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", 1 if on else 0)
+        frappe.db.commit()
+        self.addCleanup(
+            lambda: frappe.db.set_single_value(erpnext_sync.DOCTYPE, "auto_create_products", 0)
+        )
+
+    def test_creates_a_product_named_after_the_item(self):
+        self.enable_auto()
+        row = ent("NewSKU", "2027-07-01")
+        row["item_name"] = PREFIX + "Shiny Thing"
+
+        result = self.run_sync([row])
+
+        self.assertEqual(result["products_created"], 1)
+        self.assertTrue(frappe.db.exists("HD Product", PREFIX + "Shiny Thing"))
+        self.assertEqual(result["created"], 1, "and the entitlement is created in the same run")
+
+    def test_one_item_code_under_two_names_makes_one_product(self):
+        """The FrappeCloud case: same code, different item_name on each order."""
+        self.enable_auto()
+        a = ent("DualName", "2026-07-01", so="SO-A"); a["item_name"] = PREFIX + "Hosting"
+        b = ent("DualName", "2027-07-01", so="SO-B"); b["item_name"] = PREFIX + "Hosting [B]"
+
+        result = self.run_sync([a, b])
+
+        self.assertEqual(result["products_created"], 1)
+        mapped = frappe.get_all(
+            "HD Product Erpnext Item", filters={"item_code": "DualName"}, pluck="parent"
+        )
+        self.assertEqual(len(set(mapped)), 1)
+
+    def test_adopts_an_existing_product_of_the_same_name_instead_of_duplicating(self):
+        """Somebody already created the product by hand; just map the code to it."""
+        self.enable_auto()
+        existing = frappe.get_doc({
+            "doctype": "HD Product", "product_name": PREFIX + "Already Here"
+        }).insert(ignore_permissions=True).name
+        frappe.db.commit()
+
+        row = ent("AdoptMe", "2027-07-01")
+        row["item_name"] = PREFIX + "Already Here"
+        result = self.run_sync([row])
+
+        self.assertEqual(result["products_created"], 0)
+        self.assertEqual(
+            frappe.get_all("HD Product Erpnext Item", filters={"item_code": "AdoptMe"}, pluck="parent"),
+            [existing],
+        )
+
+    def test_disabled_by_setting_leaves_the_item_unmapped(self):
+        self.enable_auto(False)
+        result = self.run_sync([ent("StillUnmapped", "2027-07-01")])
+
+        self.assertEqual(result["products_created"], 0)
+        self.assertEqual(result["unmapped"], 1)
+        self.assertEqual(result["created"], 0)
+
+    def test_falls_back_to_the_item_code_when_no_name_is_given(self):
+        self.enable_auto()
+        row = ent("BareCode", "2027-07-01")
+        row["item_name"] = ""
+
+        self.run_sync([row])
+        self.assertTrue(frappe.db.exists("HD Product", "BareCode"))
