@@ -220,6 +220,7 @@ fixtures = [
                     "bot_enabled",
                     "normalized_phone",
                     "phone_suffix",
+                    "erpnext_contact",
                 ],
             ],
         ],
