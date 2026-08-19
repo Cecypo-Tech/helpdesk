@@ -88,10 +88,10 @@ from unittest.mock import patch
 from helpdesk.integrations import wa_verification
 
 
-def _settings(enabled=1, reask=7):
+def _settings(enabled=1, reask=7, prompt="What is your company name and KRA PIN?"):
 	return frappe._dict(
 		verification_enabled=enabled,
-		verification_prompt="What is your company name and KRA PIN?",
+		verification_prompt=prompt,
 		verification_reask_days=reask,
 	)
 
@@ -255,6 +255,42 @@ class TestPromptIsNotAnAgentReply(unittest.TestCase):
 
 		self.assertTrue(send.called)
 		self.assertIs(send.call_args.kwargs.get("system"), True)
+
+
+class TestBlankPrompt(_StateBase):
+	"""An operator clearing the free-text prompt must not send the word "None".
+
+	`s.get("verification_prompt")` passed straight through reaches the customer
+	as the literal "None" plus the bot suffix — and stamping Asked on the way out
+	would mean it is never retried.
+	"""
+
+	def _blank(self, prompt):
+		return patch.object(
+			wa_verification, "settings", return_value=_settings(prompt=prompt)
+		)
+
+	def test_an_empty_prompt_sends_nothing(self):
+		for prompt in (None, "", "   "):
+			with self.subTest(prompt=prompt), self._blank(prompt):
+				wa_verification.handle_incoming(self.msg("hello"))
+			self.assertEqual(self.sent, [], f"sent something for {prompt!r}")
+
+	def test_an_empty_prompt_leaves_the_contact_in_its_prior_state(self):
+		"""Bail before *both* side effects: marking Asked without asking would
+		strand the contact forever, and it must resume once the field is set."""
+		with self._blank(""):
+			wa_verification.handle_incoming(self.msg("hello"))
+
+		self.assertIn(self.status(), (None, "Unverified"))
+		self.assertIsNone(
+			frappe.db.get_value("Contact", self.contact, "hd_verification_asked_on")
+		)
+
+		# Prompt restored: the very next message asks, no manual repair needed.
+		wa_verification.handle_incoming(self.msg("still here?"))
+		self.assertEqual(len(self.sent), 1)
+		self.assertEqual(self.status(), "Asked")
 
 
 from helpdesk.api import verification as verification_api

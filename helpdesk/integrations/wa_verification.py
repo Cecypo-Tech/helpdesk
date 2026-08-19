@@ -125,7 +125,24 @@ def _handle(doc) -> None:
 	if status == ASKED and not _reask_due(state, s):
 		return
 
-	send_prompt(ticket, s.get("verification_prompt"))
+	prompt = (s.get("verification_prompt") or "").strip()
+	if not prompt:
+		# An operator who clears the free-text field would otherwise have `None`
+		# formatted into the outgoing body — the customer receives the literal
+		# "None" plus the bot suffix, and the contact is marked Asked so it is
+		# never retried. Bail before *both* side effects: leaving the contact in
+		# its prior state means filling the prompt back in resumes normally on
+		# the next inbound message.
+		frappe.log_error(
+			title="WhatsApp verification prompt is blank",
+			message=(
+				f"verification_enabled is on but verification_prompt is empty; "
+				f"ticket {ticket} / contact {contact} was not prompted."
+			),
+		)
+		return
+
+	send_prompt(ticket, prompt)
 	frappe.db.set_value("Contact", contact, {
 		STATUS_FIELD: ASKED,
 		"hd_verification_asked_on": frappe.utils.now_datetime(),
