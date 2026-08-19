@@ -81,3 +81,150 @@ class TestMatchClaim(unittest.TestCase):
 		"""Must not return every customer whose tax_id is blank."""
 		self.assertEqual(verification.match_claim(""), [])
 		self.assertEqual(verification.match_claim(None), [])
+
+
+from unittest.mock import patch
+
+from helpdesk.integrations import wa_verification
+
+
+def _settings(enabled=1, reask=7):
+	return frappe._dict(
+		verification_enabled=enabled,
+		verification_prompt="What is your company name and KRA PIN?",
+		verification_reask_days=reask,
+	)
+
+
+class _StateBase(unittest.TestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.cleanup()
+		self.contact = frappe.get_doc({
+			"doctype": "Contact",
+			"first_name": PREFIX + "caller",
+			"phone_nos": [{"phone": "254700111222", "is_primary_mobile_no": 1}],
+		}).insert(ignore_permissions=True).name
+		self.ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": PREFIX + "ticket",
+			"contact": self.contact,
+		}).insert(ignore_permissions=True).name
+		frappe.db.commit()
+
+		self.sent = []
+		p = patch.object(
+			wa_verification, "send_prompt",
+			side_effect=lambda ticket, text: self.sent.append((ticket, text)),
+		)
+		p.start()
+		self.addCleanup(p.stop)
+		p2 = patch.object(wa_verification, "settings", return_value=_settings())
+		p2.start()
+		self.addCleanup(p2.stop)
+		self.addCleanup(self.cleanup)
+
+	def cleanup(self):
+		for t in frappe.get_all(
+			"HD Ticket", filters={"subject": ["like", PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("HD Ticket", t, force=True, ignore_permissions=True,
+			                  delete_permanently=True)
+		for c in frappe.get_all(
+			"Contact", filters={"first_name": ["like", PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("Contact", c, force=True, ignore_permissions=True,
+			                  delete_permanently=True)
+		for c in frappe.get_all(
+			"HD Customer", filters={"name": ["like", PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("HD Customer", c, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+	def msg(self, text):
+		return frappe._dict(
+			name=PREFIX + "msg", type="Incoming", message=text,
+			reference_doctype="HD Ticket", reference_name=self.ticket,
+		)
+
+	def status(self):
+		return frappe.db.get_value("Contact", self.contact, "hd_verification_status")
+
+
+class TestAsking(_StateBase):
+	def test_an_unverified_contact_is_asked_once(self):
+		wa_verification.handle_incoming(self.msg("my printer is broken"))
+		self.assertEqual(len(self.sent), 1)
+		self.assertEqual(self.status(), "Asked")
+
+	def test_a_second_message_inside_the_window_does_not_reask(self):
+		wa_verification.handle_incoming(self.msg("my printer is broken"))
+		wa_verification.handle_incoming(self.msg("are you there?"))
+		self.assertEqual(len(self.sent), 1, "must not nag on every message")
+
+	def test_it_asks_again_after_the_reask_window(self):
+		wa_verification.handle_incoming(self.msg("hello"))
+		frappe.db.set_value(
+			"Contact", self.contact, "hd_verification_asked_on",
+			frappe.utils.add_days(frappe.utils.now_datetime(), -8),
+		)
+		wa_verification.handle_incoming(self.msg("hello again"))
+		self.assertEqual(len(self.sent), 2)
+
+	def test_a_contact_already_linked_to_a_customer_is_never_asked(self):
+		customer = frappe.get_doc({
+			"doctype": "HD Customer", "customer_name": PREFIX + "known",
+		}).insert(ignore_permissions=True).name
+		c = frappe.get_doc("Contact", self.contact)
+		c.append("links", {"link_doctype": "HD Customer", "link_name": customer})
+		c.save(ignore_permissions=True)
+		frappe.db.commit()
+
+		wa_verification.handle_incoming(self.msg("hello"))
+		self.assertEqual(self.sent, [])
+
+	def test_disabled_setting_does_nothing_at_all(self):
+		with patch.object(wa_verification, "settings", return_value=_settings(enabled=0)):
+			wa_verification.handle_incoming(self.msg("hello"))
+		self.assertEqual(self.sent, [])
+		self.assertIn(self.status(), (None, "Unverified"))
+
+
+class TestRecordingTheClaim(_StateBase):
+	def test_a_pin_in_the_reply_is_stored_and_status_moves_to_claimed(self):
+		wa_verification.handle_incoming(self.msg("hello"))
+		wa_verification.handle_incoming(self.msg("Blue Lake Ltd P051234567X"))
+
+		row = frappe.db.get_value(
+			"Contact", self.contact,
+			["hd_verification_status", "hd_claimed_tax_id", "hd_claimed_company"],
+			as_dict=True,
+		)
+		self.assertEqual(row.hd_verification_status, "Claimed")
+		self.assertEqual(row.hd_claimed_tax_id, "P051234567X")
+		self.assertIn("Blue Lake", row.hd_claimed_company)
+
+	def test_a_reply_with_no_pin_leaves_the_state_alone(self):
+		wa_verification.handle_incoming(self.msg("hello"))
+		wa_verification.handle_incoming(self.msg("sorry what do you mean?"))
+		self.assertEqual(self.status(), "Asked")
+		self.assertEqual(len(self.sent), 1)
+
+	def test_a_verified_contact_is_never_relinked_by_a_later_pin(self):
+		frappe.db.set_value("Contact", self.contact, "hd_verification_status", "Verified")
+		wa_verification.handle_incoming(self.msg("actually our PIN is P099999999Z"))
+		self.assertEqual(
+			frappe.db.get_value("Contact", self.contact, "hd_claimed_tax_id"), None
+		)
+
+	def test_a_rejected_contact_is_never_asked_again(self):
+		frappe.db.set_value("Contact", self.contact, "hd_verification_status", "Rejected")
+		wa_verification.handle_incoming(self.msg("hello"))
+		self.assertEqual(self.sent, [])
+
+
+class TestFailOpen(_StateBase):
+	def test_a_failing_send_does_not_raise(self):
+		with patch.object(wa_verification, "send_prompt", side_effect=Exception("boom")):
+			wa_verification.handle_incoming(self.msg("hello"))
+		self.assertTrue(frappe.db.exists("HD Ticket", self.ticket))

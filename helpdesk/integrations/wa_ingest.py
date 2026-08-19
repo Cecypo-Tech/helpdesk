@@ -41,7 +41,7 @@ def process_incoming_message(message_name: str) -> None:
 		# Already linked, by an earlier run of this job or by an agent.
 		return
 
-	from helpdesk.integrations import bot, wa
+	from helpdesk.integrations import bot, wa, wa_verification
 
 	wa.link_incoming_message(doc)
 
@@ -64,6 +64,17 @@ def process_incoming_message(message_name: str) -> None:
 		frappe.log_error(
 			title="WhatsApp bot dispatch failed",
 			message=f"Message {doc.name} is linked to ticket {doc.reference_name}; the bot did not run.",
+		)
+
+	# Same discipline as the bot dispatch above: the ticket is already committed
+	# and an automated question must not be able to undo it. handle_incoming
+	# swallows its own errors too; this is belt and braces.
+	try:
+		wa_verification.handle_incoming(doc)
+	except Exception:
+		frappe.log_error(
+			title="WhatsApp verification dispatch failed",
+			message=f"Message {doc.name} is linked to ticket {doc.reference_name}.",
 		)
 
 
