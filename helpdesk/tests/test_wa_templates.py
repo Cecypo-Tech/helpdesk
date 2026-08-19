@@ -289,3 +289,52 @@ class TestWATemplates(FrappeTestCase):
 			frappe.delete_doc, "WhatsApp Message", result["name"],
 			ignore_permissions=True, force=True,
 		)
+
+	# ── agent reply vs system send ────────────────────────────────────────
+
+	def _send(self, text, **kwargs):
+		"""Send through the real path with Meta patched out, returning the doc name."""
+		with patch(MESSAGE_POST, return_value={"messages": [{"id": "wamid.test"}]}):
+			result = wa._send_fw_reply(self.ticket.name, text, **kwargs)
+		self.addCleanup(
+			frappe.delete_doc, "WhatsApp Message", result["name"],
+			ignore_permissions=True, force=True,
+		)
+		return result
+
+	def _reply_status_settings(self):
+		"""Settings that move the ticket on an agent reply, which is the default."""
+		return patch.object(
+			wa, "_fw_settings",
+			return_value=frappe._dict(enabled=1, agent_reply_status="Replied"),
+		)
+
+	def test_an_agent_reply_still_moves_the_ticket(self):
+		"""The default must be untouched: this is the behaviour every existing
+		caller of _send_fw_reply relies on."""
+		self._make_incoming(age_hours=1)
+		with self._reply_status_settings():
+			self._send("on it")
+
+		self.assertEqual(
+			frappe.db.get_value("HD Ticket", self.ticket.name, "status"), "Replied"
+		)
+
+	def test_a_system_send_leaves_the_status_and_assignment_alone(self):
+		"""An automated housekeeping question is not an agent reply. Moving a
+		brand-new ticket into agent_reply_status can drop it out of the agents'
+		Open queue — the "degrades support" outcome the verification spec rules
+		out — and assigning it credits a human who never touched it."""
+		self._make_incoming(age_hours=1)
+		before = frappe.db.get_value("HD Ticket", self.ticket.name, "status")
+
+		with self._reply_status_settings():
+			self._send("who are you?", system=True)
+
+		self.assertEqual(
+			frappe.db.get_value("HD Ticket", self.ticket.name, "status"), before
+		)
+		self.assertIn(
+			frappe.db.get_value("HD Ticket", self.ticket.name, "_assign") or "[]",
+			("[]", "", None),
+		)

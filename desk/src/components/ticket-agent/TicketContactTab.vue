@@ -134,6 +134,58 @@
             </span>
           </div>
         </div>
+
+        <!-- Unverified WhatsApp contact claim. Only shown while there is
+             something for an agent to act on: a never-asked, verified, or
+             already-rejected contact renders nothing here. -->
+        <div
+          v-if="claim.data && ['Asked', 'Claimed'].includes(claim.data.status)"
+          class="mt-3 rounded border border-outline-gray-2 bg-surface-gray-1 p-3 text-base"
+        >
+          <div class="font-medium text-ink-gray-8">Unverified number</div>
+
+          <div v-if="claim.data.status === 'Asked'" class="mt-1 text-ink-gray-6">
+            Asked for a company name and KRA PIN; no reply yet.
+          </div>
+
+          <template v-else>
+            <div class="mt-1 text-ink-gray-6">
+              Claims
+              <!-- A message that carried a PIN and nothing else has no company
+                   to show; omit the field rather than render a dangling middot. -->
+              <span v-if="claim.data.claimed_company" class="text-ink-gray-8">
+                {{ claim.data.claimed_company }} &middot;
+              </span>
+              <span class="text-ink-gray-8">{{ claim.data.claimed_tax_id }}</span>
+            </div>
+
+            <div v-if="!claim.data.matches.length" class="mt-2 text-ink-gray-6">
+              No customer matches that PIN.
+            </div>
+
+            <div
+              v-for="m in claim.data.matches"
+              :key="m.name"
+              class="mt-2 flex items-center gap-2"
+            >
+              <span class="text-ink-gray-8 truncate">{{ m.customer_name }}</span>
+              <Button
+                variant="subtle"
+                label="Link"
+                :disabled="claimBusy"
+                @click="approve(m.name)"
+              />
+            </div>
+
+            <Button
+              class="mt-2"
+              variant="ghost"
+              label="Dismiss"
+              :disabled="claimBusy"
+              @click="reject()"
+            />
+          </template>
+        </div>
       </div>
     </div>
 
@@ -205,9 +257,9 @@ import {
 } from "@/types";
 import { copyToClipboard } from "@/utils";
 import dayjs from "dayjs";
-import { Avatar, Tooltip, createResource } from "frappe-ui";
+import { Avatar, Button, Tooltip, createResource, toast } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, inject, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { CopyIcon } from "../icons";
 import EmailIcon from "../icons/EmailIcon.vue";
 import PhoneIcon from "../icons/PhoneIcon.vue";
@@ -249,6 +301,76 @@ watch(
   },
   { immediate: true }
 );
+
+// Unrecognised WhatsApp sender's self-reported company/PIN claim, and the
+// customers it could plausibly match. Same watch-not-auto reasoning as
+// above: makeParams isn't reactive, so this would otherwise show the
+// previous ticket's claim after navigation.
+const claim = createResource({
+  url: "helpdesk.api.verification.get_contact_claim",
+  makeParams: () => ({ ticket: ticket.value?.doc?.name }),
+});
+
+watch(
+  () => ticket.value?.doc?.name,
+  (name) => {
+    if (name) claim.fetch();
+  },
+  { immediate: true }
+);
+
+// Held while an approve/reject request is in flight. Both endpoints are
+// idempotent server-side, but linking a contact to a customer is the most
+// security-relevant action in this panel — a double click firing it twice, or
+// a failure that looks identical to a success, are both worth ruling out.
+const claimBusy = ref(false);
+
+function submitClaimAction(resource, failure: string, onDone?: () => void) {
+  if (claimBusy.value) return;
+  claimBusy.value = true;
+  return resource
+    .fetch()
+    .then(() => {
+      claim.fetch();
+      onDone?.();
+    })
+    .catch((e) => {
+      toast.error(e?.messages?.[0] || e?.message || failure);
+    })
+    .finally(() => {
+      claimBusy.value = false;
+    });
+}
+
+// Never triggered implicitly (e.g. "only one match") — only an explicit
+// agent click may link a contact to a customer.
+function approve(customer: string) {
+  return submitClaimAction(
+    createResource({
+      url: "helpdesk.api.verification.approve_contact_link",
+      params: { contact: claim.data.contact, customer },
+    }),
+    "Could not link this contact",
+    () => {
+      // The endpoint backfills HD Ticket.customer, but entitlement and standing
+      // are separate requests that already resolved against the empty ticket.
+      // Reload them so the coverage panel replaces the claim right away rather
+      // than only after the agent reloads the page.
+      entitlement.reload();
+      standing.reload();
+    }
+  );
+}
+
+function reject() {
+  return submitClaimAction(
+    createResource({
+      url: "helpdesk.api.verification.reject_contact_claim",
+      params: { contact: claim.data.contact },
+    }),
+    "Could not dismiss this claim"
+  );
+}
 
 // Only ever shown to agents, and never quoted by the bot: a WhatsApp number
 // can be a shared office handset.

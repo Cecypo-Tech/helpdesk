@@ -8,6 +8,9 @@
  "field_order": [
   "enabled",
   "unknown_contact_action",
+  "verification_enabled",
+  "verification_prompt",
+  "verification_reask_days",
   "new_conversation_timeout_hours",
   "section_ticket_defaults",
   "default_ticket_type",
@@ -38,6 +41,27 @@
    "fieldtype": "Select",
    "label": "Unknown Contact Action",
    "options": "Skip Ticket Creation\nCreate Contact and Ticket\nCreate Ticket Only"
+  },
+  {
+   "default": "0",
+   "fieldname": "verification_enabled",
+   "fieldtype": "Check",
+   "label": "Ask Unknown Contacts to Identify Themselves",
+   "description": "Off by default. When on, an unrecognised WhatsApp number is asked once for its company name and KRA PIN. A match never links anyone automatically — an agent approves."
+  },
+  {
+   "default": "Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
+   "depends_on": "eval:doc.verification_enabled",
+   "fieldname": "verification_prompt",
+   "fieldtype": "Small Text",
+   "label": "Verification Prompt"
+  },
+  {
+   "default": "7",
+   "depends_on": "eval:doc.verification_enabled",
+   "fieldname": "verification_reask_days",
+   "fieldtype": "Int",
+   "label": "Days Before Asking Again"
   },
   {
    "default": "24",

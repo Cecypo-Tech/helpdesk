@@ -65,3 +65,4 @@ helpdesk.patches.add_product_fields_to_ticket_template
 helpdesk.patches.add_erpnext_fields_to_hd_customer
 helpdesk.patches.add_erpnext_contact_field
 helpdesk.patches.add_erpnext_entitlement_fields
+helpdesk.patches.add_contact_verification_fields
