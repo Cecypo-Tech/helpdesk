@@ -11,8 +11,36 @@ class TestWAUnreadState(FrappeTestCase):
 		# actually committed instead of being rolled back at class teardown.
 		self.addCleanup(frappe.db.commit)
 		frappe.set_user("Administrator")
+		# Identifiers are derived per run rather than fixed. With literals, any
+		# run that died before its cleanup left rows behind that the next run
+		# counted as its own -- which is exactly how this module came to fail
+		# with "6 != 3" and "4 != 2", the expected count doubled by one stale
+		# generation. test_wa_contact_link already derives its identifiers for
+		# the same reason.
+		self.suffix = frappe.generate_hash(length=6)
+		self._purge_strays()
 		self.agent_a = self._make_agent("wa-unread-test-a@example.com")
 		self.agent_b = self._make_agent("wa-unread-test-b@example.com")
+
+	@staticmethod
+	def _purge_strays():
+		"""Clear rows left by an earlier generation of this module.
+
+		Historic runs used fixed JIDs and a fixed line name, so a site that ever
+		ran the old version still carries them. Per-run identifiers stop new
+		strays; this clears the old ones so the module is not permanently red on
+		a database that predates the change.
+		"""
+		for jid_like in ("%unreadtest@%", "%windowtest@%"):
+			for name in frappe.get_all("WA Message", filters={"jid": ["like", jid_like]}, pluck="name"):
+				frappe.delete_doc(
+					"WA Message", name, force=True, ignore_permissions=True, delete_permanently=True
+				)
+			frappe.db.delete("WA Conversation Read State", {"jid": ["like", jid_like]})
+		for line in ("wa-unread-test-line", "wa-window-test-line"):
+			if frappe.db.exists("WA Line", line):
+				frappe.delete_doc("WA Line", line, force=True, ignore_permissions=True)
+		frappe.db.commit()
 
 	def _make_agent(self, email):
 		if not frappe.db.exists("User", email):
@@ -55,7 +83,7 @@ class TestWAUnreadState(FrappeTestCase):
 	def test_mark_read_does_not_clear_other_agents_badge(self):
 		from helpdesk.integrations.wa import get_wa_conversations, mark_wa_messages_read
 
-		jid = "111unreadtest@s.whatsapp.net"
+		jid = f"111unreadtest-{self.suffix}@s.whatsapp.net"
 		self._make_message(jid, "first")
 		self._make_message(jid, "second")
 		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
@@ -80,12 +108,13 @@ class TestWAUnreadState(FrappeTestCase):
 			mark_all_wa_messages_read,
 		)
 
-		line_name = "wa-unread-test-line"
-		if not frappe.db.exists("WA Line", line_name):
-			frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
-			self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
+		line_name = f"wa-unread-test-line-{self.suffix}"
+		frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
+		# Registered unconditionally. The old form only registered cleanup when
+		# it had just created the line, so a leaked line was never cleaned again.
+		self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
 
-		jid = "222unreadtest@s.whatsapp.net"
+		jid = f"222unreadtest-{self.suffix}@s.whatsapp.net"
 		self._make_message(jid, "one", line=line_name)
 		self._make_message(jid, "two", line=line_name)
 		self._make_message(jid, "three", line=line_name)
@@ -130,7 +159,7 @@ class TestWAUnreadState(FrappeTestCase):
 		"""
 		from helpdesk.integrations.wa import _mark_conversation_read_for_user
 
-		jid = "444unreadtest@race.test"
+		jid = f"444unreadtest-{self.suffix}@race.test"
 		user = self.agent_a
 		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
 
@@ -182,15 +211,14 @@ class TestWAUnreadState(FrappeTestCase):
 		"""
 		from helpdesk.integrations.wa import get_wa_conversations, get_wa_lines
 
-		line_name = "wa-window-test-line"
-		if not frappe.db.exists("WA Line", line_name):
-			frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
-			self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
+		line_name = f"wa-window-test-line-{self.suffix}"
+		frappe.get_doc({"doctype": "WA Line", "instance_name": line_name}).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "WA Line", line_name, ignore_permissions=True, force=True)
 
 		original = frappe.db.get_single_value("WhatsApp Helpdesk Settings", "unread_window_days")
 		self.addCleanup(self._set_unread_window, original)
 
-		jid = "555windowtest@s.whatsapp.net"
+		jid = f"555windowtest-{self.suffix}@s.whatsapp.net"
 		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
 		recent = self._make_message(jid, "recent", line=line_name)
 		old = self._make_message(jid, "ancient", line=line_name)
@@ -232,7 +260,7 @@ class TestWAUnreadState(FrappeTestCase):
 	def test_historical_sync_does_not_create_unread_for_anyone(self):
 		from helpdesk.integrations.wa import _mark_conversation_read_for_all_agents, get_wa_conversations
 
-		jid = "333unreadtest@g.us"
+		jid = f"333unreadtest-{self.suffix}@g.us"
 		self._make_message(jid, "imported old message")
 		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": jid})
 		_mark_conversation_read_for_all_agents(jid, upto=frappe.utils.now_datetime())
