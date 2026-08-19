@@ -453,20 +453,25 @@ def sync_entitlements() -> dict:
 	products_created = 0
 
 	if settings().get("auto_create_products"):
-		# Keyed on item CODE, never item name. In this data one code
-		# ("FrappeCloud Hosting [Subscription]") appears under two different
-		# item names, and creating by name would produce two products for one
-		# thing. First name seen wins as the label; it can be renamed later.
-		unmapped_first_seen: dict[str, str] = {}
+		# The product is named after the ITEM CODE, not the item name.
+		#
+		# Sales Order Item.item_name is denormalised — copied onto the line when
+		# the order is raised — so renaming or merging an Item in ERPNext leaves
+		# historical lines carrying the old name. Here, lines still read
+		# "FrappeCloud Hosting" and "FrappeCloud Hosting [B]" against the single
+		# code "FrappeCloud Hosting [Subscription]" after those items were
+		# merged. The code is the only stable identifier, so it is both the key
+		# and the label. Rename the product afterwards if a friendlier name is
+		# wanted on the ticket badge.
+		unmapped_codes_to_create = []
 		for row in rows:
 			code = (row.get("item_code") or "").strip()
-			if not code or code in items or code in unmapped_first_seen:
-				continue
-			unmapped_first_seen[code] = (row.get("item_name") or "").strip() or code
+			if code and code not in items and code not in unmapped_codes_to_create:
+				unmapped_codes_to_create.append(code)
 
-		for code, label in unmapped_first_seen.items():
+		for code in unmapped_codes_to_create:
 			try:
-				product = ensure_product_for_item(code, label)
+				product = ensure_product_for_item(code)
 			except Exception:
 				frappe.log_error(
 					frappe.get_traceback(),
@@ -589,17 +594,21 @@ def enqueue_entitlement_sync() -> dict:
 	return {"status": "queued"}
 
 
-def ensure_product_for_item(item_code: str, label: str) -> dict | None:
+def ensure_product_for_item(item_code: str) -> dict | None:
 	"""Map an ERPNext item code to an HD Product, creating one if needed.
 
-	If a product of that name already exists — somebody created it by hand —
-	the code is mapped onto it rather than making a near-duplicate. That makes
+	The product is named after the item CODE. Item names are denormalised onto
+	Sales Order lines and go stale when items are renamed or merged, so the code
+	is the only stable identifier available.
+
+	If a product of that name already exists — somebody created it by hand — the
+	code is mapped onto it rather than making a near-duplicate. That makes
 	auto-creation safe to leave on: it fills gaps, it does not fork the
 	catalogue.
 	"""
-	existing = frappe.db.exists("HD Product", label)
+	existing = frappe.db.exists("HD Product", item_code)
 	if existing:
-		doc = frappe.get_doc("HD Product", label)
+		doc = frappe.get_doc("HD Product", item_code)
 		codes = {(r.item_code or "").strip() for r in (doc.get("erpnext_items") or [])}
 		if item_code not in codes:
 			doc.append("erpnext_items", {"item_code": item_code})
@@ -608,7 +617,7 @@ def ensure_product_for_item(item_code: str, label: str) -> dict | None:
 
 	doc = frappe.get_doc({
 		"doctype": "HD Product",
-		"product_name": label,
+		"product_name": item_code,
 		"erpnext_items": [{"item_code": item_code}],
 	})
 	doc.insert(ignore_permissions=True)
