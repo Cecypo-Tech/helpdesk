@@ -243,3 +243,63 @@ class TestFailOpen(_StateBase):
 		with patch.object(wa_verification, "send_prompt", side_effect=Exception("boom")):
 			wa_verification.handle_incoming(self.msg("hello"))
 		self.assertTrue(frappe.db.exists("HD Ticket", self.ticket))
+
+
+from helpdesk.api import verification as verification_api
+from helpdesk.utils import get_customer
+
+
+class TestApprovalApi(_StateBase):
+	def setUp(self):
+		super().setUp()
+		self.customer = frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": PREFIX + "approve-co",
+			"tax_id": "P051234567X",
+		}).insert(ignore_permissions=True).name
+		frappe.db.set_value("Contact", self.contact, {
+			"hd_verification_status": "Claimed",
+			"hd_claimed_tax_id": "P051234567X",
+			"hd_claimed_company": "Blue Lake Ltd",
+		})
+		frappe.db.commit()
+
+	def test_the_claim_payload_carries_the_matches(self):
+		payload = verification_api.get_contact_claim(self.ticket)
+		self.assertEqual(payload["status"], "Claimed")
+		self.assertEqual([m["name"] for m in payload["matches"]], [self.customer])
+
+	def test_a_single_exact_match_does_not_auto_link(self):
+		"""The load-bearing rule. A PIN is printed on every invoice; matching one
+		is evidence for an agent, never authorisation."""
+		verification_api.get_contact_claim(self.ticket)
+		self.assertEqual(get_customer(self.contact), [])
+		self.assertEqual(self.status(), "Claimed")
+
+	def test_approve_creates_the_link_that_get_customer_reads(self):
+		verification_api.approve_contact_link(self.contact, self.customer)
+		self.assertEqual(get_customer(self.contact), [self.customer])
+		self.assertEqual(self.status(), "Verified")
+
+	def test_approving_twice_does_not_duplicate_the_link(self):
+		verification_api.approve_contact_link(self.contact, self.customer)
+		verification_api.approve_contact_link(self.contact, self.customer)
+		self.assertEqual(get_customer(self.contact), [self.customer])
+
+	def test_reject_marks_it_and_creates_no_link(self):
+		verification_api.reject_contact_claim(self.contact)
+		self.assertEqual(self.status(), "Rejected")
+		self.assertEqual(get_customer(self.contact), [])
+
+	def test_endpoints_refuse_a_non_agent(self):
+		"""Whitelisting alone bypasses permissions; these read and write customer
+		linkage, so they need the agent guard."""
+		frappe.set_user("Guest")
+		self.addCleanup(frappe.set_user, "Administrator")
+		for call in (
+			lambda: verification_api.get_contact_claim(self.ticket),
+			lambda: verification_api.approve_contact_link(self.contact, self.customer),
+			lambda: verification_api.reject_contact_claim(self.contact),
+		):
+			with self.assertRaises(frappe.PermissionError):
+				call()
