@@ -64,6 +64,20 @@ class _Base(unittest.TestCase):
         p = patch.object(erpnext_sync, "is_configured", return_value=True)
         p.start()
         self.addCleanup(p.stop)
+        # sync_customers advances last_customer_sync on the REAL singleton.
+        # Without this, running the suite poisons the watermark and the next
+        # genuine sync silently does nothing — which is exactly what happened
+        # the first time this was pointed at production.
+        self.saved_watermark = frappe.db.get_single_value(
+            erpnext_sync.DOCTYPE, "last_customer_sync"
+        )
+        self.addCleanup(self.restore_watermark)
+
+    def restore_watermark(self):
+        frappe.db.set_single_value(
+            erpnext_sync.DOCTYPE, "last_customer_sync", self.saved_watermark
+        )
+        frappe.db.commit()
 
     def tearDown(self):
         cleanup()
@@ -213,3 +227,80 @@ class TestFailureAndIdempotency(_Base):
 
         self.assertEqual(fetch.call_count, 2)
         self.assertEqual(result["created"], 2)
+
+
+class TestWatermark(_Base):
+    """The incremental watermark decides what the NEXT run asks for, so getting
+    it wrong silently skips records forever."""
+
+    def watermark(self):
+        return frappe.db.get_single_value(erpnext_sync.DOCTYPE, "last_customer_sync")
+
+    def test_advances_to_the_newest_record_seen_not_to_now(self):
+        """Helpdesk and ERPNext are different machines with different clocks.
+        Stamping now() would skip anything modified inside the skew, and the
+        watermark only moves forward, so those records would never be seen."""
+        frappe.db.set_single_value(erpnext_sync.DOCTYPE, "last_customer_sync", None)
+        row = customer(PREFIX + "wm", modified="2026-01-02 03:04:05")
+
+        with patch.object(erpnext_sync, "fetch_page", side_effect=[payload([row])]):
+            erpnext_sync.sync_customers()
+
+        self.assertEqual(str(self.watermark()), "2026-01-02 03:04:05")
+
+    def test_does_not_advance_when_nothing_came_back(self):
+        """An empty page must not push the watermark forward past records that
+        were never actually seen."""
+        frappe.db.set_single_value(
+            erpnext_sync.DOCTYPE, "last_customer_sync", "2026-01-01 00:00:00"
+        )
+        with patch.object(erpnext_sync, "fetch_page", side_effect=[payload([])]):
+            erpnext_sync.sync_customers()
+
+        self.assertEqual(str(self.watermark()), "2026-01-01 00:00:00")
+
+    def test_failure_does_not_advance_the_watermark(self):
+        frappe.db.set_single_value(
+            erpnext_sync.DOCTYPE, "last_customer_sync", "2026-01-01 00:00:00"
+        )
+        fail = {"ok": False, "data": None, "error": "boom"}
+        with patch.object(erpnext_sync, "fetch_page", side_effect=[fail]):
+            erpnext_sync.sync_customers()
+
+        self.assertEqual(str(self.watermark()), "2026-01-01 00:00:00")
+
+    def test_full_resync_ignores_the_stored_watermark(self):
+        """The escape hatch. Needed the first time this ran for real: a stale
+        watermark made a production sync a silent no-op."""
+        frappe.db.set_single_value(
+            erpnext_sync.DOCTYPE, "last_customer_sync", "2099-01-01 00:00:00"
+        )
+        row = customer(PREFIX + "full")
+
+        with patch.object(erpnext_sync, "fetch_page", side_effect=[payload([row])]) as f:
+            result = erpnext_sync.sync_customers(full=True)
+
+        self.assertNotIn("modified_after", f.call_args[0][0])
+        self.assertEqual(result["created"], 1)
+
+    def test_watermark_advances_per_page_not_only_at_the_end(self):
+        """A run that dies on page two must not throw away page one. The
+        watermark is what makes a partial run resumable, so it has to move as
+        each page commits."""
+        a = customer(PREFIX + "pg-a", modified="2026-03-01 00:00:00")
+        fail = {"ok": False, "data": None, "error": "died on page two"}
+
+        frappe.db.set_single_value(erpnext_sync.DOCTYPE, "last_customer_sync", None)
+        with patch.object(
+            erpnext_sync, "fetch_page",
+            side_effect=[payload([a], has_more=True), fail],
+        ):
+            result = erpnext_sync.sync_customers()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["created"], 1, "page one's work must be kept")
+        self.assertEqual(
+            str(frappe.db.get_single_value(erpnext_sync.DOCTYPE, "last_customer_sync")),
+            "2026-03-01 00:00:00",
+            "watermark must reflect the page that did succeed",
+        )

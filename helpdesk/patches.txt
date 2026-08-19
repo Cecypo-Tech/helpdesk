@@ -64,3 +64,4 @@ helpdesk.patches.add_missing_kb_query_product_field
 helpdesk.patches.add_product_fields_to_ticket_template
 helpdesk.patches.add_erpnext_fields_to_hd_customer
 helpdesk.patches.add_erpnext_contact_field
+helpdesk.patches.add_erpnext_entitlement_fields

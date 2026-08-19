@@ -15,7 +15,6 @@ place and reports why. Nothing here may block support.
 """
 
 import frappe
-from frappe.utils import now_datetime
 
 from helpdesk.integrations.erpnext_remote import call, is_configured, settings
 
@@ -99,11 +98,16 @@ def apply_row(row: dict) -> str:
 	return "updated"
 
 
-def sync_customers(page_size: int = PAGE_SIZE) -> dict:
+def sync_customers(page_size: int = PAGE_SIZE, full: bool = False) -> dict:
 	"""Pull customers from ERPNext and mirror them.
 
 	Incremental: asks only for rows modified since the last successful run. The
 	endpoint orders by `modified asc` precisely so this is safe to page.
+
+	`full=True` ignores the stored watermark and re-reads everything. That
+	escape hatch is not theoretical — the first time this ran against production
+	it did nothing at all, because a stale watermark left by the test suite made
+	it ask for records newer than any that existed.
 	"""
 	if not is_configured():
 		return {
@@ -115,7 +119,7 @@ def sync_customers(page_size: int = PAGE_SIZE) -> dict:
 		}
 
 	cfg = settings()
-	since = cfg.get("last_customer_sync")
+	since = None if full else cfg.get("last_customer_sync")
 
 	created = updated = unchanged = 0
 	offset = 0
@@ -162,11 +166,27 @@ def sync_customers(page_size: int = PAGE_SIZE) -> dict:
 			if modified and (not high_water or str(modified) > str(high_water)):
 				high_water = modified
 
+		# Commit each page rather than the whole run. A full sync is ~15 pages
+		# and 85 seconds against production; holding one write transaction open
+		# for that long invites the lock contention this app has already been
+		# bitten by, discards every page if the last one fails, and shows an
+		# operator no progress. The watermark makes resuming natural, so a
+		# partially completed run is genuinely useful rather than wasted.
+		if high_water and str(high_water) != str(since):
+			frappe.db.set_single_value(DOCTYPE, "last_customer_sync", high_water)
+		frappe.db.commit()
+
 		if not data.get("has_more"):
 			break
 		offset += page_size
 
-	frappe.db.set_single_value(DOCTYPE, "last_customer_sync", now_datetime())
+	# Advance the watermark to the newest record actually SEEN, never to now().
+	# Helpdesk and ERPNext are different machines with different clocks; if
+	# ERPNext's is behind, stamping now() here would skip everything modified
+	# inside that skew — permanently, because the watermark only moves forward.
+	# An empty page leaves it untouched for the same reason.
+	if high_water and str(high_water) != str(since):
+		frappe.db.set_single_value(DOCTYPE, "last_customer_sync", high_water)
 	frappe.db.commit()
 
 	return {
@@ -353,3 +373,187 @@ def sync_contacts(customer: str, contacts: list[dict]) -> dict:
 		elif outcome == "updated":
 			updated += 1
 	return {"created": created, "updated": updated}
+
+
+# ── Entitlements ─────────────────────────────────────────────────────────────
+#
+# A Sales Order with an Auto Repeat is a support contract. Its items say what is
+# covered; delivery_date says until when. Many orders fold into one row per
+# (customer, product).
+#
+# Two rules carry the business logic, and both exist because of how Auto Repeat
+# actually behaves here:
+#
+#   support_expiry = MAX(delivery_date). The Auto Repeat issues a fresh order
+#   each period, so a customer accumulates orders and the newest is current.
+#
+#   renewal_unpaid = per_billed < 100 on the order that won. Auto Repeat SUBMITS
+#   the renewal about a month BEFORE expiry, so taking the newest date alone
+#   would silently grant another year of cover to somebody who never renewed.
+#   The flag surfaces that instead of hiding it.
+
+ENTITLEMENT_PAGE = 2000
+
+
+def fetch_entitlements(params: dict | None = None) -> dict:
+	"""Seam for tests, and the only place the endpoint name is written."""
+	return call("helpdesk_customer_entitlements", params or {"limit": ENTITLEMENT_PAGE})
+
+
+def item_to_product_map() -> dict[str, str]:
+	"""ERPNext Item code -> HD Product. Many codes may mean one product."""
+	mapping: dict[str, str] = {}
+	try:
+		rows = frappe.get_all(
+			"HD Product Erpnext Item",
+			filters={"parenttype": "HD Product"},
+			fields=["parent", "item_code"],
+		)
+	except Exception:
+		# Custom field not migrated yet — nothing is mapped, so nothing syncs.
+		return {}
+	for row in rows:
+		code = (row.get("item_code") or "").strip()
+		if code:
+			mapping[code] = row["parent"]
+	return mapping
+
+
+def erp_customer_map() -> dict[str, str]:
+	"""ERPNext customer name -> HD Customer."""
+	try:
+		rows = frappe.get_all(
+			"HD Customer",
+			filters={"erpnext_customer": ["!=", ""]},
+			fields=["name", "erpnext_customer"],
+		)
+	except Exception:
+		return {}
+	return {r["erpnext_customer"]: r["name"] for r in rows}
+
+
+def sync_entitlements() -> dict:
+	"""Derive HD Customer Product rows from recurring Sales Orders."""
+	if not is_configured():
+		return {"ok": False, "error": "ERPNext sync is not configured",
+		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0}
+
+	result = fetch_entitlements()
+	if not result.get("ok"):
+		return {"ok": False, "error": result.get("error"),
+		        "created": 0, "updated": 0, "unchanged": 0, "unmapped": 0}
+
+	data = result.get("data") or {}
+	rows = data.get("entitlements") or []
+
+	items = item_to_product_map()
+	customers = erp_customer_map()
+
+	# Fold to one winner per (customer, product): the order with the latest
+	# delivery_date. Its per_billed is what the flag reflects — an older paid
+	# order must not make an unpaid renewal look settled.
+	best: dict[tuple, dict] = {}
+	unmapped_codes = set()
+
+	for row in rows:
+		product = items.get((row.get("item_code") or "").strip())
+		if not product:
+			unmapped_codes.add(row.get("item_code"))
+			continue
+		customer = customers.get(row.get("customer"))
+		if not customer:
+			continue
+
+		expiry = row.get("delivery_date")
+		key = (customer, product)
+		current = best.get(key)
+		if current is None or str(expiry or "") > str(current.get("delivery_date") or ""):
+			best[key] = row
+
+	created = updated = unchanged = 0
+
+	for (customer, product), row in best.items():
+		try:
+			outcome = apply_entitlement(customer, product, row)
+		except Exception:
+			frappe.log_error(
+				frappe.get_traceback(),
+				f"ERPNext sync: could not mirror entitlement {customer}/{product}",
+			)
+			continue
+		if outcome == "created":
+			created += 1
+		elif outcome == "updated":
+			updated += 1
+		else:
+			unchanged += 1
+
+	if unmapped_codes:
+		# Logged rather than silent: an unmapped code is a gap somebody should
+		# see, not a decision the sync gets to make quietly.
+		frappe.logger().warning(
+			"ERPNext sync: %s unmapped item code(s): %s"
+			% (len(unmapped_codes), sorted(c for c in unmapped_codes if c)[:20])
+		)
+
+	frappe.db.set_single_value(DOCTYPE, "last_entitlement_sync", frappe.utils.now_datetime())
+	frappe.db.commit()
+
+	return {"ok": True, "error": None, "created": created, "updated": updated,
+	        "unchanged": unchanged, "unmapped": len(unmapped_codes)}
+
+
+def apply_entitlement(customer: str, product: str, row: dict) -> str:
+	"""Create or update one HD Customer Product row from the winning order."""
+	expiry = row.get("delivery_date")
+	unpaid = 1 if float(row.get("per_billed") or 0) < 100 else 0
+	so = row.get("sales_order")
+
+	existing = frappe.db.get_value(
+		"HD Customer Product", {"customer": customer, "product": product},
+		["name", "source", "support_expiry", "renewal_unpaid", "source_document"],
+		as_dict=True,
+	)
+
+	if not existing:
+		frappe.get_doc({
+			"doctype": "HD Customer Product",
+			"customer": customer,
+			"product": product,
+			"support_expiry": expiry,
+			"renewal_unpaid": unpaid,
+			"source": "ERPNext",
+			"source_document": so,
+		}).insert(ignore_permissions=True)
+		return "created"
+
+	# A human decision outranks a mirror. This is the ownership rule the whole
+	# entitlement model was built around.
+	if existing.get("source") == "Manual":
+		return "unchanged"
+
+	changes = {}
+	if str(existing.get("support_expiry") or "") != str(expiry or ""):
+		changes["support_expiry"] = expiry
+	if int(existing.get("renewal_unpaid") or 0) != unpaid:
+		changes["renewal_unpaid"] = unpaid
+	if existing.get("source_document") != so:
+		changes["source_document"] = so
+	if existing.get("source") != "ERPNext":
+		changes["source"] = "ERPNext"
+
+	if not changes:
+		return "unchanged"
+
+	frappe.db.set_value("HD Customer Product", existing["name"], changes, update_modified=False)
+	return "updated"
+
+
+@frappe.whitelist()
+def enqueue_entitlement_sync() -> dict:
+	frappe.only_for(["System Manager", "Administrator"])
+	frappe.enqueue(
+		"helpdesk.integrations.erpnext_sync.sync_entitlements",
+		queue="long", timeout=1800, job_id="erpnext_entitlement_sync", deduplicate=True,
+	)
+	return {"status": "queued"}
