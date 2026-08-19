@@ -82,6 +82,28 @@ class TestMatchClaim(unittest.TestCase):
 		self.assertEqual(verification.match_claim(""), [])
 		self.assertEqual(verification.match_claim(None), [])
 
+	def test_several_customers_can_share_one_tax_id(self):
+		"""tax_id being 1:1 today is a property of the mirror's name-folding, not
+		a guarantee: 30 customers in the source ERPNext share one with a namesake.
+		The many-match path exists for the day that shows up here, so it is
+		tested rather than merely built."""
+		frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": PREFIX + "twin-a",
+			"tax_id": "P099888777Q",
+		}).insert(ignore_permissions=True)
+		frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": PREFIX + "twin-b",
+			"tax_id": "P099888777Q",
+		}).insert(ignore_permissions=True)
+		frappe.db.commit()
+
+		self.assertEqual(
+			sorted(verification.match_claim("p099888777q")),
+			[PREFIX + "twin-a", PREFIX + "twin-b"],
+		)
+
 
 from unittest.mock import patch
 
@@ -316,6 +338,23 @@ class TestApprovalApi(_StateBase):
 		payload = verification_api.get_contact_claim(self.ticket)
 		self.assertEqual(payload["status"], "Claimed")
 		self.assertEqual([m["name"] for m in payload["matches"]], [self.customer])
+
+	def test_the_claim_payload_carries_every_match_when_a_pin_is_shared(self):
+		"""Two customers on one tax_id must both reach the agent. Collapsing to
+		the first would hand them somebody else's account on a coin flip."""
+		twin = frappe.get_doc({
+			"doctype": "HD Customer",
+			"customer_name": PREFIX + "approve-twin",
+			"tax_id": "P051234567X",
+		}).insert(ignore_permissions=True).name
+		frappe.db.commit()
+
+		payload = verification_api.get_contact_claim(self.ticket)
+		self.assertEqual(sorted(m["name"] for m in payload["matches"]),
+		                 sorted([self.customer, twin]))
+		self.assertTrue(all(m["customer_name"] for m in payload["matches"]))
+		# Still nobody linked: several matches is information, not a decision.
+		self.assertEqual(get_customer(self.contact), [])
 
 	def test_a_single_exact_match_does_not_auto_link(self):
 		"""The load-bearing rule. A PIN is printed on every invoice; matching one
