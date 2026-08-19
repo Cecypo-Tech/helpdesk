@@ -151,8 +151,11 @@
           <template v-else>
             <div class="mt-1 text-ink-gray-6">
               Claims
-              <span class="text-ink-gray-8">{{ claim.data.claimed_company }}</span>
-              &middot;
+              <!-- A message that carried a PIN and nothing else has no company
+                   to show; omit the field rather than render a dangling middot. -->
+              <span v-if="claim.data.claimed_company" class="text-ink-gray-8">
+                {{ claim.data.claimed_company }} &middot;
+              </span>
               <span class="text-ink-gray-8">{{ claim.data.claimed_tax_id }}</span>
             </div>
 
@@ -166,10 +169,21 @@
               class="mt-2 flex items-center gap-2"
             >
               <span class="text-ink-gray-8 truncate">{{ m.customer_name }}</span>
-              <Button variant="subtle" label="Link" @click="approve(m.name)" />
+              <Button
+                variant="subtle"
+                label="Link"
+                :disabled="claimBusy"
+                @click="approve(m.name)"
+              />
             </div>
 
-            <Button class="mt-2" variant="ghost" label="Dismiss" @click="reject()" />
+            <Button
+              class="mt-2"
+              variant="ghost"
+              label="Dismiss"
+              :disabled="claimBusy"
+              @click="reject()"
+            />
           </template>
         </div>
       </div>
@@ -243,9 +257,9 @@ import {
 } from "@/types";
 import { copyToClipboard } from "@/utils";
 import dayjs from "dayjs";
-import { Avatar, Button, Tooltip, createResource } from "frappe-ui";
+import { Avatar, Button, Tooltip, createResource, toast } from "frappe-ui";
 import { storeToRefs } from "pinia";
-import { computed, inject, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { CopyIcon } from "../icons";
 import EmailIcon from "../icons/EmailIcon.vue";
 import PhoneIcon from "../icons/PhoneIcon.vue";
@@ -305,24 +319,57 @@ watch(
   { immediate: true }
 );
 
+// Held while an approve/reject request is in flight. Both endpoints are
+// idempotent server-side, but linking a contact to a customer is the most
+// security-relevant action in this panel — a double click firing it twice, or
+// a failure that looks identical to a success, are both worth ruling out.
+const claimBusy = ref(false);
+
+function submitClaimAction(resource, failure: string, onDone?: () => void) {
+  if (claimBusy.value) return;
+  claimBusy.value = true;
+  return resource
+    .fetch()
+    .then(() => {
+      claim.fetch();
+      onDone?.();
+    })
+    .catch((e) => {
+      toast.error(e?.messages?.[0] || e?.message || failure);
+    })
+    .finally(() => {
+      claimBusy.value = false;
+    });
+}
+
 // Never triggered implicitly (e.g. "only one match") — only an explicit
 // agent click may link a contact to a customer.
 function approve(customer: string) {
-  return createResource({
-    url: "helpdesk.api.verification.approve_contact_link",
-    params: { contact: claim.data.contact, customer },
-  })
-    .fetch()
-    .then(() => claim.fetch());
+  return submitClaimAction(
+    createResource({
+      url: "helpdesk.api.verification.approve_contact_link",
+      params: { contact: claim.data.contact, customer },
+    }),
+    "Could not link this contact",
+    () => {
+      // The endpoint backfills HD Ticket.customer, but entitlement and standing
+      // are separate requests that already resolved against the empty ticket.
+      // Reload them so the coverage panel replaces the claim right away rather
+      // than only after the agent reloads the page.
+      entitlement.reload();
+      standing.reload();
+    }
+  );
 }
 
 function reject() {
-  return createResource({
-    url: "helpdesk.api.verification.reject_contact_claim",
-    params: { contact: claim.data.contact },
-  })
-    .fetch()
-    .then(() => claim.fetch());
+  return submitClaimAction(
+    createResource({
+      url: "helpdesk.api.verification.reject_contact_claim",
+      params: { contact: claim.data.contact },
+    }),
+    "Could not dismiss this claim"
+  );
 }
 
 // Only ever shown to agents, and never quoted by the bot: a WhatsApp number
