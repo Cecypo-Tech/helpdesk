@@ -53,10 +53,19 @@ def execute():
 	# to frappe.new_doc only if tabSingles has zero rows for it). This site's
 	# singleton already has rows from earlier features, so the three new
 	# fields would otherwise load as None instead of their JSON defaults.
-	frappe.db.set_single_value("WhatsApp Helpdesk Settings", "verification_enabled", 0)
-	frappe.db.set_single_value(
-		"WhatsApp Helpdesk Settings",
-		"verification_prompt",
-		"Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
-	)
-	frappe.db.set_single_value("WhatsApp Helpdesk Settings", "verification_reask_days", 7)
+	#
+	# Only stamp a field when it is genuinely unset (None) — re-running this
+	# patch must never clobber a value an operator has since changed. 0 is a
+	# legitimate stored value for the Check field, not "unset", so this
+	# checks for None specifically rather than falsiness.
+	settings = "WhatsApp Helpdesk Settings"
+	if frappe.db.get_single_value(settings, "verification_enabled") is None:
+		frappe.db.set_single_value(settings, "verification_enabled", 0)
+	if frappe.db.get_single_value(settings, "verification_prompt") is None:
+		frappe.db.set_single_value(
+			settings,
+			"verification_prompt",
+			"Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
+		)
+	if frappe.db.get_single_value(settings, "verification_reask_days") is None:
+		frappe.db.set_single_value(settings, "verification_reask_days", 7)
