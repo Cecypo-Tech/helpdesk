@@ -2,7 +2,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from unittest.mock import patch
 
-from helpdesk.integrations import wa
+from helpdesk.integrations import wa, wa_ingest
 
 # Derived per run rather than fixed: a shared literal meant this module and
 # test_contact_phone_suffix created contacts with the same trailing digits, so
@@ -128,11 +128,28 @@ class TestWAContactLink(FrappeTestCase):
 		if ticket:
 			data["reference_doctype"] = "HD Ticket"
 			data["reference_name"] = ticket
-		doc = frappe.get_doc(data).insert(ignore_permissions=True)
+		# frappe.enqueue is patched out for the insert itself. on_whatsapp_message_insert
+		# now only ENQUEUES wa_ingest.process_incoming_message (enqueue_after_commit=True)
+		# rather than linking inline, so leaving it live hands the work to a real RQ
+		# worker: the assertions below race it, and anything it creates lands after
+		# cleanup has run. That is what left stray Contacts on this site.
+		with patch("frappe.enqueue"):
+			doc = frappe.get_doc(data).insert(ignore_permissions=True)
 		self.addCleanup(
 			frappe.delete_doc, "WhatsApp Message", doc.name, ignore_permissions=True, force=True
 		)
 		return doc
+
+	def _deliver(self, msg):
+		"""Run the ingestion job for a message, the way a worker eventually would.
+
+		Called explicitly so the linking these tests assert on has actually
+		happened by the time they look. Must run inside whatever _fw_settings
+		patch the test set up -- the job reads settings too. Same shape as
+		helpdesk/integrations/tests/test_no_erpnext.py.
+		"""
+		wa_ingest.process_incoming_message(msg.name)
+		return msg
 
 	def _resolve(self, ticket):
 		doc = frappe.get_doc("HD Ticket", ticket)
@@ -173,7 +190,7 @@ class TestWAContactLink(FrappeTestCase):
 		self._resolve(t1.name)
 
 		with patch.object(wa, "_fw_settings", return_value=_settings()):
-			reply = self._incoming(message="one more thing")
+			reply = self._deliver(self._incoming(message="one more thing"))
 
 		new_ticket = frappe.db.get_value("WhatsApp Message", reply.name, "reference_name")
 		self.assertIsNotNone(new_ticket)
@@ -197,7 +214,7 @@ class TestWAContactLink(FrappeTestCase):
 
 		before = frappe.db.count("Contact")
 		with patch.object(wa, "_fw_settings", return_value=_settings()):
-			reply = self._incoming(message="one more thing")
+			reply = self._deliver(self._incoming(message="one more thing"))
 		after = frappe.db.count("Contact")
 
 		new_ticket = frappe.db.get_value("WhatsApp Message", reply.name, "reference_name")
@@ -213,7 +230,7 @@ class TestWAContactLink(FrappeTestCase):
 		self._incoming(ticket=t1.name)
 
 		with patch.object(wa, "_fw_settings", return_value=_settings()):
-			reply = self._incoming(message="still talking")
+			reply = self._deliver(self._incoming(message="still talking"))
 
 		self.assertEqual(
 			str(frappe.db.get_value("WhatsApp Message", reply.name, "reference_name")),
@@ -225,7 +242,7 @@ class TestWAContactLink(FrappeTestCase):
 		# untouched by the inheritance change.
 		before = frappe.db.count("Contact")
 		with patch.object(wa, "_fw_settings", return_value=_settings()):
-			msg = self._incoming(message="brand new conversation")
+			msg = self._deliver(self._incoming(message="brand new conversation"))
 
 		new_ticket = frappe.db.get_value("WhatsApp Message", msg.name, "reference_name")
 		self.assertIsNotNone(new_ticket)

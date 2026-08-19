@@ -1773,8 +1773,18 @@ def send_wa_reply(
     reply_to_text: str | None = None,
     reply_to_from_me: bool = False,
     mentioned_jids: str | None = None,
+    *,
+    system: bool = False,
 ) -> dict:
-    """Send a text reply via WA API (Baileys) or frappe_whatsapp depending on ticket type."""
+    """Send a text reply via WA API (Baileys) or frappe_whatsapp depending on ticket type.
+
+    `system=True` sends transport only: no agent assignment, no move to
+    agent_reply_status. Automated sends -- the bot, the unknown-contact
+    verification prompt -- are not agent replies and must not claim a ticket for
+    whatever user the background job happens to run as, nor move it out of the
+    agents' Open queue. Keyword-only and defaulting to False, so every
+    agent-initiated caller behaves exactly as before.
+    """
     # ── frappe_whatsapp path ─────────────────────────────────────────────────
     if ticket and not jid:
         try:
@@ -1782,7 +1792,7 @@ def send_wa_reply(
         except Exception:
             pass
         if not jid:
-            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type, media_url=media_url, reply_to_message_id=reply_to_message_id)
+            return _send_fw_reply(ticket=ticket, message=message, content_type=content_type, media_url=media_url, reply_to_message_id=reply_to_message_id, system=system)
 
     # ── Baileys/WA path ──────────────────────────────────────────────────────
     settings = _settings()
@@ -1863,7 +1873,10 @@ def send_wa_reply(
     })
     msg_doc.insert(ignore_permissions=True)
 
-    if ticket:
+    # `system` sends skip all of this: it is "an agent just replied" bookkeeping,
+    # and an automated send is neither an agent nor a reply anyone should be
+    # assigned for. Same guard as the frappe_whatsapp path in _send_fw_reply.
+    if ticket and not system:
         assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
         if frappe.session.user not in (frappe.parse_json(assign_json) or []):
             try:
