@@ -47,10 +47,10 @@
    "fieldname": "verification_enabled",
    "fieldtype": "Check",
    "label": "Ask Unknown Contacts to Identify Themselves",
-   "description": "Off by default. When on, an unrecognised WhatsApp number is asked once for its company name and KRA PIN. A match never links anyone automatically — an agent approves."
+   "description": "Off by default. When on, an unrecognised WhatsApp number is asked once for its KRA PIN. A match never links anyone automatically — an agent approves."
   },
   {
-   "default": "Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
+   "default": "Hi! Please reply with your company KRA PIN so we can link this WhatsApp number to your account. We only need this once.",
    "depends_on": "eval:doc.verification_enabled",
    "fieldname": "verification_prompt",
    "fieldtype": "Small Text",

@@ -132,8 +132,14 @@ Three settings on `WhatsApp Helpdesk Settings`:
 Default prompt copy — deliberately free of any account detail, because it is sent
 to a number we have not identified:
 
-> Hi! So we can pull up your account, could you reply with your company name and
-> KRA PIN? Thanks.
+> Hi! Please reply with your company KRA PIN so we can link this WhatsApp number
+> to your account. We only need this once.
+
+The company name is deliberately not requested. `match_claim` compares `tax_id`
+only, and the company's identity comes from the mirrored ERPNext record once the
+PIN resolves — so asking for a name gave the customer a second thing to get
+wrong for no matching benefit. `hd_claimed_company` still captures whatever
+context they typed around the PIN, and is shown to the agent when non-empty.
 
 ### Flow
 
@@ -261,9 +267,10 @@ Backend, `helpdesk/tests/test_contact_verification.py`:
 - **Customers will answer the question.** If they mostly ignore it, this
   degrades to the manual path — no worse than today, but the build was wasted.
   Worth measuring before extending it to other channels.
-- **The company name in the reply is worth storing.** It is only ever shown to
-  the agent as corroboration; nothing matches on it. If it turns out to be noise,
-  drop the field.
+- **The company name is no longer requested** (changed 2026-08-19). It was never
+  matched on, so asking for it only widened the surface for a customer to get the
+  reply wrong. `hd_claimed_company` still records whatever surrounds the PIN and
+  is displayed when non-empty, so an agent keeps any context volunteered.
 - **`Create Contact and Ticket` is the intended prod setting.** On the default
   `Skip Ticket Creation`, an unknown number produces no ticket, and this feature
   never runs at all.

@@ -145,7 +145,7 @@
           <div class="font-medium text-ink-gray-8">Unverified number</div>
 
           <div v-if="claim.data.status === 'Asked'" class="mt-1 text-ink-gray-6">
-            Asked for a company name and KRA PIN; no reply yet.
+            Asked for a KRA PIN; no reply yet.
           </div>
 
           <template v-else>
