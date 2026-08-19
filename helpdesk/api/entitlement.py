@@ -67,3 +67,36 @@ def get_ticket_entitlement(ticket: str | int) -> dict:
 		"support_expiry": current.get("support_expiry") if current else None,
 		"entitlements": entitlements,
 	}
+
+
+@frappe.whitelist()
+@agent_only
+def get_ticket_standing(ticket: str | int) -> dict:
+	"""Live account standing for the ticket's customer.
+
+	A separate endpoint from get_ticket_entitlement on purpose: this one crosses
+	the network to ERPNext, and bundling it would make the entitlement panel
+	wait on that. The panel renders immediately; standing arrives when it can.
+
+	Financial figures are agent-only and must never reach the customer portal or
+	be quoted by the bot into a WhatsApp thread — a WhatsApp number can be a
+	shared office handset.
+	"""
+	from helpdesk.integrations import erpnext_standing
+
+	unknown = {"status": "unknown", "error": None, "customer": None}
+	if not ticket:
+		return unknown
+
+	try:
+		customer = frappe.db.get_value("HD Ticket", ticket, "customer")
+	except Exception:
+		return unknown
+	if not customer:
+		return unknown
+
+	erp_customer = frappe.db.get_value("HD Customer", customer, "erpnext_customer")
+	if not erp_customer:
+		return unknown
+
+	return erpnext_standing.fetch(erp_customer)

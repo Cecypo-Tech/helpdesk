@@ -120,6 +120,19 @@
           </div>
 
           <div v-else class="text-xs text-ink-gray-5">No products recorded</div>
+
+          <!-- Account standing. Advisory only: it never gates support. An
+               ERPNext outage shows "unavailable" rather than hiding the row,
+               so nobody mistakes a broken lookup for a clean account. -->
+          <div v-if="standingLabel" class="mt-2 flex items-center gap-2">
+            <span class="shrink-0 text-xs text-ink-gray-5">Account</span>
+            <span
+              class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="standingTone"
+            >
+              {{ standingLabel }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -219,13 +232,45 @@ const entitlement = createResource({
 // WhatsApp page the sidebar can mount before the ticket doc resolves, so the
 // watcher (not a one-shot auto fetch) is also what lets it retry once the
 // name becomes available.
+const standing = createResource({
+  url: "helpdesk.api.entitlement.get_ticket_standing",
+  makeParams: () => ({ ticket: ticket.value?.doc?.name }),
+});
+
 watch(
   () => ticket.value?.doc?.name,
   (name) => {
-    if (name) entitlement.reload();
+    if (name) {
+      entitlement.reload();
+      // Separate request on purpose: this one crosses the network to ERPNext,
+      // so the coverage panel must not wait on it.
+      standing.reload();
+    }
   },
   { immediate: true }
 );
+
+// Only ever shown to agents, and never quoted by the bot: a WhatsApp number
+// can be a shared office handset.
+const standingLabel = computed(() => {
+  const d = standing.data;
+  if (!d || d.status === "unknown") return null;
+  if (d.status === "unavailable") return "Standing unavailable";
+  if (!d.is_overdue) return "No overdue balance";
+  const amount = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+  }).format(d.overdue || 0);
+  return `${d.currency || ""} ${amount} overdue · ${d.days_overdue}d`.trim();
+});
+
+const standingTone = computed(() => {
+  const d = standing.data;
+  if (!d) return "bg-surface-gray-2 text-ink-gray-5";
+  if (d.status === "unavailable") return "bg-surface-gray-2 text-ink-gray-5";
+  return d.is_overdue
+    ? "bg-surface-red-2 text-ink-red-3"
+    : "bg-surface-green-2 text-ink-green-3";
+});
 
 function toneFor(status) {
   switch (status) {
