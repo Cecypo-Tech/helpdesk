@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-18 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "section_connection",
+  "server_url",
+  "api_key",
+  "col_break_conn",
+  "api_secret",
+  "test_connection",
+  "section_schedule",
+  "sync_interval_hours",
+  "sync_now",
+  "col_break_sched",
+  "last_customer_sync",
+  "last_entitlement_sync"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Master switch. When off, no call is made to ERPNext at all.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "section_connection",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "description": "Base URL of the ERPNext site, e.g. https://erp.example.com",
+   "fieldname": "server_url",
+   "fieldtype": "Data",
+   "label": "Server URL"
+  },
+  {
+   "description": "API key of a dedicated ERPNext user. Inside safe_exec the Server Scripts bypass permissions, so this key is the only access control \u2014 rotate it like a secret.",
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API Key"
+  },
+  {
+   "fieldname": "col_break_conn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_secret",
+   "fieldtype": "Password",
+   "label": "API Secret"
+  },
+  {
+   "depends_on": "eval:doc.server_url && doc.api_key",
+   "description": "Fetches one customer. Proves the URL, the credentials, the Server Script being installed, and permissions \u2014 all in one call.",
+   "fieldname": "test_connection",
+   "fieldtype": "Button",
+   "label": "Test Connection"
+  },
+  {
+   "fieldname": "section_schedule",
+   "fieldtype": "Section Break",
+   "label": "Sync"
+  },
+  {
+   "default": "6",
+   "fieldname": "sync_interval_hours",
+   "fieldtype": "Int",
+   "label": "Sync Interval (hours)"
+  },
+  {
+   "depends_on": "eval:doc.enabled",
+   "description": "Mirrors customers now, in the background. Safe to run repeatedly: it only asks for rows changed since the last successful run.",
+   "fieldname": "sync_now",
+   "fieldtype": "Button",
+   "label": "Sync Customers Now"
+  },
+  {
+   "fieldname": "col_break_sched",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_customer_sync",
+   "fieldtype": "Datetime",
+   "label": "Last Customer Sync",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_entitlement_sync",
+   "fieldtype": "Datetime",
+   "label": "Last Entitlement Sync",
+   "read_only": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-18 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "ERPNext Sync Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

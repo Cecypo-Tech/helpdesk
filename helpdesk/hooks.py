@@ -178,6 +178,12 @@ override_whitelisted_methods = {
 }
 
 fixtures = [
+    # ONE Custom Field entry, deliberately. Frappe writes every Custom Field
+    # fixture spec to the same file (helpdesk/fixtures/custom_field.json), so
+    # multiple specs overwrite each other and only the last one survives the
+    # export. That silently dropped baileys_jid and friends four separate times
+    # during development, which would have broken the WhatsApp integration on a
+    # fresh install. Add new fields to these two lists — never as a new entry.
     {
         "doctype": "Custom Field",
         "filters": [
@@ -190,6 +196,11 @@ fixtures = [
                     "HD Task",
                     "HD Article",
                     "HD Bot Missing KB Query",
+                    "HD Customer",
+                    "WhatsApp Account",
+                    "WhatsApp Message",
+                    "Contact",
+                    "Contact Phone",
                 ],
             ],
             [
@@ -203,36 +214,20 @@ fixtures = [
                     "support_status",
                     "products",
                     "product",
+                    "tax_id",
+                    "territory",
+                    "customer_group",
+                    "bot_enabled",
+                    "normalized_phone",
+                    "phone_suffix",
+                    "erpnext_contact",
                 ],
             ],
         ],
     },
     {
-        "doctype": "Custom Field",
-        "filters": [["dt", "=", "WhatsApp Account"], ["fieldname", "=", "bot_enabled"]],
-    },
-    {
-        "doctype": "Custom Field",
-        "filters": [
-            ["dt", "=", "WhatsApp Message"],
-            ["fieldname", "=", "normalized_phone"],
-        ],
-    },
-    {
-        "doctype": "Custom Field",
-        "filters": [
-            ["dt", "in", ["Contact", "Contact Phone"]],
-            ["fieldname", "=", "phone_suffix"],
-        ],
-    },
-    # Indexes WhatsApp Message.message_id for the duplicate-delivery guard. Also
-    # created by add_whatsapp_message_id_index, but a fresh install marks patches
-    # as already-run without executing them, so the fixture is what carries it there.
-    {
         "doctype": "Property Setter",
-        "filters": [
-            ["name", "=", "WhatsApp Message-message_id-search_index"],
-        ],
+        "filters": [["name", "=", "WhatsApp Message-message_id-search_index"]],
     },
 ]
 
