@@ -45,6 +45,27 @@ FIELDS = {
 }
 
 
+def _stamp_single_default(doctype, fieldname, value):
+	"""Set a Single field's value only if it has never been saved.
+
+	frappe.db.get_single_value() always runs the result through
+	cast_fieldtype(), which maps a missing row to the type's zero value
+	(cint(None) == 0, cstr(None) == "") rather than None — so it can never
+	tell "unset" apart from "explicitly set to the falsy default". Reading
+	the raw Singles row instead gives the true stored value (a string) or
+	None when no row exists at all, which is the only reliable "never
+	saved" signal.
+	"""
+	# order_by=None: "Singles" is not a real doctype, so get_value's default
+	# "order by creation" resolution has no column to bind to and raises
+	# OperationalError on this table.
+	raw = frappe.db.get_value(
+		"Singles", {"doctype": doctype, "field": fieldname}, "value", order_by=None
+	)
+	if raw is None:
+		frappe.db.set_single_value(doctype, fieldname, value)
+
+
 def execute():
 	create_custom_fields(FIELDS, ignore_validate=True)
 
@@ -54,18 +75,14 @@ def execute():
 	# singleton already has rows from earlier features, so the three new
 	# fields would otherwise load as None instead of their JSON defaults.
 	#
-	# Only stamp a field when it is genuinely unset (None) — re-running this
-	# patch must never clobber a value an operator has since changed. 0 is a
-	# legitimate stored value for the Check field, not "unset", so this
-	# checks for None specifically rather than falsiness.
+	# Only stamp a field when it is genuinely unset — re-running this patch
+	# must never clobber a value an operator has since changed. 0 is a
+	# legitimate stored value for the Check field, not "unset".
 	settings = "WhatsApp Helpdesk Settings"
-	if frappe.db.get_single_value(settings, "verification_enabled") is None:
-		frappe.db.set_single_value(settings, "verification_enabled", 0)
-	if frappe.db.get_single_value(settings, "verification_prompt") is None:
-		frappe.db.set_single_value(
-			settings,
-			"verification_prompt",
-			"Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
-		)
-	if frappe.db.get_single_value(settings, "verification_reask_days") is None:
-		frappe.db.set_single_value(settings, "verification_reask_days", 7)
+	_stamp_single_default(settings, "verification_enabled", 0)
+	_stamp_single_default(
+		settings,
+		"verification_prompt",
+		"Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
+	)
+	_stamp_single_default(settings, "verification_reask_days", 7)
