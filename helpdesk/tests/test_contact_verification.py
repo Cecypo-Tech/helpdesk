@@ -204,6 +204,21 @@ class TestRecordingTheClaim(_StateBase):
 		self.assertEqual(row.hd_claimed_tax_id, "P051234567X")
 		self.assertIn("Blue Lake", row.hd_claimed_company)
 
+	def test_a_second_different_pin_before_approval_overwrites_the_claim(self):
+		"""A still-unapproved contact correcting a typo, not a bug: the agent
+		must see the newest claim, so CLAIMED stays in the guard alongside ASKED."""
+		wa_verification.handle_incoming(self.msg("hello"))
+		wa_verification.handle_incoming(self.msg("Blue Lake Ltd P051234567X"))
+		wa_verification.handle_incoming(self.msg("sorry typo, it is P099999999Z"))
+
+		row = frappe.db.get_value(
+			"Contact", self.contact,
+			["hd_verification_status", "hd_claimed_tax_id"],
+			as_dict=True,
+		)
+		self.assertEqual(row.hd_verification_status, "Claimed")
+		self.assertEqual(row.hd_claimed_tax_id, "P099999999Z")
+
 	def test_a_reply_with_no_pin_leaves_the_state_alone(self):
 		wa_verification.handle_incoming(self.msg("hello"))
 		wa_verification.handle_incoming(self.msg("sorry what do you mean?"))

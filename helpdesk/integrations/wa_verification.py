@@ -47,9 +47,12 @@ def contact_state(contact: str) -> dict:
 			 "hd_verification_asked_on"],
 			as_dict=True,
 		) or {}
-	except Exception:
+	except Exception as e:
 		# Custom Fields absent — same hazard as baileys_jid on an unmigrated site.
-		return {}
+		# Anything else is a real failure and must not be mistaken for that.
+		if frappe.db.is_missing_column(e):
+			return {}
+		raise
 
 
 def handle_incoming(doc) -> None:
@@ -94,6 +97,10 @@ def _handle(doc) -> None:
 	if status in TERMINAL:
 		return
 
+	# CLAIMED is included here, not just ASKED: a later PIN from a contact an
+	# agent has not yet approved is treated as the customer correcting a typo,
+	# and the agent must see the newest claim rather than the first one. This
+	# is intentional overwrite-on-correction, not a missed status guard.
 	if status in (ASKED, CLAIMED):
 		claim = verification.extract_claim(doc.get("message"))
 		if claim["tax_id"]:
