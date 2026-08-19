@@ -378,14 +378,20 @@ def sync_contacts(customer: str, contacts: list[dict]) -> dict:
 # ── Entitlements ─────────────────────────────────────────────────────────────
 #
 # A Sales Order with an Auto Repeat is a support contract. Its items say what is
-# covered; delivery_date says until when. Many orders fold into one row per
-# (customer, product).
+# covered; the Auto Repeat schedule says until when. Many orders fold into one
+# row per (customer, product).
 #
 # Two rules carry the business logic, and both exist because of how Auto Repeat
 # actually behaves here:
 #
-#   support_expiry = MAX(delivery_date). The Auto Repeat issues a fresh order
-#   each period, so a customer accumulates orders and the newest is current.
+#   support_expiry = Auto Repeat.next_schedule_date + 1 month. Orders are issued
+#   a month AHEAD of the period they renew, so the next scheduled order date is
+#   one month before cover lapses. A customer signing on 19 Aug 2026 renews on
+#   1 Aug 2027 and is covered to 1 Sep 2027.
+#
+#   NOT delivery_date, which was the first guess and is wrong: on live data it
+#   equals the order date (2026-08-01 ordered, 2026-08-01 "delivery"), so using
+#   it would expire every customer within weeks of them renewing.
 #
 #   renewal_unpaid = per_billed < 100 on the order that won. Auto Repeat SUBMITS
 #   the renewal about a month BEFORE expiry, so taking the newest date alone
@@ -393,6 +399,32 @@ def sync_contacts(customer: str, contacts: list[dict]) -> dict:
 #   The flag surfaces that instead of hiding it.
 
 ENTITLEMENT_PAGE = 2000
+
+
+
+def entitlement_expiry(row: dict) -> str | None:
+	"""When cover lapses for one recurring order line.
+
+	Orders are raised a month before the period they pay for, so the Auto
+	Repeat's next_schedule_date is one month short of the true expiry.
+
+	If the Auto Repeat is gone — deleted, or an ERPNext that predates the
+	schedule fields in the endpoint — fall back to the order date plus a full
+	cycle plus the same month. That is deliberately the generous direction: this
+	gates support, and wrongly locking out a paying customer is the worse error.
+	"""
+	scheduled = (row.get("ar_next_schedule_date") or "").strip() if isinstance(
+		row.get("ar_next_schedule_date"), str
+	) else row.get("ar_next_schedule_date")
+
+	if scheduled:
+		return str(frappe.utils.add_months(frappe.utils.getdate(scheduled), 1))
+
+	ordered = row.get("ordered_on")
+	if ordered:
+		return str(frappe.utils.add_months(frappe.utils.getdate(ordered), 13))
+
+	return None
 
 
 def fetch_entitlements(params: dict | None = None) -> dict:
@@ -484,7 +516,7 @@ def sync_entitlements() -> dict:
 				items[code] = product["name"]
 
 	# Fold to one winner per (customer, product): the order with the latest
-	# delivery_date. Its per_billed is what the flag reflects — an older paid
+	# computed expiry. Its per_billed is what the flag reflects — an older paid
 	# order must not make an unpaid renewal look settled.
 	best: dict[tuple, dict] = {}
 	unmapped_codes = set()
@@ -498,10 +530,10 @@ def sync_entitlements() -> dict:
 		if not customer:
 			continue
 
-		expiry = row.get("delivery_date")
+		expiry = entitlement_expiry(row)
 		key = (customer, product)
 		current = best.get(key)
-		if current is None or str(expiry or "") > str(current.get("delivery_date") or ""):
+		if current is None or str(expiry or "") > str(entitlement_expiry(current) or ""):
 			best[key] = row
 
 	created = updated = unchanged = 0
@@ -540,7 +572,7 @@ def sync_entitlements() -> dict:
 
 def apply_entitlement(customer: str, product: str, row: dict) -> str:
 	"""Create or update one HD Customer Product row from the winning order."""
-	expiry = row.get("delivery_date")
+	expiry = entitlement_expiry(row)
 	unpaid = 1 if float(row.get("per_billed") or 0) < 100 else 0
 	so = row.get("sales_order")
 

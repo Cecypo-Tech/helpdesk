@@ -51,9 +51,17 @@ SELECT_CLAUSE = """
            so.transaction_date AS ordered_on,
            so.currency      AS currency,
            soi.item_code    AS item_code,
-           soi.item_name    AS item_name
+           soi.item_name    AS item_name,
+           so.auto_repeat   AS auto_repeat,
+           ar.frequency          AS ar_frequency,
+           ar.start_date         AS ar_start_date,
+           ar.end_date           AS ar_end_date,
+           ar.next_schedule_date AS ar_next_schedule_date,
+           ar.status             AS ar_status,
+           ar.disabled           AS ar_disabled
     FROM `tabSales Order Item` soi
     JOIN `tabSales Order` so ON so.name = soi.parent
+    LEFT JOIN `tabAuto Repeat` ar ON ar.name = so.auto_repeat
     WHERE so.docstatus = 1
       AND so.auto_repeat IS NOT NULL
       AND so.auto_repeat != ''
@@ -86,6 +94,16 @@ for r in rows:
         "sales_order": r["sales_order"],
         "ordered_on": str(r["ordered_on"]) if r["ordered_on"] else None,
         "currency": r["currency"],
+        # The Auto Repeat is what actually describes the contract period.
+        # delivery_date turned out to track the ORDER date, not an expiry, so
+        # cover has to be derived from the schedule rather than the order line.
+        "auto_repeat": r["auto_repeat"],
+        "ar_frequency": r["ar_frequency"],
+        "ar_start_date": str(r["ar_start_date"]) if r["ar_start_date"] else None,
+        "ar_end_date": str(r["ar_end_date"]) if r["ar_end_date"] else None,
+        "ar_next_schedule_date": str(r["ar_next_schedule_date"]) if r["ar_next_schedule_date"] else None,
+        "ar_status": r["ar_status"],
+        "ar_disabled": int(r["ar_disabled"] or 0),
     })
 
 frappe.flags.version = 1

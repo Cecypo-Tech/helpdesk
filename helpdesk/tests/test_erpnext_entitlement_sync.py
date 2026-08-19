@@ -1,14 +1,16 @@
 """Derive HD Customer Product rows from recurring Sales Orders.
 
 The chain: a Sales Order with an Auto Repeat is a support contract; its items
-say what is covered; delivery_date says until when. Helpdesk folds many orders
-into one row per (customer, product).
+say what is covered; the Auto Repeat schedule says until when. Helpdesk folds
+many orders into one row per (customer, product).
 
 Two rules carry the business logic:
 
-  * support_expiry is MAX(delivery_date) across that product's orders. The Auto
-    Repeat issues a fresh SO each period, so a customer accumulates orders and
-    the newest one is their current cover.
+  * support_expiry is next_schedule_date + 1 month, taken from whichever of that
+    product's orders expires latest. Orders are raised a month AHEAD of the
+    period they pay for, so the next scheduled order lands one month before
+    cover lapses. Notably it is NOT delivery_date, which on live data equals the
+    order date and would expire everyone weeks after they renewed.
 
   * renewal_unpaid is per_billed < 100. Auto Repeat submits the renewal order
     about a month BEFORE expiry, so taking the latest date alone would silently
@@ -37,12 +39,20 @@ def payload(rows):
                      "count": len(rows), "truncated": False, "entitlements": rows}}
 
 
-def ent(item_code, delivery_date, per_billed=100.0, customer=None, so="SO-1"):
+def ent(item_code, expiry, per_billed=100.0, customer=None, so="SO-1"):
+    """One endpoint row that will resolve to `expiry`.
+
+    The schedule date is set a month earlier, because that is the shape of the
+    real data: the Auto Repeat raises each order a month before the period it
+    renews. delivery_date is set to the order date on purpose — that is what
+    live ERPNext returns, and no test should pass by reading it.
+    """
     return {
         "customer": customer or (PREFIX + "erp-co"),
         "item_code": item_code,
         "item_name": item_code,
-        "delivery_date": delivery_date,
+        "delivery_date": "2026-01-01",
+        "ar_next_schedule_date": str(frappe.utils.add_months(frappe.utils.getdate(expiry), -1)),
         "so_status": "Completed" if per_billed >= 100 else "To Bill",
         "per_billed": per_billed,
         "sales_order": so,
@@ -134,7 +144,7 @@ class TestMapping(_Base):
 
 
 class TestExpiryAndRenewal(_Base):
-    def test_latest_delivery_date_wins(self):
+    def test_latest_expiry_wins(self):
         """Auto Repeat issues a fresh order each period, so a customer
         accumulates orders and the newest is their current cover."""
         self.run_sync([
@@ -280,3 +290,60 @@ class TestAutoCreateProducts(_Base):
         self.assertEqual(result["products_created"], 0)
         self.assertEqual(result["unmapped"], 1)
         self.assertEqual(result["created"], 0)
+
+
+class TestEntitlementExpiryRule(unittest.TestCase):
+    """Cover runs to the next scheduled order plus a month.
+
+    Orders are issued a month ahead of the period they pay for, so the Auto
+    Repeat schedule — not the order line — says when support lapses. These test
+    the rule directly, without the sync around it.
+    """
+
+    def test_expiry_is_next_schedule_date_plus_one_month(self):
+        self.assertEqual(
+            erpnext_sync.entitlement_expiry({"ar_next_schedule_date": "2027-08-01"}),
+            "2027-09-01",
+        )
+
+    def test_worked_example_from_the_business(self):
+        """Sign 19 Aug 2026, renew 1 Aug 2027, covered to 1 Sep 2027."""
+        self.assertEqual(
+            erpnext_sync.entitlement_expiry({
+                "ordered_on": "2026-08-19",
+                "ar_next_schedule_date": "2027-08-01",
+            }),
+            "2027-09-01",
+        )
+
+    def test_delivery_date_is_ignored(self):
+        """delivery_date equals the ORDER date on live data (2026-08-01 ordered,
+        2026-08-01 'delivery'). Honouring it expired every customer weeks after
+        they renewed — the bug this rule replaced."""
+        self.assertEqual(
+            erpnext_sync.entitlement_expiry({
+                "delivery_date": "2026-08-01",
+                "ordered_on": "2026-08-01",
+                "ar_next_schedule_date": "2027-08-01",
+            }),
+            "2027-09-01",
+        )
+
+    def test_falls_back_generously_when_the_schedule_is_missing(self):
+        """No Auto Repeat: order date + one cycle + the month. Generous on
+        purpose — this gates support, and wrongly locking out a paying customer
+        is the worse error."""
+        self.assertEqual(
+            erpnext_sync.entitlement_expiry({"ordered_on": "2026-08-01"}),
+            "2027-09-01",
+        )
+
+    def test_no_dates_at_all_yields_none_rather_than_a_guess(self):
+        self.assertIsNone(erpnext_sync.entitlement_expiry({}))
+
+    def test_month_end_does_not_overflow(self):
+        """31 Jan + 1 month must land in February, not spill into March."""
+        self.assertEqual(
+            erpnext_sync.entitlement_expiry({"ar_next_schedule_date": "2027-01-31"}),
+            "2027-02-28",
+        )
