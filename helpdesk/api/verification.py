@@ -55,12 +55,12 @@ def get_contact_claim(ticket: str | int) -> dict:
 
 
 def _customer_name(customer: str) -> str:
-	try:
-		return frappe.db.get_value("HD Customer", customer, "customer_name") or customer
-	except Exception as e:
-		if frappe.db.is_missing_column(e):
-			return customer
-		raise
+	# No missing-column guard here: customer_name is a core field in
+	# hd_customer.json and the doctype's autoname (field:customer_name), so it
+	# cannot be absent while HD Customer exists. The guard the Custom Field
+	# reads need would be inert here, and inert defensive code gets copied
+	# somewhere it hides a real error.
+	return frappe.db.get_value("HD Customer", customer, "customer_name") or customer
 
 
 @frappe.whitelist()
