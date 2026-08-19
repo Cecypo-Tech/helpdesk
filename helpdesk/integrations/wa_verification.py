@@ -32,10 +32,16 @@ def settings():
 
 def send_prompt(ticket: str, text: str) -> None:
 	"""Free-form WABA reply. Safe without a template: the customer's inbound
-	message just opened the 24-hour window, so it is open by construction."""
+	message just opened the 24-hour window, so it is open by construction.
+
+	`system=True` because this is not an agent reply. Without it _send_fw_reply
+	would assign the ticket to whoever's session sent it and move it into the
+	configured agent-reply status — so ticking verification_enabled would quietly
+	pull every brand-new unknown-number ticket out of the agents' Open queue.
+	"""
 	from helpdesk.integrations.wa import _send_fw_reply
 
-	_send_fw_reply(ticket, text)
+	_send_fw_reply(ticket, text, system=True)
 
 
 def contact_state(contact: str) -> dict:

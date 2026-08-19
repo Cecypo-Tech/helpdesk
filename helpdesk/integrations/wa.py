@@ -3254,6 +3254,12 @@ def set_wa_message_normalized_phone(doc, method=None):
 
 
 _WA_DUPLICATE_FLAG = "hd_wa_duplicate"
+# Marks an outgoing message as automated housekeeping rather than an agent
+# reply. The status move lives in two places -- _send_fw_reply and the
+# after_insert hook on WhatsApp Message -- so suppressing it in the sender alone
+# would not actually stop the ticket moving. The flag rides on the doc instance
+# the hook is handed, the same way _WA_DUPLICATE_FLAG does.
+_WA_SYSTEM_FLAG = "hd_wa_system_send"
 
 
 def _wa_message_id_seen(message_id: str) -> bool:
@@ -3897,8 +3903,15 @@ def get_wa_message_by_message_id(message_id: str = None, jid: str = None) -> dic
 
 # ── frappe_whatsapp integration handlers ──────────────────────────────────────
 
-def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None, reply_to_message_id: str | None = None) -> dict:
-	"""Create an Outgoing WhatsApp Message via frappe_whatsapp for this ticket."""
+def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_url: str | None = None, reply_to_message_id: str | None = None, *, system: bool = False) -> dict:
+	"""Create an Outgoing WhatsApp Message via frappe_whatsapp for this ticket.
+
+	`system=True` sends the message as transport only: no assignment, no status
+	move. Use it for automated housekeeping (the unknown-contact verification
+	prompt), which is not an agent reply and must not be treated as one — see
+	the guard at the end of this function for why that matters. Keyword-only and
+	defaulting to False so every agent-initiated caller behaves exactly as before.
+	"""
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		frappe.throw(_("frappe_whatsapp is not installed."))
 	phone = get_contact_phone(ticket)
@@ -3926,16 +3939,27 @@ def _send_fw_reply(ticket: str, message: str, content_type: str = "text", media_
 		"is_reply": 1 if reply_to_message_id else 0,
 		"reply_to_message_id": reply_to_message_id or "",
 	})
+	if system:
+		# Read by on_whatsapp_message_insert, which does its own status move for
+		# every outgoing message. Set before insert so the hook sees it.
+		msg_doc.flags[_WA_SYSTEM_FLAG] = True
 	msg_doc.insert(ignore_permissions=True)
-	assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
-	if frappe.session.user not in (frappe.parse_json(assign_json) or []):
-		try:
-			frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
-		except Exception:
-			pass
-	s = _fw_settings()
-	if s and s.enabled and s.agent_reply_status:
-		_set_ticket_status(ticket, s.agent_reply_status)
+	# Everything below is "an agent just replied" bookkeeping, not transport.
+	# An automated housekeeping question must not claim the ticket for whoever's
+	# session sent it, and above all must not move a brand-new ticket out of Open
+	# into agent_reply_status — that can drop it straight out of the agents'
+	# queue, which is exactly the "degrades support" outcome the verification
+	# spec rules out.
+	if not system:
+		assign_json = frappe.db.get_value("HD Ticket", ticket, "_assign") or "[]"
+		if frappe.session.user not in (frappe.parse_json(assign_json) or []):
+			try:
+				frappe.get_doc("HD Ticket", ticket).assign_agent(frappe.session.user)
+			except Exception:
+				pass
+		s = _fw_settings()
+		if s and s.enabled and s.agent_reply_status:
+			_set_ticket_status(ticket, s.agent_reply_status)
 	return {"name": msg_doc.name, "status": msg_doc.status}
 
 
@@ -4006,7 +4030,11 @@ def on_whatsapp_message_insert(doc, method=None):
 	# Outgoing: link to ticket and update status
 	if doc.type != "Incoming":
 		if doc.reference_doctype == "HD Ticket" and doc.reference_name:
-			if s.agent_reply_status:
+			# A system send (see _send_fw_reply's `system` flag) is transport
+			# only: an automated housekeeping question must not move a
+			# brand-new ticket out of the agents' Open queue. The realtime
+			# publish still runs -- agents should see it in the thread.
+			if s.agent_reply_status and not doc.flags.get(_WA_SYSTEM_FLAG):
 				_set_ticket_status(doc.reference_name, s.agent_reply_status)
 			_publish_fw_message(doc.reference_name, is_incoming=False)
 		return

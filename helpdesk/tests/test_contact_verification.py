@@ -245,6 +245,18 @@ class TestFailOpen(_StateBase):
 		self.assertTrue(frappe.db.exists("HD Ticket", self.ticket))
 
 
+class TestPromptIsNotAnAgentReply(unittest.TestCase):
+	def test_send_prompt_marks_the_send_as_system(self):
+		"""_send_fw_reply is not pure transport: by default it assigns the ticket
+		and moves it into agent_reply_status. Ticking verification_enabled must
+		not start pulling brand-new tickets out of the agents' Open queue."""
+		with patch("helpdesk.integrations.wa._send_fw_reply") as send:
+			wa_verification.send_prompt("SOME-TICKET", "who are you?")
+
+		self.assertTrue(send.called)
+		self.assertIs(send.call_args.kwargs.get("system"), True)
+
+
 from helpdesk.api import verification as verification_api
 from helpdesk.utils import get_customer
 
