@@ -334,6 +334,33 @@ class TestApprovalApi(_StateBase):
 		verification_api.approve_contact_link(self.contact, self.customer)
 		self.assertEqual(get_customer(self.contact), [self.customer])
 
+	def test_approve_backfills_the_customer_on_the_open_ticket(self):
+		"""HD Ticket.customer is only written by set_customer() on save, and the
+		entitlement/standing endpoints read the ticket, not the contact. Without
+		the backfill the agent clicks Link and the coverage panel stays empty."""
+		self.assertFalse(frappe.db.get_value("HD Ticket", self.ticket, "customer"))
+
+		verification_api.approve_contact_link(self.contact, self.customer)
+
+		self.assertEqual(
+			frappe.db.get_value("HD Ticket", self.ticket, "customer"), self.customer
+		)
+
+	def test_approve_does_not_overwrite_a_ticket_that_already_has_a_customer(self):
+		"""Somebody attributed that ticket deliberately; a later link decision
+		about the number must not silently re-file their work."""
+		other = frappe.get_doc({
+			"doctype": "HD Customer", "customer_name": PREFIX + "already-set",
+		}).insert(ignore_permissions=True).name
+		frappe.db.set_value("HD Ticket", self.ticket, "customer", other)
+		frappe.db.commit()
+
+		verification_api.approve_contact_link(self.contact, self.customer)
+
+		self.assertEqual(
+			frappe.db.get_value("HD Ticket", self.ticket, "customer"), other
+		)
+
 	def test_reject_marks_it_and_creates_no_link(self):
 		verification_api.reject_contact_claim(self.contact)
 		self.assertEqual(self.status(), "Rejected")

@@ -68,10 +68,10 @@ def _customer_name(customer: str) -> str:
 def approve_contact_link(contact: str, customer: str) -> dict:
 	"""Link the contact to the customer an agent chose.
 
-	Writes the Dynamic Link shape helpdesk/utils.py:91 queries, so HD Ticket
-	.customer populates on the next save and product, entitlement and standing
-	follow with no further work. Idempotent: calling this twice for the same
-	pair does not append a second link row.
+	Writes the Dynamic Link shape helpdesk/utils.py:91 queries, so every future
+	ticket from this contact resolves a customer through the existing path.
+	Idempotent: calling this twice for the same pair does not append a second
+	link row.
 	"""
 	if not frappe.db.exists("HD Customer", customer):
 		frappe.throw(frappe._("Customer {0} does not exist.").format(customer))
@@ -84,9 +84,31 @@ def approve_contact_link(contact: str, customer: str) -> dict:
 		doc.append("links", {"link_doctype": "HD Customer", "link_name": customer})
 		doc.save(ignore_permissions=True)
 
+	_backfill_ticket_customer(contact, customer)
+
 	frappe.db.set_value("Contact", contact, "hd_verification_status", VERIFIED)
 	frappe.db.commit()
 	return {"ok": True, "customer": customer}
+
+
+def _backfill_ticket_customer(contact: str, customer: str) -> None:
+	"""Stamp the customer onto this contact's tickets that have none.
+
+	HD Ticket.customer is populated by set_customer() on *save* (hd_ticket.py),
+	and get_ticket_entitlement / get_ticket_standing read HD Ticket.customer
+	rather than the contact. Without this, the ticket the agent is looking at
+	when they click Link shows nothing at all until something happens to re-save
+	it — the payoff moment of the whole feature reads as "nothing happened".
+
+	Only ever fills a blank. A ticket already attributed to some other customer
+	is somebody's deliberate call and is left exactly as it is.
+	"""
+	for name in frappe.get_all(
+		"HD Ticket",
+		filters={"contact": contact, "customer": ["in", [None, ""]]},
+		pluck="name",
+	):
+		frappe.db.set_value("HD Ticket", name, "customer", customer)
 
 
 @frappe.whitelist()

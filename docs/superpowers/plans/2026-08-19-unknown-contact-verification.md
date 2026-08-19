@@ -1029,6 +1029,9 @@ asserted from a test:
    `Create Contact and Ticket`, and repeat: the prompt arrives once.
 4. Reply with a real company name and PIN. The contact tab shows the claim and
    the match.
-5. Click **Link**. Reload the ticket: `customer` is populated, and the coverage
-   panel shows products and standing.
+5. Click **Link**. The claim panel is replaced in place by the coverage panel,
+   showing products and standing — no page reload needed. `HD Ticket.customer`
+   is populated by the same call: `set_customer()` only runs on save, so
+   `approve_contact_link` backfills it for this contact's tickets that have no
+   customer yet. Confirm in `/app/hd-ticket/<name>` that `customer` is set.
 6. Send another message from that number: no prompt.
