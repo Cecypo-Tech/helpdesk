@@ -417,3 +417,66 @@ class TestApprovalApi(_StateBase):
 		):
 			with self.assertRaises(frappe.PermissionError):
 				call()
+
+
+class TestPinOnlyPromptPatch(unittest.TestCase):
+	"""The prompt asks for the PIN alone, and the patch respects rewording.
+
+	The company name was never matched on — match_claim compares tax_id only —
+	so asking for it gave the customer a second thing to get wrong for nothing.
+	"""
+
+	DOCTYPE = "WhatsApp Helpdesk Settings"
+	FIELD = "verification_prompt"
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.saved = frappe.db.get_value(
+			"Singles", {"doctype": self.DOCTYPE, "field": self.FIELD}, "value", order_by=None
+		)
+		self.addCleanup(self.restore)
+
+	def restore(self):
+		if self.saved is None:
+			frappe.db.delete("Singles", {"doctype": self.DOCTYPE, "field": self.FIELD})
+		else:
+			frappe.db.set_single_value(self.DOCTYPE, self.FIELD, self.saved)
+		frappe.db.commit()
+
+	def _run(self):
+		from helpdesk.patches.pin_only_verification_prompt import execute
+
+		execute()
+		frappe.db.commit()
+		return frappe.db.get_value(
+			"Singles", {"doctype": self.DOCTYPE, "field": self.FIELD}, "value", order_by=None
+		)
+
+	def test_the_old_default_is_replaced(self):
+		from helpdesk.patches import pin_only_verification_prompt as patch_mod
+
+		frappe.db.set_single_value(self.DOCTYPE, self.FIELD, patch_mod.PREVIOUS_DEFAULT)
+		frappe.db.commit()
+
+		self.assertEqual(self._run(), patch_mod.NEW_DEFAULT)
+
+	def test_a_reworded_prompt_is_left_alone(self):
+		"""An operator's wording is theirs. A patch that overwrites it once will
+		overwrite it again on the next migrate."""
+		mine = "Karibu! Tuma PIN yako ya KRA tafadhali."
+		frappe.db.set_single_value(self.DOCTYPE, self.FIELD, mine)
+		frappe.db.commit()
+
+		self.assertEqual(self._run(), mine)
+
+	def test_an_unwritten_field_is_left_for_the_install_patch(self):
+		frappe.db.delete("Singles", {"doctype": self.DOCTYPE, "field": self.FIELD})
+		frappe.db.commit()
+
+		self.assertIsNone(self._run())
+
+	def test_the_new_default_does_not_mention_a_company_name(self):
+		from helpdesk.patches import pin_only_verification_prompt as patch_mod
+
+		self.assertNotIn("company name", patch_mod.NEW_DEFAULT.lower())
+		self.assertIn("kra pin", patch_mod.NEW_DEFAULT.lower())

@@ -83,6 +83,6 @@ def execute():
 	_stamp_single_default(
 		settings,
 		"verification_prompt",
-		"Hi! So we can pull up your account, could you reply with your company name and KRA PIN? Thanks.",
+		"Hi! Please reply with your company KRA PIN so we can link this WhatsApp number to your account. We only need this once.",
 	)
 	_stamp_single_default(settings, "verification_reask_days", 7)
