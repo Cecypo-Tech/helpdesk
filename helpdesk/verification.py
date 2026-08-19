@@ -51,8 +51,12 @@ def match_claim(tax_id: str | None) -> list[str]:
 		rows = frappe.get_all(
 			"HD Customer", filters={"tax_id": ["is", "set"]}, fields=["name", "tax_id"]
 		)
-	except Exception:
-		# tax_id is a Custom Field; the column is absent on an unmigrated site.
-		return []
+	except Exception as e:
+		# tax_id is a Custom Field; on an unmigrated site the column is absent
+		# and MariaDB raises ER.BAD_FIELD_ERROR. Only that specific case reads
+		# as "no match" -- any other failure is a real fault and must surface.
+		if frappe.db.is_missing_column(e):
+			return []
+		raise
 
 	return [r["name"] for r in rows if normalise_pin(r.get("tax_id")) == claimed]
