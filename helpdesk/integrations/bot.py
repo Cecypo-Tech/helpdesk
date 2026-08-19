@@ -2,6 +2,8 @@
 import re
 import frappe
 
+from helpdesk.utils import agent_only
+
 from helpdesk import entitlement
 
 try:
@@ -263,12 +265,19 @@ class _BotState:
 			self._set_cache(session)
 
 	def send_reply(self, message: str) -> None:
+		"""Send as transport only.
+
+		system=True because a bot reply is not an agent reply: it must not
+		assign the ticket to whatever user this background job runs as, and must
+		not move the ticket out of the agents' queue. A customer waiting on a
+		human should still look like one.
+		"""
 		if not send_wa_reply:
 			return
 		if self.ticket_name:
-			send_wa_reply(ticket=self.ticket_name, message=message)
+			send_wa_reply(ticket=self.ticket_name, message=message, system=True)
 		else:
-			send_wa_reply(jid=self.jid, line=self.line_name, message=message)
+			send_wa_reply(jid=self.jid, line=self.line_name, message=message, system=True)
 
 
 # ── Conversation history ───────────────────────────────────────────────────────
@@ -449,56 +458,6 @@ def _download_image_wa_line(media_url: str, line_name: str) -> bytes | None:
 		return None
 
 
-# ── Company name extraction ───────────────────────────────────────────────────
-
-
-def _extract_company_name(text: str) -> str:
-	"""Use the LLM to pull just the company/business name out of a free-form message.
-
-	Returns empty string if no company name is found or the LLM call fails.
-	"""
-	from helpdesk.integrations.llm import chat as llm_chat
-
-	try:
-		messages = [
-			{
-				"role": "system",
-				"content": (
-					"You are a company-name extractor. Return ONLY the company or business name — "
-					"nothing else, no explanation, no punctuation around it.\n\n"
-					"Rules:\n"
-					"- Company names are short (1–6 words), typically proper nouns.\n"
-					"- If the message is a question, complaint, or does not clearly state a company name → return empty string.\n"
-					"- Do NOT return sentences, prices, dates, invoice references, or partial phrases.\n"
-					"- Be conservative: when in doubt, return empty string.\n\n"
-					"Examples:\n"
-					"User: 'We are Acme Corporation' → Acme Corporation\n"
-					"User: 'safaricom' → Safaricom\n"
-					"User: 'the company is TechCorp Ltd' → TechCorp Ltd\n"
-					"User: 'Also we agreed you'd charge 2k for the template' → \n"
-					"User: 'I need help with my invoice' → \n"
-					"User: 'you raised 2 invoices of 2k instead of one' → "
-				),
-			},
-			{"role": "user", "content": text},
-		]
-		result = llm_chat(messages).strip().strip(".,;:")
-		# Reject anything that looks like a sentence rather than a name:
-		# too long, contains a question mark, too many words, or sentence-ending punctuation mid-string.
-		if (
-			not result
-			or len(result) > 60
-			or "?" in result
-			or result.count(" ") > 6
-			or any(result[i] in ".!" for i in range(len(result) - 1))
-		):
-			return ""
-		return result
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company name extraction failed")
-		return ""
-
-
 # ── Escalation ────────────────────────────────────────────────────────────────
 
 
@@ -559,56 +518,18 @@ def process_message(msg_name: str, channel: str) -> None:
 		if _assign and frappe.parse_json(_assign):
 			return
 
-	if ticket_name:
-		_company_key = f"wa_bot_company:{ticket_name}"
-		_company_retry_key = f"wa_bot_company_retry:{ticket_name}"
-		# Atomic-ish: fetch and immediately delete so a concurrent job won't also claim it.
-		_waiting_for_company = frappe.cache().get_value(_company_key)
-		if _waiting_for_company:
-			frappe.cache().delete_value(_company_key)
-			# Previous bot message asked for company name — extract it from the reply.
-			company_name = _extract_company_name(text)
-			if company_name:
-				existing = frappe.db.get_value("HD Customer", {"customer_name": company_name}, "name")
-				if existing:
-					cust_name = existing
-				else:
-					cust = frappe.get_doc({"doctype": "HD Customer", "customer_name": company_name})
-					cust.insert(ignore_permissions=True)
-					frappe.db.commit()
-					cust_name = cust.name
-				frappe.db.set_value("HD Ticket", ticket_name, "customer", cust_name)
-				frappe.cache().delete_value(_company_retry_key)
-				try:
-					state.send_reply(f"Thank you! I've noted your company as *{company_name}*. How can I help you?")
-					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
-				except Exception:
-					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company confirm message failed")
-				return
-			# Extraction failed — re-ask once; on second failure fall through to normal handling
-			# so the user's actual message still gets a response.
-			already_retried = frappe.cache().get_value(_company_retry_key)
-			if not already_retried:
-				frappe.cache().set_value(_company_retry_key, 1, expires_in_sec=3600)
-				frappe.cache().set_value(_company_key, 1, expires_in_sec=3600)
-				try:
-					state.send_reply("Sorry, I didn't catch that — could you share just your company name? (e.g. *Acme Ltd*)")
-					state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
-				except Exception:
-					frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company re-ask failed")
-				return
-			# Second failure: clear retry flag and fall through so the message is handled normally.
-			frappe.cache().delete_value(_company_retry_key)
-
-		customer = frappe.db.get_value("HD Ticket", ticket_name, "customer")
-		if not customer:
-			try:
-				state.send_reply("Before we get started, could you please share your company name?")
-				frappe.cache().set_value(_company_key, 1, expires_in_sec=3600)
-				state.update(bot_reply_count=state.bot_reply_count + 1, bot_active=1)
-			except Exception:
-				frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: company name prompt failed")
-			return
+	# Identity is NOT the bot's job. It used to ask for a company name here, run
+	# the answer through an LLM extractor, then either link the ticket to an
+	# HD Customer whose name matched or CREATE one and link that -- all with no
+	# human in the loop. That let anyone attach themselves to a real customer's
+	# record by typing its name, from which the coverage panel and account
+	# standing then resolve, and it filled the customer list with extracted
+	# strings on the miss path. Unknown contacts are handled by
+	# helpdesk.integrations.wa_verification, which records what the customer
+	# claims and leaves the linking decision to an agent. See
+	# docs/superpowers/specs/2026-08-19-unknown-contact-verification-design.md.
+	#
+	# A ticket with no customer now just gets answered normally.
 
 	if _is_short_message(text, settings.min_message_words or 3):
 		if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
@@ -727,10 +648,17 @@ def process_message(msg_name: str, channel: str) -> None:
 
 
 @frappe.whitelist()
+@agent_only
 def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
 	"""Return an LLM-drafted reply suggestion for the agent UI.
 
 	Never sent automatically — the agent reviews and edits before sending.
+
+	@agent_only because @frappe.whitelist() alone bypasses permissions: without
+	it any authenticated user, portal Customers included, could pass any ticket
+	name and receive a draft built from that ticket's conversation history --
+	someone else's WhatsApp thread -- while also spending a billable LLM call
+	per request. Both callers are agent reply boxes, so the guard costs nothing.
 	"""
 	jid = None
 	if channel == "wa_line":

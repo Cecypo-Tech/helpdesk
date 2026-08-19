@@ -240,8 +240,10 @@ class TestEscalation(unittest.TestCase):
 
 		with patch("helpdesk.integrations.bot.send_wa_reply") as mock_send:
 			_escalate(_BotState(self.ticket.name, None, None))
+			# system=True: an escalation message is automated, so it must not
+			# assign the ticket or move it out of the agents' queue.
 			mock_send.assert_called_once_with(
-				ticket=self.ticket.name, message="Test escalation message"
+				ticket=self.ticket.name, message="Test escalation message", system=True
 			)
 
 
@@ -294,3 +296,181 @@ class TestDocEventHandlers(unittest.TestCase):
 		with patch("frappe.enqueue") as mock_enqueue:
 			handle_whatsapp_message(doc)
 			mock_enqueue.assert_not_called()
+
+
+class TestBotDoesNotHandleIdentity(unittest.TestCase):
+	"""The bot must never decide who a customer is.
+
+	It used to ask for a company name, run the answer through an LLM extractor,
+	and then either link the ticket to an HD Customer whose name matched or
+	create one and link that — with no human in the loop. That let anyone attach
+	themselves to a real customer's record by typing its name, and filled the
+	customer list with extracted strings on the miss path. Identity now belongs
+	to helpdesk.integrations.wa_verification, which records a claim and leaves
+	the decision to an agent.
+	"""
+
+	PREFIX = "_test-botident-"
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.cleanup()
+		# A raised_by of "Administrator" resolves to a real contact, and
+		# HD Ticket.set_customer then derives a customer from it — which would
+		# have meant this fixture never exercised the no-customer path at all.
+		# The assertion below is what caught that.
+		self.ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": self.PREFIX + "no customer",
+			"raised_by": self.PREFIX + frappe.generate_hash(length=6) + "@example.invalid",
+		}).insert(ignore_permissions=True)
+		self.assertFalse(
+			frappe.db.get_value("HD Ticket", self.ticket.name, "customer"),
+			"fixture must start with no customer, or the test proves nothing",
+		)
+		frappe.db.commit()
+		self.addCleanup(self.cleanup)
+
+	def cleanup(self):
+		for t in frappe.get_all(
+			"HD Ticket", filters={"subject": ["like", self.PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("HD Ticket", t, force=True, ignore_permissions=True,
+			                  delete_permanently=True)
+		frappe.db.sql(
+			"DELETE FROM `tabWhatsApp Message` WHERE message_id LIKE %s", (self.PREFIX + "%",)
+		)
+		for c in frappe.get_all(
+			"HD Customer", filters={"customer_name": ["like", "%" + self.PREFIX + "%"]},
+			pluck="name",
+		):
+			frappe.delete_doc("HD Customer", c, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+	def _bot_settings(self):
+		return frappe._dict(
+			is_enabled=1,
+			min_message_words=1,
+			conversation_mode="Multi-turn",
+			max_bot_replies=3,
+			clarification_message_enabled=0,
+			clarification_message="",
+			kb_search_limit=3,
+			enable_gap_tracking=0,
+			auto_escalate_on_no_kb=0,
+			system_prompt="You are a helpful support assistant.",
+			escalation_message_enabled=0,
+			escalation_message="",
+		)
+
+	def _run(self, text):
+		"""Drive one inbound message through the bot and return the send mock."""
+		from unittest.mock import patch
+
+		with patch("frappe.enqueue"):
+			msg = frappe.get_doc({
+				"doctype": "WhatsApp Message",
+				"type": "Incoming",
+				"from": "254700999888",
+				"message": text,
+				"content_type": "text",
+				"message_id": self.PREFIX + frappe.generate_hash(length=8),
+				"reference_doctype": "HD Ticket",
+				"reference_name": self.ticket.name,
+			}).insert(ignore_permissions=True)
+		frappe.db.commit()
+
+		from helpdesk.integrations import bot
+
+		with (
+			patch.object(bot, "_bot_settings", return_value=self._bot_settings()),
+			patch.object(bot, "_combined_kb_search", return_value=[]),
+			patch.object(bot, "send_wa_reply") as mock_send,
+			patch("helpdesk.integrations.llm.chat", return_value="Here is an answer."),
+			patch(
+				"helpdesk.integrations.embeddings.search_resolved_tickets", return_value=[]
+			),
+		):
+			bot.process_message(msg.name, "waba")
+		return mock_send
+
+	def test_a_company_name_does_not_create_a_customer(self):
+		before = frappe.db.count("HD Customer")
+		self._run("We are " + self.PREFIX + "Acme Corporation")
+		self.assertEqual(
+			frappe.db.count("HD Customer"), before,
+			"the bot invented an HD Customer from what the customer typed",
+		)
+
+	def test_a_company_name_does_not_link_the_ticket(self):
+		"""The dangerous half: naming a real customer must not attach you to it."""
+		existing = frappe.get_doc({
+			"doctype": "HD Customer", "customer_name": self.PREFIX + "Real Customer Ltd",
+		}).insert(ignore_permissions=True).name
+
+		self._run("We are " + self.PREFIX + "Real Customer Ltd")
+
+		self.assertFalse(
+			frappe.db.get_value("HD Ticket", self.ticket.name, "customer"),
+			f"the bot linked the ticket to {existing} on a typed name alone",
+		)
+
+	def test_a_ticket_with_no_customer_still_gets_answered(self):
+		"""The removed branch used to short-circuit here and ask for a company
+		name instead of helping. An unidentified customer still gets support."""
+		mock_send = self._run("my printer will not connect to the network at all")
+		self.assertTrue(mock_send.called, "the bot did not reply at all")
+		sent = mock_send.call_args.kwargs.get("message", "")
+		self.assertNotIn("company name", sent.lower())
+
+
+class TestBotRepliesAreSystemSends(unittest.TestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		# _BotState reads the ticket on construction, so this needs to be real.
+		self.ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": "_test-botsys- reply shape",
+			"raised_by": "_test-botsys-" + frappe.generate_hash(length=6) + "@example.invalid",
+		}).insert(ignore_permissions=True)
+		frappe.db.commit()
+		self.addCleanup(frappe.db.commit)
+		self.addCleanup(
+			frappe.delete_doc, "HD Ticket", self.ticket.name,
+			force=True, ignore_permissions=True,
+		)
+
+	def test_send_reply_does_not_claim_or_move_the_ticket(self):
+		"""A bot reply is not an agent reply: it must not assign the ticket to
+		whatever user the job runs as, nor move it out of the agents' queue."""
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import _BotState
+
+		with patch("helpdesk.integrations.bot.send_wa_reply") as mock_send:
+			_BotState(self.ticket.name, None, None).send_reply("hello")
+
+		self.assertTrue(mock_send.call_args.kwargs.get("system"))
+
+	def test_wa_line_replies_are_system_sends_too(self):
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import _BotState
+
+		with patch("helpdesk.integrations.bot.send_wa_reply") as mock_send:
+			_BotState(None, "2547000@s.whatsapp.net", "some-line").send_reply("hello")
+
+		self.assertTrue(mock_send.call_args.kwargs.get("system"))
+
+
+class TestSuggestAgentReplyIsGuarded(unittest.TestCase):
+	def test_a_non_agent_is_refused(self):
+		"""@frappe.whitelist() alone bypasses permissions. Without the guard any
+		authenticated user — portal Customers included — could read a draft built
+		from someone else's WhatsApp thread, and spend a billable LLM call doing it."""
+		from helpdesk.integrations.bot import suggest_agent_reply
+
+		frappe.set_user("Guest")
+		self.addCleanup(frappe.set_user, "Administrator")
+		with self.assertRaises(frappe.PermissionError):
+			suggest_agent_reply("any-ticket")
