@@ -43,7 +43,10 @@ function update(field: Field["fieldname"], value: FieldValue, event = null) {
 :deep(.form-control textarea),
 :deep(.form-control button) {
   border-color: transparent;
-  background: white;
+  /* Theme-aware, not a raw colour -- same fix as TicketField.vue. `white`
+     stayed white under [data-theme="dark"], so template-driven fields rendered
+     as white slabs on the mobile agent view too. */
+  background: var(--surface-white);
 }
 :deep(.form-control textarea) {
   field-sizing: content;
@@ -64,7 +67,7 @@ function update(field: Field["fieldname"], value: FieldValue, event = null) {
 }
 
 :deep(.form-control button svg) {
-  color: white;
+  color: var(--surface-white);
   width: 0;
 }
 </style>
