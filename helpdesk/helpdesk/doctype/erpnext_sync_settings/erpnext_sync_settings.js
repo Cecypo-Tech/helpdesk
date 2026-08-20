@@ -21,6 +21,24 @@ frappe.ui.form.on("ERPNext Sync Settings", {
 		});
 	},
 
+	sync_entitlements_now(frm) {
+		if (frm.is_dirty()) {
+			frappe.msgprint(__("Save the settings first, then sync."));
+			return;
+		}
+		frappe.call({
+			method: "helpdesk.integrations.erpnext_sync.enqueue_entitlement_sync",
+			callback() {
+				frappe.show_alert({
+					message: __(
+						"Entitlement sync queued. Last Entitlement Sync updates when it finishes."
+					),
+					indicator: "blue",
+				});
+			},
+		});
+	},
+
 	test_connection(frm) {
 		if (frm.is_dirty()) {
 			frappe.msgprint(__("Save the settings first, then test."));

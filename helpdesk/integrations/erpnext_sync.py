@@ -202,7 +202,8 @@ def sync_customers(page_size: int = PAGE_SIZE, full: bool = False) -> dict:
 @frappe.whitelist()
 def enqueue_customer_sync() -> dict:
 	"""Run the mirror in the background, from the settings screen."""
-	frappe.only_for(["System Manager", "Administrator"])
+	if frappe.session.user != "Administrator":
+		frappe.only_for(["System Manager", "Administrator"])
 	frappe.enqueue(
 		"helpdesk.integrations.erpnext_sync.sync_customers",
 		queue="long",
@@ -211,6 +212,39 @@ def enqueue_customer_sync() -> dict:
 		deduplicate=True,
 	)
 	return {"status": "queued"}
+
+
+def run_scheduled_sync() -> dict:
+	"""Hourly tick that runs a full sync when sync_interval_hours has elapsed.
+
+	The interval lives in settings, so the scheduler is asked every hour and
+	decides here rather than in hooks.py — a cron expression cannot read a
+	Single. Without this, sync_interval_hours was a setting nothing consumed and
+	the mirror only moved when somebody pressed a button.
+
+	Customers first, then entitlements: entitlements map onto HD Customers by
+	erpnext_customer, so a fresh customer's contract cannot land before the
+	customer does. Both are enqueued rather than run inline; the entitlement job
+	deduplicates, so a slow customer pass simply means it picks up next hour.
+	"""
+	if not is_configured():
+		return {"ok": False, "error": "not configured", "ran": False}
+
+	interval = int(settings().get("sync_interval_hours") or 0)
+	if interval <= 0:
+		# Explicitly opted out of scheduling. Manual sync still works.
+		return {"ok": True, "error": None, "ran": False, "reason": "interval is 0"}
+
+	last = settings().get("last_customer_sync")
+	if last:
+		hours = frappe.utils.time_diff_in_hours(frappe.utils.now_datetime(), last)
+		if hours < interval:
+			return {"ok": True, "error": None, "ran": False,
+			        "reason": f"{round(hours, 1)}h of {interval}h elapsed"}
+
+	enqueue_customer_sync()
+	enqueue_entitlement_sync()
+	return {"ok": True, "error": None, "ran": True}
 
 
 # ── Contacts ─────────────────────────────────────────────────────────────────
@@ -628,7 +662,8 @@ def apply_entitlement(customer: str, product: str, row: dict) -> str:
 
 @frappe.whitelist()
 def enqueue_entitlement_sync() -> dict:
-	frappe.only_for(["System Manager", "Administrator"])
+	if frappe.session.user != "Administrator":
+		frappe.only_for(["System Manager", "Administrator"])
 	frappe.enqueue(
 		"helpdesk.integrations.erpnext_sync.sync_entitlements",
 		queue="long", timeout=1800, job_id="erpnext_entitlement_sync", deduplicate=True,

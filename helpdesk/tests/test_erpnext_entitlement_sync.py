@@ -374,3 +374,79 @@ class TestEntitlementExpiryRule(unittest.TestCase):
             erpnext_sync.entitlement_expiry({"ar_next_schedule_date": "2027-01-31"}),
             "2027-02-28",
         )
+
+
+class TestScheduledSync(unittest.TestCase):
+	"""The hourly tick decides for itself whether the interval has elapsed.
+
+	sync_interval_hours lives in a Single, and a cron expression cannot read one,
+	so the decision has to live in the function. Before this existed the setting
+	was consumed by nothing and the mirror only moved when somebody pressed a
+	button.
+	"""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.saved_interval = frappe.db.get_single_value(
+			erpnext_sync.DOCTYPE, "sync_interval_hours"
+		)
+		self.saved_last = frappe.db.get_single_value(
+			erpnext_sync.DOCTYPE, "last_customer_sync"
+		)
+		self.addCleanup(self.restore)
+
+	def restore(self):
+		frappe.db.set_single_value(
+			erpnext_sync.DOCTYPE, "sync_interval_hours", self.saved_interval
+		)
+		frappe.db.set_single_value(
+			erpnext_sync.DOCTYPE, "last_customer_sync", self.saved_last
+		)
+		frappe.db.commit()
+
+	def _run(self, interval, last, configured=True):
+		frappe.db.set_single_value(erpnext_sync.DOCTYPE, "sync_interval_hours", interval)
+		frappe.db.set_single_value(erpnext_sync.DOCTYPE, "last_customer_sync", last)
+		frappe.db.commit()
+		with (
+			patch.object(erpnext_sync, "is_configured", return_value=configured),
+			patch.object(erpnext_sync, "enqueue_customer_sync") as cust,
+			patch.object(erpnext_sync, "enqueue_entitlement_sync") as ent,
+		):
+			result = erpnext_sync.run_scheduled_sync()
+		return result, cust, ent
+
+	def test_it_runs_when_the_interval_has_elapsed(self):
+		stale = frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-9)
+		result, cust, ent = self._run(6, stale)
+
+		self.assertTrue(result["ran"])
+		self.assertTrue(cust.called)
+		self.assertTrue(ent.called, "entitlements must follow customers")
+
+	def test_it_waits_when_the_interval_has_not_elapsed(self):
+		recent = frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-1)
+		result, cust, ent = self._run(6, recent)
+
+		self.assertFalse(result["ran"])
+		self.assertFalse(cust.called)
+
+	def test_a_never_synced_site_runs_immediately(self):
+		result, cust, _ = self._run(6, None)
+
+		self.assertTrue(result["ran"])
+		self.assertTrue(cust.called)
+
+	def test_zero_means_do_not_schedule(self):
+		"""0 is an explicit opt-out, not an accident -- the patch backfills the
+		default so an unwritten field never reads as 0."""
+		result, cust, _ = self._run(0, None)
+
+		self.assertFalse(result["ran"])
+		self.assertFalse(cust.called)
+
+	def test_an_unconfigured_site_does_nothing(self):
+		result, cust, _ = self._run(6, None, configured=False)
+
+		self.assertFalse(result["ran"])
+		self.assertFalse(cust.called)

@@ -46,6 +46,10 @@ scheduler_events = {
     "hourly": [
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_due_task_wpa_notifications",
         "helpdesk.integrations.outline.sync_outline_docs",
+        # Ticks hourly and decides for itself whether sync_interval_hours has
+        # elapsed. A cron expression cannot read that setting out of a Single,
+        # so the decision lives in the function.
+        "helpdesk.integrations.erpnext_sync.run_scheduled_sync",
     ],
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",
