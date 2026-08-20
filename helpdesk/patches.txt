@@ -67,3 +67,4 @@ helpdesk.patches.add_erpnext_contact_field
 helpdesk.patches.add_erpnext_entitlement_fields
 helpdesk.patches.add_contact_verification_fields
 helpdesk.patches.pin_only_verification_prompt
+helpdesk.patches.backfill_sync_interval_hours
