@@ -117,6 +117,43 @@ class TestRediSearchGuard(unittest.TestCase):
         build.assert_called_once()
 
 
+class TestIndexConfig(unittest.TestCase):
+    """Pure configuration checks -- deliberately NOT gated on an index existing.
+
+    The bug these guard against makes the index impossible to build, so a class
+    that skips when the index is missing would skip exactly when it matters.
+    """
+
+    def test_every_filtered_field_is_also_selected(self):
+        """A field named in `filters` must also be in `fields`.
+
+        `get_documents_paginated` SELECTs only the declared fields, so a filter
+        on an unselected field reads as None during a BULK build. Every document
+        then fails the filter, nothing is indexed, the progress cursor never
+        advances, and the build spins forever -- which is exactly what happened
+        when `status` was filtered but not selected.
+
+        Single-doc indexing cannot catch this: `index_doc` goes through
+        `frappe.get_doc` and has every field, so the tests stayed green while a
+        full rebuild was broken.
+        """
+        for doctype, config in HelpdeskSearch.INDEXABLE_DOCTYPES.items():
+            declared = set()
+            for field in config.get("fields", []):
+                if isinstance(field, str):
+                    declared.add(field)
+                elif isinstance(field, dict):
+                    declared.update(field.values())
+
+            for field in (config.get("filters") or {}):
+                self.assertIn(
+                    field,
+                    declared,
+                    f"{doctype}: '{field}' is filtered on but not selected. A bulk "
+                    f"build would read it as None and index nothing.",
+                )
+
+
 class TestArticleIndexing(unittest.TestCase):
     """HD Article was absent from INDEXABLE_DOCTYPES, so nothing indexed it."""
 

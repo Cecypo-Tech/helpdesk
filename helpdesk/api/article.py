@@ -4,6 +4,13 @@ import frappe
 
 from helpdesk.search_sqlite import HelpdeskSearch
 
+# SQLite's highlight() wraps matches in <mark>. The widget v-html's the snippet,
+# so the markup renders there -- but it interpolates the title as TEXT, which
+# showed a literal "<mark>Tremol</mark>" on screen. Titles were never highlighted
+# before this endpoint moved backends, so strip rather than start rendering
+# untrusted markup in a new place.
+_HIGHLIGHT_TAG = re.compile(r"</?mark>")
+
 NUM_RESULTS = 5
 
 
@@ -64,7 +71,7 @@ def search(query: str) -> list:
             {
                 "id": f"HD Article:{row.get('name')}",
                 "name": row.get("name"),
-                "subject": row.get("title"),
+                "subject": _HIGHLIGHT_TAG.sub("", row.get("title") or ""),
                 "headings": "",
                 "description": row.get("content"),
                 # Not used by the widget, but the Ticket Search Analysis report

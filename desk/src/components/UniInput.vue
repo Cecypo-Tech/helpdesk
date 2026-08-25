@@ -7,6 +7,12 @@
       </span>
     </span>
     <div class="flex gap-2 items-center">
+      <!--
+        The @change payload is optional-chained at every hop. Autocomplete emits
+        `change` with null when a selection is CLEARED, and reading `.target` off
+        null throws "can't access property 'target'" -- a console error that also
+        stops the field from clearing.
+      -->
       <component
         class="w-full"
         :is="component"
@@ -18,7 +24,7 @@
         @change="
           emitUpdate(
             field.fieldname,
-            $event.target?.value || $event.value || $event
+            $event?.target?.value ?? $event?.value ?? $event
           )
         "
       />

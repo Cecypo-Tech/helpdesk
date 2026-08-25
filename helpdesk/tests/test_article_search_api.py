@@ -18,7 +18,7 @@ from unittest.mock import patch
 import frappe
 
 from helpdesk.api.article import NUM_RESULTS, sanitize_query, search
-from helpdesk.search_sqlite import HelpdeskSearch
+from helpdesk.search_sqlite import HelpdeskSearch, strip_markdown
 
 # Deliberately alphanumeric, with no hyphen or underscore. The index tokenizer
 # is `unicode61 ... tokenchars '-_'`, so it treats those as WORD characters and
@@ -197,3 +197,81 @@ class TestArticleSearchApi(unittest.TestCase):
 
     def test_sanitize_query_strips_punctuation_and_collapses_space(self):
         self.assertEqual(sanitize_query("  How's   the  BACKUP? "), "how s the backup")
+
+    # --- readability of what the widget shows -----------------------------
+
+    def test_subject_carries_no_highlight_markup(self):
+        """The widget interpolates the title as TEXT, so any <mark> from
+        SQLite's highlight() renders literally on screen as "<mark>Tremol</mark>"."""
+        results = search(f"{PREFIX} publicanswer")
+        self.assertTrue(results)
+        self.assertNotIn("<mark>", results[0]["subject"])
+        self.assertNotIn("</mark>", results[0]["subject"])
+
+    def test_snippet_is_not_raw_markdown(self):
+        """Article bodies arrive as markdown inside HTML. Unstripped, snippets
+        read like "## Software Reset ... ![](/api/attachments...) | Brand |"."""
+        results = search(MARKER)
+        self.assertTrue(results)
+        for r in results:
+            desc = r["description"] or ""
+            for noise in ("![](", "## ", "|---", "**"):
+                self.assertNotIn(noise, desc)
+
+
+class TestStripMarkdown(unittest.TestCase):
+    """Cases taken from the real article bodies on this site."""
+
+    def test_images_are_removed(self):
+        out = strip_markdown('![](/api/attachments.redirect?id=87227966 "=380x74") Press')
+        self.assertNotIn("![](", out)
+        self.assertIn("Press", out)
+
+    def test_headings_lose_their_hashes(self):
+        self.assertEqual(strip_markdown("## Software Reset steps"), "Software Reset steps")
+
+    def test_links_keep_their_text(self):
+        self.assertEqual(
+            strip_markdown("See [the manual](https://x.example/doc) now"),
+            "See the manual now",
+        )
+
+    def test_table_rules_and_pipes_go(self):
+        out = strip_markdown("| Brand | IPs | |-------|-----| | Tremol | 196.207.27.42 |")
+        self.assertNotIn("|", out)
+        self.assertNotIn("---", out)
+        self.assertIn("Tremol", out)
+
+    def test_directives_are_removed(self):
+        self.assertNotIn(":::", strip_markdown(":::warning Network settings reset :::"))
+
+    def test_emphasis_is_unwrapped(self):
+        self.assertEqual(strip_markdown("# **POWERING ON**"), "POWERING ON")
+
+    def test_hyphenated_words_survive(self):
+        """The table-rule pattern matches runs of 3+, so ordinary hyphenation and
+        short ranges must come through untouched."""
+        self.assertEqual(
+            strip_markdown("tab-software reset on the FT-100MX"),
+            "tab-software reset on the FT-100MX",
+        )
+
+    def test_literal_escape_sequences_are_treated_as_whitespace(self):
+        """The Outline import embeds literal backslash-n in article bodies. They
+        survive the base indexer's whitespace collapse, and they read as a word
+        character to every other pattern here -- which is how "excel\\n#### MYSQL"
+        kept its heading marker."""
+        out = strip_markdown("to excel" + chr(92) + "n#### MYSQL COUNT")
+        self.assertNotIn(chr(92) + "n", out)
+        self.assertNotIn("#", out)
+        self.assertEqual(out, "to excel MYSQL COUNT")
+
+    def test_image_with_a_rewritten_url_is_removed(self):
+        """The base indexer rewrites bare URLs to "[link]" before this runs, which
+        eats an image's closing paren and leaves "![]([link]" behind."""
+        out = strip_markdown("renew --dry-run ![]([link] Ctrl X")
+        self.assertNotIn("![](", out)
+
+    def test_empty_input_is_safe(self):
+        self.assertEqual(strip_markdown(""), "")
+        self.assertEqual(strip_markdown(None), "")
