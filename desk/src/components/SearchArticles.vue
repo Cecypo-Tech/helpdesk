@@ -24,19 +24,26 @@
         :key="a.id"
         class="rounded-md border-2 p-2 border-hidden hover:bg-surface-gray-2"
       >
+        <!--
+          `name` used to be `<article>#<heading>`, because the old RediSearch
+          index stored one document per heading section. The SQLite index stores
+          whole articles, so it is now just the article and there is no anchor to
+          jump to. Splitting on '#' here would have produced `hash: "#undefined"`.
+        -->
         <RouterLink
           class="group cursor-pointer hover:text-gray-900 flex flex-col gap-1"
           :to="{
             name: 'ArticlePublic',
             params: {
-              articleId: a.name.split('#')[0],
+              articleId: a.name,
             },
-            hash: `#${a.name.split('#')[1]}`,
           }"
           @click="handleSearchArticleClick(a)"
           target="_blank"
         >
-          <dt class="font-base">{{ a.subject }} - {{ a.headings }}</dt>
+          <dt class="font-base">
+            {{ a.headings ? `${a.subject} - ${a.headings}` : a.subject }}
+          </dt>
           <!-- eslint-disable-next-line vue/no-v-html -->
           <dd
             class="font-base text-p-sm text-gray-600 line-clamp-1"

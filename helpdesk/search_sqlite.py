@@ -25,6 +25,18 @@ class HelpdeskSearchIndexMissingError(SQLiteSearchIndexMissingError):
 class HelpdeskSearch(SQLiteSearch):
     INDEX_NAME = "helpdesk_search.db"
 
+    def __init__(self, db_name=None, articles_only=False):
+        """`articles_only` skips the accessible-ticket lookup.
+
+        `_get_accessible_ticket_names()` runs `frappe.get_list("HD Ticket")` on
+        every search. The article-suggestion widget on the new-ticket form fires
+        one search per debounced keystroke and cannot match a ticket anyway, so
+        paying for that list there is pure waste -- on a busy site it is the
+        most expensive part of a request that only ever returns articles.
+        """
+        super().__init__(db_name)
+        self.articles_only = articles_only
+
     INDEX_SCHEMA = {
         "metadata_fields": [
             "agent_group",
@@ -117,10 +129,46 @@ class HelpdeskSearch(SQLiteSearch):
 
     def _get_accessible_ticket_names(self):
         """Get tickets accessible to current user based on helpdesk permissions."""
+        if getattr(self, "articles_only", False):
+            return []
         return frappe.get_list("HD Ticket", pluck="name")
+
+    def _passes_index_filters(self, doc) -> bool:
+        """Whether `doc` satisfies the `filters` declared for its doctype.
+
+        `INDEXABLE_DOCTYPES[...]["filters"]` is applied by the bulk build, which
+        reads through `get_documents_paginated`. It is NOT applied on save:
+        frappe's `update_doc_index` doc_event calls `index_doc` directly and
+        never looks at the config filters. So without this check a Draft article
+        is indexed the moment it is saved, and the customer-facing suggestion
+        widget offers it -- an unpublished, possibly unfinished article.
+        """
+        config = self.doc_configs.get(doc.doctype) or {}
+        for field, expected in (config.get("filters") or {}).items():
+            if getattr(doc, field, None) != expected:
+                return False
+        return True
+
+    def index_doc(self, doctype, docname):
+        """Index one document, or evict it if it no longer qualifies.
+
+        The eviction half matters more than it looks. Publishing an article
+        indexes it; unpublishing it fires the same doc_event, and the base
+        implementation simply does nothing when `prepare_document` declines --
+        leaving the row from when it *was* published. A withdrawn article would
+        stay searchable, and keep being suggested to customers.
+        """
+        doc = frappe.get_doc(doctype, docname)
+        if not self._passes_index_filters(doc):
+            self.remove_doc(doctype, docname)
+            return
+        super().index_doc(doctype, docname)
 
     def prepare_document(self, doc):
         """Prepare a document for indexing with helpdesk-specific handling."""
+        if not self._passes_index_filters(doc):
+            return None
+
         document = super().prepare_document(doc)
         if not document:
             return None

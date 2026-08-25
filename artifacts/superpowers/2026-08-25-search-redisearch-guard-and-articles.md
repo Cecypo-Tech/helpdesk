@@ -172,3 +172,118 @@ bench --site dev.localhost run-tests --module helpdesk.tests.test_article_produc
   article suggestions are broken there too, silently. Check with
   `frappe.cache().execute_command("MODULE", "LIST")` or grep the FC error log for
   `FT.CREATE`.
+
+---
+
+# Follow-up: article search moved off RediSearch
+
+Date: 2026-08-25
+Branch: `fix/article-search-off-redisearch`
+
+## Why
+
+The "out of scope" item above became the work. `helpdesk/api/article.py::search`
+still called the RediSearch path, so on any host without the module it raised
+`unknown command 'FT.SEARCH'` and `SearchArticles.vue` rendered **nothing at
+all** -- its "No answers found" state only appears on an empty *successful*
+response, so a hard failure was indistinguishable from no matches. That widget
+renders under `v-if="isCustomerPortal"` (`TicketNew.vue:73`), making it a
+customer-facing surface.
+
+Evidence on prod was suggestive rather than conclusive: the user reported the
+widget doing nothing, but a JS error in the page (`Autocomplete.vue` TypeError)
+could produce the identical blank, since `articles.data` is `undefined` whether
+the request failed or was never made. The XHR status was requested to settle it.
+The repoint is correct either way -- it removes the dependency rather than
+diagnosing around it.
+
+## Decisions taken (user-chosen)
+
+1. **Whole-article results.** The RediSearch index stored one document per
+   heading section (`name` = `<article>#<heading>`), so suggestions deep-linked
+   into an article. SQLite stores whole articles. Chose whole-article links over
+   reproducing section indexing.
+2. **No query-expansion cascade.** The old endpoint retried through textblob/NLTK
+   noun phrases and nouns, AND then OR -- compensation for RediSearch's strict
+   AND matching, which also put an NLTK corpus download on a customer-facing
+   path. One query now replaces up to five.
+
+## Changes
+
+- `helpdesk/api/article.py` -- rewritten onto `HelpdeskSearch`, filtered to
+  `doctype: HD Article`, capped at `NUM_RESULTS`. Keeps `score` in the response:
+  the Ticket Search Analysis report sums it, and dropping the key would have been
+  a `KeyError` in a report nobody runs often enough to notice quickly.
+- `helpdesk/search_sqlite.py` -- `HelpdeskSearch(articles_only=True)` skips the
+  `frappe.get_list("HD Ticket")` permission lookup. The widget fires one search
+  per debounced keystroke and can never match a ticket, so on a busy site that
+  list was the most expensive part of an articles-only request.
+- `desk/src/components/SearchArticles.vue` -- route param built from `name`
+  directly; the old `name.split('#')[1]` would have produced `hash: "#undefined"`.
+  Heading suffix rendered only when present.
+
+## Bug found by the new tests
+
+`INDEXABLE_DOCTYPES[...]["filters"]` is honoured **only by the bulk build**.
+Frappe's `update_doc_index` doc_event calls `index_doc` directly and never
+consults config filters, so every HD Article was indexed on save -- Draft and
+Archived included. The earlier commit claiming "Draft and Archived articles never
+enter the index" was wrong for the on-save path.
+
+Worse was the transition: publishing indexed an article, and unpublishing left
+the row from when it *was* published, because the base `index_doc` simply does
+nothing when `prepare_document` declines. A withdrawn article stayed searchable.
+
+Fixed at the one funnel both paths share: `_passes_index_filters()` applied in
+`prepare_document`, plus an `index_doc` override that **evicts** a document that
+no longer qualifies. The check is generic over the declared filters, so it also
+closes the same hole for `Communication` (`reference_doctype: HD Ticket`).
+
+Latent rather than realised on this site: the live index held 184 Published rows
+and no drafts, only because it had just been rebuilt. It would have fired the
+first time anyone edited one of the 2 Draft or 5 Archived articles.
+
+## Verification
+
+`helpdesk/tests/test_article_search_api.py`, 14 cases -- RediSearch is not
+touched, customers get results, internal articles are withheld from customers
+(including on a query that matches both fixtures) and shown to agents, drafts are
+never offered, unpublishing evicts, response shape matches what the widget reads,
+`score` survives for the report, `name` carries no anchor, results are capped, and
+punctuation-only input returns `[]` rather than raising.
+
+```
+test_search_index          -> 23 OK
+test_article_search_api    -> 14 OK
+test_article_product_tagging -> 6 OK
+test_article_product_tags  -> 10 OK
+```
+
+Against the 184 real articles, 8 queries, both roles:
+
+```
+as customer   backup 3 hits | restore 3 | printer 5 | tremol 5 | etims 5 ...
+              top for "restore" = "Backup & <mark>Restore</mark>"
+              INTERNAL LEAKED: 0
+as agent      backup 5 hits | restore 4 | ...
+              top for "restore" = "<mark>Restore</mark> DB"  (internal)
+              INTERNAL LEAKED: 12  (correctly)
+```
+
+Highlighting survives the move. `bench build --app helpdesk` clean.
+
+## Review pass
+
+- **Blocker**: none.
+- **Major**: none remaining -- the draft-indexing hole was found and fixed here.
+- **Minor**: fixture naming matters in this codebase. The index tokenizer is
+  `unicode61 ... tokenchars '-_'`, so it treats hyphens and underscores as WORD
+  characters while `sanitize_query` strips them. Fixtures named `_test-foo-bar`
+  can never be found, which reads as a broken endpoint rather than a broken
+  fixture. Noted in a comment at the top of the test module.
+- **Minor**: recall could differ from the old cascade on multi-word queries. A
+  direct comparison was impossible -- the legacy backend cannot run on this bench
+  at all -- so the new path was validated against real articles instead of
+  diffed against the old one.
+- **Nit**: `helpdesk/search.py` is now reachable only from `hd_ticket.py`'s unused
+  import. Deleting the module is a bigger cleanup and stays upstream's call.
