@@ -4,6 +4,19 @@
 import frappe
 from frappe.search.sqlite_search import SQLiteSearch, SQLiteSearchIndexMissingError
 
+from helpdesk.utils import is_agent
+
+# Articles are not ticket-scoped, but the base class ANDs a single
+# `reference_ticket IN (...)` clause onto every query and gives a subclass no way
+# to express "OR doctype = 'HD Article'". So articles ride the same column with
+# sentinel values, and `_get_accessible_tickets()` decides which of them the
+# current user is allowed to see.
+#
+# HD Ticket names are positive autoincrement integers, cast with `int()` in
+# `prepare_document`, so anything <= 0 is unreachable as a real ticket.
+ARTICLE_PUBLIC_KEY = 0
+ARTICLE_INTERNAL_KEY = -1
+
 
 class HelpdeskSearchIndexMissingError(SQLiteSearchIndexMissingError):
     pass
@@ -62,6 +75,22 @@ class HelpdeskSearch(SQLiteSearch):
             ],
             "filters": {"reference_doctype": "HD Ticket"},
         },
+        "HD Article": {
+            "fields": [
+                "name",
+                "title",
+                "content",
+                "modified",
+                "author",
+                # Selected purely so `prepare_document` can read it during a bulk
+                # build -- `get_documents_paginated` SELECTs only declared fields,
+                # and `internal` is not a schema metadata column.
+                "internal",
+            ],
+            # Draft and Archived articles are not answers to anything, so they
+            # never enter the index rather than being filtered out on read.
+            "filters": {"status": "Published"},
+        },
     }
 
     def get_search_filters(self):
@@ -70,6 +99,23 @@ class HelpdeskSearch(SQLiteSearch):
         return {"reference_ticket": accessible_tickets}
 
     def _get_accessible_tickets(self):
+        """Ticket keys the current user may see, plus the article sentinels.
+
+        The public sentinel is always present: an article that is indexed is
+        readable. The internal one is added only for agents, which reproduces the
+        visibility rule the RediSearch path applied on read.
+
+        Appending sentinels also fixes a sharp edge in the base class -- an empty
+        accessible-ticket list is compiled to `1=0`, so on a site with no visible
+        tickets every search returned nothing at all, articles included.
+        """
+        keys = list(self._get_accessible_ticket_names())
+        keys.append(ARTICLE_PUBLIC_KEY)
+        if is_agent():
+            keys.append(ARTICLE_INTERNAL_KEY)
+        return keys
+
+    def _get_accessible_ticket_names(self):
         """Get tickets accessible to current user based on helpdesk permissions."""
         return frappe.get_list("HD Ticket", pluck="name")
 
@@ -98,6 +144,19 @@ class HelpdeskSearch(SQLiteSearch):
 
         if doc.doctype == "HD Ticket":
             document["reference_ticket"] = int(doc.name)
+
+        if doc.doctype == "HD Article":
+            document["reference_ticket"] = (
+                ARTICLE_INTERNAL_KEY
+                if frappe.utils.cint(getattr(doc, "internal", 0))
+                else ARTICLE_PUBLIC_KEY
+            )
+            # `owner` is not in the declared field list, so a bulk build never
+            # SELECTs it; fall back explicitly rather than relying on _dict
+            # returning None for a missing key.
+            document["owner"] = getattr(doc, "author", None) or getattr(
+                doc, "owner", None
+            )
 
         # Map commented_by to owner for HD Ticket Comment
         if doc.doctype == "HD Ticket Comment":
