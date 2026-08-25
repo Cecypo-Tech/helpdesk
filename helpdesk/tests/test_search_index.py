@@ -30,6 +30,7 @@ from helpdesk.search import (
     build_index_in_background,
     is_redisearch_available,
 )
+from helpdesk.utils import is_agent
 from helpdesk.search_sqlite import (
     ARTICLE_INTERNAL_KEY,
     ARTICLE_PUBLIC_KEY,
@@ -199,3 +200,119 @@ class TestArticleIndexing(unittest.TestCase):
             result = self.search.search(PREFIX + "noticketsite")
         names = [r.get("name") for r in result["results"]]
         self.assertIn(doc.name, names)
+
+
+class TestInternalArticleVisibility(unittest.TestCase):
+    """Internal articles must never reach a customer.
+
+    Separate from TestArticleIndexing, and deliberately NOT mocking `is_agent`.
+    The property that matters is not "the non-agent branch filters correctly" --
+    it is "a real customer session takes that branch". A mocked gate proves the
+    former and would keep passing if the gate stopped being consulted at all.
+
+    Exercised through `helpdesk.api.search.search`, the whitelisted endpoint, so
+    the assertion covers what an end user can actually call. The UI only routes
+    the search page for agents, but the endpoint is reachable by any logged-in
+    user, so UI routing is not the control here.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cleanup()
+        cls.customer = "_test-searchidx-customer@example.com"
+        if not frappe.db.exists("User", cls.customer):
+            frappe.get_doc(
+                {
+                    "doctype": "User",
+                    "email": cls.customer,
+                    "first_name": "Search Index Customer",
+                    "user_type": "Website User",
+                    "send_welcome_email": 0,
+                }
+            ).insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        cls.search = HelpdeskSearch()
+        cls.public = make_article("visible-to-all")
+        cls.internal = make_article("internal-only", internal=1)
+
+    @classmethod
+    def tearDownClass(cls):
+        frappe.set_user("Administrator")
+        cleanup()
+        frappe.delete_doc("User", cls.customer, force=True, ignore_permissions=True)
+        frappe.db.commit()
+
+    def setUp(self):
+        if not self.search.index_exists():
+            self.skipTest("search index not built on this site")
+        self.search.index_doc("HD Article", self.public.name)
+        self.search.index_doc("HD Article", self.internal.name)
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+
+    def _search_as(self, user, term):
+        from helpdesk.api.search import search as api_search
+
+        frappe.set_user(user)
+        result = api_search(query=term, limit=100)
+        return [r.get("name") for r in result["results"]]
+
+    def test_customer_session_is_not_an_agent(self):
+        """Guards the premise the rest of this class rests on."""
+        frappe.set_user(self.customer)
+        self.assertFalse(is_agent())
+
+    def test_customer_cannot_find_internal_article(self):
+        names = self._search_as(self.customer, PREFIX + "internal-only")
+        self.assertNotIn(self.internal.name, names)
+
+    def test_customer_can_still_find_public_article(self):
+        """The gate must be a filter, not a blanket block on article search."""
+        names = self._search_as(self.customer, PREFIX + "visible-to-all")
+        self.assertIn(self.public.name, names)
+
+    def test_agent_can_find_internal_article(self):
+        names = self._search_as("Administrator", PREFIX + "internal-only")
+        self.assertIn(self.internal.name, names)
+
+    def test_internal_articles_absent_from_customer_filter_counts(self):
+        """Counts are a side channel: a customer must not learn how many internal
+        articles exist, even without seeing them."""
+        from helpdesk.api.search import get_filter_options
+
+        frappe.set_user("Administrator")
+        agent_count = get_filter_options()["doctypes"].get("HD Article", 0)
+        frappe.set_user(self.customer)
+        customer_count = get_filter_options()["doctypes"].get("HD Article", 0)
+
+        self.assertLess(customer_count, agent_count)
+
+    def test_no_internal_article_leaks_across_a_broad_sweep(self):
+        """Term-by-term sweep drawn from the internal articles' own titles -- the
+        worst case for a leak, and the shape of the audit that verified this
+        change against live data."""
+        internal_names = set(
+            frappe.get_all(
+                "HD Article",
+                filters={"status": "Published", "internal": 1},
+                pluck="name",
+            )
+        )
+        if not internal_names:
+            self.skipTest("no internal articles on this site")
+
+        terms = set()
+        for title in frappe.get_all(
+            "HD Article",
+            filters={"status": "Published", "internal": 1},
+            pluck="title",
+        ):
+            terms.update(w for w in (title or "").split() if len(w) > 3)
+
+        leaked = set()
+        for term in sorted(terms)[:25]:
+            leaked.update(set(self._search_as(self.customer, term)) & internal_names)
+
+        self.assertEqual(leaked, set(), f"internal articles leaked to a customer: {leaked}")

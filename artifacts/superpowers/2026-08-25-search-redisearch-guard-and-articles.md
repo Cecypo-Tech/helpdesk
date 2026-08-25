@@ -107,13 +107,34 @@ INTERNAL article / as agent     found_target=True   matches=14
 filter options doctypes -> {'HD Article': 184}
 ```
 
-Tests: `helpdesk/tests/test_search_index.py`, 17 cases covering the four
+Internal-article leak audit, real customer session (no mocking), 40 query terms
+drawn from the internal articles' own titles:
+
+```
+agent-hb-test-5c633551@backup.internal
+  is_agent=False  article hits=323  INTERNAL LEAKED=0
+  filter option counts: {'HD Article': 147}
+Administrator
+  is_agent=True   article hits=416  INTERNAL LEAKED=34
+  filter option counts: {'HD Article': 184}
+```
+
+Tests: `helpdesk/tests/test_search_index.py`, 23 cases covering the four
 `is_redisearch_available()` branches, both guarded entry points, the
 still-runs-when-available case, sentinel assignment, sentinel/ticket collision,
 internal visibility per role, and the empty-accessible-ticket regression.
 
+`TestInternalArticleVisibility` deliberately does NOT mock `is_agent`. The
+property that matters is not "the non-agent branch filters correctly" but "a real
+customer session takes that branch" -- a mocked gate proves the former and would
+keep passing if the gate stopped being consulted at all. It drives
+`helpdesk.api.search.search`, the whitelisted endpoint, because the UI routes the
+search page only for agents but the endpoint is reachable by any logged-in user,
+so UI routing is not the control. It also asserts the filter-option counts, which
+are a side channel: a customer must not learn how many internal articles exist.
+
 ```
-bench --site dev.localhost run-tests --module helpdesk.tests.test_search_index   -> 17 OK
+bench --site dev.localhost run-tests --module helpdesk.tests.test_search_index   -> 23 OK
 bench --site dev.localhost run-tests --module helpdesk.tests.test_article_product_tagging -> 6 OK
 bench --site dev.localhost run-tests --module helpdesk.tests.test_article_product_tags    -> 10 OK
 ```
@@ -141,7 +162,12 @@ bench --site dev.localhost run-tests --module helpdesk.tests.test_article_produc
   Redis without the query engine. Indexing articles is the prerequisite; the
   repoint is the follow-up. It needs care: that endpoint returns a
   `[{title, items}]` shape with highlighting and does NLTK/textblob noun-phrase
-  query expansion.
+  query expansion. **`SearchArticles.vue` renders under `v-if="isCustomerPortal"`
+  (`TicketNew.vue:73`), so that endpoint is a customer-facing surface** -- the
+  repoint MUST carry the internal-article gate across, or customers would be
+  offered internal articles on the new-ticket form. `api/article.py` currently
+  applies that gate on read (`search.py:381`); the SQLite path applies it through
+  `_get_accessible_tickets()` instead.
 - Frappe Cloud has not been checked. If prod's Redis also lacks the query engine,
   article suggestions are broken there too, silently. Check with
   `frappe.cache().execute_command("MODULE", "LIST")` or grep the FC error log for
