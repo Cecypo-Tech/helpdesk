@@ -287,3 +287,139 @@ Highlighting survives the move. `bench build --app helpdesk` clean.
   diffed against the old one.
 - **Nit**: `helpdesk/search.py` is now reachable only from `hd_ticket.py`'s unused
   import. Deleting the module is a bigger cleanup and stays upstream's call.
+
+---
+
+# Follow-up 2: UI defects from live use
+
+Date: 2026-08-25
+Branch: `fix/portal-context-autocomplete-theme-and-snippets`
+
+Four defects reported from screenshots, plus one found while fixing them.
+
+## 1. Sidebar collapsed on /helpdesk/backup (regression, mine)
+
+`router/index.ts` sets `isCustomerPortal.value = to.meta.public || false`, and the
+BackupPortal route was given `public: true` so customers could reach it. `public`
+does double duty -- access gate AND portal-mode switch -- so an agent clicking
+Imara Backup was flipped into customer mode and lost Dashboard, Notifications,
+Tasks, Customers, Contacts and every WhatsApp line until they navigated away.
+
+Missed during the original verification: the screenshot showed the REDUCED
+sidebar and was read as "sidebar intact".
+
+Fix: a `sharedPortal` meta flag for routes both audiences use. Portal context
+then follows the USER (`!authStore.hasDeskAccess`) instead of the route. The
+assignment moved after `authStore.init()`, which is what populates
+`hasDeskAccess`.
+
+Note for future reports: the reduced sidebar on `/helpdesk/my-tickets/new` is
+CORRECT. That is a customer route, and `SearchArticles` only renders under
+`v-if="isCustomerPortal"`.
+
+## 2. Support Status not dark
+
+`hd_product` is a Link (renders `Link.vue`, already themed); `support_status` is
+a Select, which `UniInput` renders with `Autocomplete.vue` -- a component still
+on raw Tailwind (`bg-white`, `bg-gray-100`, `text-gray-800`, `border-gray-300`).
+Raw grays do not flip with `data-theme`. Converted to semantic tokens
+(`bg-surface-*`, `text-ink-gray-*`, `border-outline-gray-*`), which fixes every
+Select field in the app, not just this one.
+
+## 3. Search results showed markup and raw markdown
+
+Two separate causes:
+
+- **Literal `<mark>` in titles.** SQLite's `highlight()` marks the title too, and
+  the widget interpolates the title as TEXT. Titles were never highlighted before
+  the backend move, so the tags are stripped server-side rather than starting to
+  render untrusted markup somewhere new. The description keeps its highlighting;
+  it was already `v-html`.
+- **Raw markdown in snippets.** Article bodies are HTML wrapping markdown source
+  (the Outline sync drops markdown into a `<pre>`). The base indexer strips HTML,
+  leaving `## `, `![](...)`, `| Brand | IPs |`, `:::warning`, `**bold**` in the
+  indexed text. Added `strip_markdown()`, applied by overriding `_process_content`
+  so it runs at INDEX time -- the search page benefits too, and the punctuation
+  stays out of the FTS vocabulary.
+
+Two ordering subtleties worth keeping:
+  - Literal `\n` / `\r` / `\t` sequences (not real whitespace) survive the base
+    indexer's whitespace collapse and read as word characters to every pattern,
+    which is how `excel\n#### MYSQL` kept its heading marker. They are stripped
+    FIRST. 50 of 184 articles here contained them.
+  - The base indexer rewrites bare URLs to `[link]` BEFORE this runs, eating an
+    image's closing paren and leaving `![]([link]`. Matched separately.
+
+## 4. `UniInput.vue` TypeError (from the user's console)
+
+`@change="... $event.target?.value ..."` -- optional-chained after `.target` but
+not before it. Autocomplete emits `change` with `null` when a selection is
+CLEARED, so reading `.target` off null threw
+`can't access property "target", i is null`. Every hop is now optional-chained.
+
+## 5. Found while fixing: a full index rebuild could not complete
+
+`filters: {"status": "Published"}` was declared without adding `status` to
+`fields`. `get_documents_paginated` SELECTs only declared fields, so during a
+BULK build `status` read as None, every article failed `_passes_index_filters`,
+nothing was indexed, the progress cursor never advanced, and the build spun
+forever -- 50MB of repeated progress output, and the index left dropped.
+
+The existing tests could not catch it: they index through `index_doc`, which goes
+via `frappe.get_doc` and has every field. So the suite stayed green while a full
+rebuild was broken.
+
+Fixes: declare `status`; make `_passes_index_filters` fall back to a DB lookup
+when a filtered field was not selected, so the failure is a slow build rather
+than a silently empty index; and add `TestIndexConfig`, which asserts every field
+named in `filters` is also in `fields`. That class is deliberately NOT gated on
+the index existing -- the bug makes the index impossible to build, so a
+skip-when-missing class would skip exactly when it matters.
+
+## Verification
+
+```
+test_search_index            -> 24 OK
+test_article_search_api      -> 26 OK
+test_article_product_tagging ->  6 OK
+test_article_product_tags    -> 10 OK
+test_contact_verification    -> 40 OK
+```
+
+Index rebuilt: 184 HD Article + 5,422 Communication rows. Residual markdown in
+indexed content, out of 184 articles: images 0, table rules 0, task boxes 0,
+literal escapes 50 -> ~3, one unbalanced `**` and one odd `####` from malformed
+source. Cosmetic residue inside a line-clamped snippet.
+
+In a browser at `/helpdesk/my-tickets/new`, dark mode, subject "tremol":
+titles render clean, snippets read as prose ("Software Reset Fpcmdke-service
+tab-software reset Password is F142HZ Network settings will get reset" where the
+screenshot had "## Software Reset ... :::warning"), the table row lost its pipes,
+`<mark>` highlighting still renders in the snippet, and both selects are dark.
+
+At `/helpdesk/backup` the full agent sidebar is present: Dashboard, Notifications,
+all WhatsApp lines, Analytics, Home, Tickets, Tasks, Knowledge Base, Customers,
+Contacts, WhatsApp Business.
+
+## Review pass
+
+- **Blocker**: none.
+- **Major**: none remaining.
+- **Minor**: a snippet can still show `<[link]` where the source had a bare URL
+  inside angle brackets. The `[link]` substitution is the base class's.
+- **Minor**: `strip_markdown` is regex-based, not a parser. It is deliberately
+  conservative -- the hyphenation test exists because an over-eager table-rule
+  pattern would eat `tab-software` and `FT-100MX`.
+- **Nit**: verifying a CSS or index change in the browser needs a browse-daemon
+  restart; `portal.css` and the debounced widget both served stale state once
+  each during this work.
+
+## Not fixed here
+
+The WhatsApp bot's PIN request. `hooks.py` dispatches only
+`bot.handle_wa_message` on `WA Message`, so the WA Line (Evolution) path never
+calls `wa_verification.handle_incoming` -- the prompt is never sent and a PIN
+reply is never recorded. The WABA path does both. The PIN extractor itself was
+tested and is correct. Wiring WA Line up is not a one-liner: `send_prompt()` calls
+`_send_fw_reply`, which is WABA-only, and would need to route through
+`send_wa_reply` per channel. Awaiting a decision.

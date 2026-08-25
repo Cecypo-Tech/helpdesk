@@ -158,6 +158,10 @@ const routes = [
   //
   // `public` + `auth` because the sidebar link is shown on the customer portal
   // too -- the portal does its own permission handling per tenant.
+  //
+  // `sharedPortal` because both audiences use this one. Without it, `public`
+  // would flip an agent into customer-portal mode and collapse their sidebar
+  // the moment they clicked Imara Backup.
   {
     path: "/backup",
     name: "BackupPortal",
@@ -165,6 +169,7 @@ const routes = [
     meta: {
       public: true,
       auth: true,
+      sharedPortal: true,
     },
   },
 
@@ -249,10 +254,23 @@ export const router = createRouter({
 
 router.beforeEach(async (to, _, next) => {
   const authStore = useAuthStore();
-  isCustomerPortal.value = to.meta.public || false;
   if (authStore.isLoggedIn) {
     await authStore.init();
   }
+
+  // `public` does double duty: it gates access for users without desk access,
+  // AND it flips the whole app into customer-portal mode. That is right for
+  // /my-tickets and friends, which only customers use. It is wrong for a route
+  // both audiences share -- an agent opening one would be switched to the
+  // customer sidebar and lose Dashboard, Tasks, Customers, Contacts and the
+  // WhatsApp lines until they navigated somewhere else.
+  //
+  // `sharedPortal` marks those routes: still reachable by customers, but the
+  // portal context follows the USER instead of the route. Resolved after
+  // authStore.init() because that is what populates hasDeskAccess.
+  isCustomerPortal.value = to.meta.sharedPortal
+    ? !authStore.hasDeskAccess
+    : to.meta.public || false;
 
   if (!authStore.isLoggedIn) {
     const redirectURL = to.fullPath !== "/" ? to.fullPath : "";

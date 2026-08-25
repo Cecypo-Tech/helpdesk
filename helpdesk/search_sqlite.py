@@ -1,10 +1,61 @@
 # Copyright (c) 2025, Frappe Technologies Pvt. Ltd. and Contributors
 # MIT License. See license.txt
 
+import re
+
 import frappe
 from frappe.search.sqlite_search import SQLiteSearch, SQLiteSearchIndexMissingError
 
 from helpdesk.utils import is_agent
+
+# Article bodies reach us as HTML wrapping raw MARKDOWN -- the Outline sync drops
+# markdown source into a <pre> block. The base indexer strips the HTML, which
+# leaves the markdown syntax sitting in the indexed text, so search snippets read
+# like "## Software Reset ... ![](/api/attachments.redirect?id=...) | Brand | IPs
+# |----|----|" instead of a sentence.
+#
+# Stripping it at INDEX time rather than when rendering results fixes the search
+# page and the suggestion widget at once, and keeps punctuation noise out of the
+# FTS vocabulary. Requires a reindex to take effect on existing rows.
+_MARKDOWN_NOISE = [
+    # Literal backslash-n / -r / -t, not real whitespace. The Outline import
+    # leaves them embedded in the text, so they survive the base indexer's
+    # whitespace collapse. They have to go FIRST: they read as a word character
+    # to every pattern below, which is how "excel\n#### MYSQL" kept its heading
+    # marker -- the lookbehind saw the "n", not a space. 50 of 184 articles here
+    # contain them.
+    (re.compile(r"\\[nrt]"), " "),
+    (re.compile(r"!\[[^\]]*\]\([^)]*\)"), " "),          # images
+    # The base indexer rewrites bare URLs to "[link]" before this runs, which
+    # eats an image's closing paren and leaves "![]([link]" behind. Match the
+    # opening marker on its own to catch that.
+    (re.compile(r"!\[[^\]]*\]\("), " "),
+    (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),        # links -> their text
+    (re.compile(r"^#{1,6}\s+|(?<=\s)#{1,6}\s+"), ""),      # ATX headings
+    (re.compile(r"\*\*([^*]+)\*\*"), r"\1"),               # bold
+    (re.compile(r"(?<!\w)[*_]([^*_]+)[*_](?!\w)"), r"\1"),  # italic
+    (re.compile(r"`+"), ""),                              # code ticks
+    (re.compile(r"(?<!\w)\[[ xX]?\]"), " "),               # task-list boxes
+    (re.compile(r"=={2,}|=="), " "),                       # ==highlight== marks
+    (re.compile(r":::+\s*\w*"), " "),                     # ::: directives
+    (re.compile(r"\|[\s:-]*\|"), " "),                     # table rules
+    (re.compile(r"\|"), " "),                              # remaining cell pipes
+    # After the pipes go, a table's separator row is left as a bare run of
+    # dashes or colons. Runs only -- a hyphenated word must survive.
+    (re.compile(r"(?<!\w)[-:]{3,}(?!\w)"), " "),
+    (re.compile(r"(?<!\w)\\(?!\w)"), " "),                 # stray escapes
+    (re.compile(r"(?<=\s)>+\s"), " "),                     # blockquote markers
+    (re.compile(r"(?:^|(?<=\s))[*+-]\s+"), " "),           # list bullets
+]
+
+
+def strip_markdown(text: str) -> str:
+    """Reduce markdown source to readable prose for indexing and snippets."""
+    if not text:
+        return ""
+    for pattern, replacement in _MARKDOWN_NOISE:
+        text = pattern.sub(replacement, text)
+    return re.sub(r"\s+", " ", text).strip()
 
 # Articles are not ticket-scoped, but the base class ANDs a single
 # `reference_ticket IN (...)` clause onto every query and gives a subclass no way
@@ -94,10 +145,18 @@ class HelpdeskSearch(SQLiteSearch):
                 "content",
                 "modified",
                 "author",
-                # Selected purely so `prepare_document` can read it during a bulk
-                # build -- `get_documents_paginated` SELECTs only declared fields,
-                # and `internal` is not a schema metadata column.
+                # Both are selected purely so `prepare_document` can read them
+                # during a BULK build: `get_documents_paginated` SELECTs only the
+                # fields declared here, and neither is a schema metadata column.
+                #
+                # `status` is load-bearing. It is the field `filters` below tests,
+                # and leaving it out does not merely weaken the filter -- the
+                # bulk build reads it as None, every article fails, nothing is
+                # indexed, and the progress cursor never advances, so the build
+                # spins forever. Single-doc indexing hides this, because
+                # `index_doc` goes through `frappe.get_doc` and has every field.
                 "internal",
+                "status",
             ],
             # Draft and Archived articles are not answers to anything, so they
             # never enter the index rather than being filtered out on read.
@@ -133,6 +192,10 @@ class HelpdeskSearch(SQLiteSearch):
             return []
         return frappe.get_list("HD Ticket", pluck="name")
 
+    def _process_content(self, content):
+        """Strip HTML (base class) and then markdown syntax."""
+        return strip_markdown(super()._process_content(content))
+
     def _passes_index_filters(self, doc) -> bool:
         """Whether `doc` satisfies the `filters` declared for its doctype.
 
@@ -144,8 +207,15 @@ class HelpdeskSearch(SQLiteSearch):
         widget offers it -- an unpublished, possibly unfinished article.
         """
         config = self.doc_configs.get(doc.doctype) or {}
+        missing = object()
         for field, expected in (config.get("filters") or {}).items():
-            if getattr(doc, field, None) != expected:
+            value = getattr(doc, field, missing)
+            if value is missing:
+                # The field was not selected. Reading that as "does not match"
+                # would silently empty the index for this doctype, so pay for a
+                # lookup instead. Declaring the field in `fields` avoids it.
+                value = frappe.db.get_value(doc.doctype, doc.name, field)
+            if value != expected:
                 return False
         return True
 
