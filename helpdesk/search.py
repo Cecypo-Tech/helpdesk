@@ -400,12 +400,46 @@ def build_index():
     frappe.cache().set_value("helpdesk_search_indexing_in_progress", False)
 
 
+def is_redisearch_available() -> bool:
+    """Whether the configured Redis actually exposes the RediSearch query engine.
+
+    `Search.index_exists()` cannot answer this. It wraps the lookup in
+    `suppress(ResponseError)`, so a Redis with no `FT.*` commands reports "no
+    index" rather than "no engine" -- and the callers below then rebuild the
+    index on every scheduler tick, forever. That is the whole of the
+    `unknown command 'FT.CREATE'` flood in worker.error.log.
+
+    `FT._LIST` is the cheapest probe that distinguishes the two cases: an engine
+    that is present answers with a (possibly empty) list of indexes, and one that
+    is absent fails with "unknown command". Any other failure is deliberately
+    read as "available" -- a broken index or a flaky connection is not a
+    capability answer, and treating it as one would silently disable indexing on
+    a bench that supports it.
+
+    The result is intentionally NOT cached. The check is a single round trip per
+    scheduler tick, and staying uncached means a bench that later gains the
+    module starts indexing again on its own, with no cache to clear.
+    """
+    try:
+        frappe.cache().execute_command("FT._LIST")
+    except ResponseError as e:
+        if "unknown command" in str(e).lower():
+            return False
+    except Exception:
+        return True
+    return True
+
+
 def build_index_in_background():
+    if not is_redisearch_available():
+        return
     if not frappe.cache().get_value("helpdesk_search_indexing_in_progress"):
         frappe.enqueue(build_index, queue="long")
 
 
 def build_index_if_not_exists():
+    if not is_redisearch_available():
+        return
     search = HelpdeskSearch()
     if not search.index_exists():
         build_index()
