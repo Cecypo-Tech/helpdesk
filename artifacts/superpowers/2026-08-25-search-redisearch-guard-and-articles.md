@@ -426,102 +426,49 @@ tested and is correct. Wiring WA Line up is not a one-liner: `send_prompt()` cal
 
 ---
 
-# Follow-up 3: the PIN prompt never ran on WA Line
+# Follow-up 3 (reverted): WA Line PIN verification
 
 Date: 2026-08-25
-Branch: `fix/wa-line-pin-verification`
 
-## Reported
+Wiring unknown-contact verification into the WA Line (Evolution) path was
+implemented, merged, pushed -- and then reverted, because the requirement does
+not exist. **WA Line conversations are not asked for a KRA PIN. Verification is
+WABA-only by design**, that being the channel with the customer/ticket linkage
+the claim is meant to resolve against.
 
-A customer replied to the bot with their KRA PIN and it was ignored.
+The investigation behind it was sound and the finding was real: `wa_verification`
+has exactly one dispatch site, on the WABA path, so a PIN volunteered on a WA
+Line is not recorded. What was wrong was the conclusion that this is a defect. It
+is the intended scope.
 
-## Cause
+Reverted with `git revert -m 1`, so the prior state is restored in history rather
+than rewritten. What was kept instead, because the same wrong conclusion is easy
+to reach again -- the two channels are handled symmetrically nearly everywhere
+else, so the missing `WA Message` entry reads like an oversight:
 
-Unknown-contact verification was wired into the WABA path only.
-`wa_ingest.process_incoming_message` calls both `bot.handle_whatsapp_message`
-and `wa_verification.handle_incoming`. `hooks.py` had exactly one handler on
-`WA Message`:
+- The `wa_verification` module docstring now states the scope and says plainly
+  that it was once "fixed" this way.
+- `hooks.py` carries a note at the `WA Message` dispatch point.
+- `TestScopeIsWabaOnly` asserts the ABSENCE: no handler on `WA Message` may
+  mention `wa_verification`. It also asserts the bot still runs there and that
+  the WABA prompt still goes out, so the revert cannot have overshot.
 
-```python
-"WA Message": {"after_insert": "helpdesk.integrations.bot.handle_wa_message"},
-```
+Cost of the mistake: one commit written, merged and pushed, then reverted. The
+lesson worth keeping is that "channel A does X and channel B does not" is a
+question for the owner, not a bug to close -- the asymmetry was load-bearing.
 
-`grep` confirmed `wa_verification` had a single dispatch site in the whole app,
-and it was the WABA one. So on a WA Line conversation the prompt was never sent
-AND a volunteered PIN was never recorded -- it just reached the bot as ordinary
-text and got answered as a question.
+## Still unexplained
 
-Two further blockers sat behind that, either of which would have kept the path
-broken even once dispatched:
+The incident that started this: a customer replied with a PIN and it was ignored.
+If verification is WABA-only and that conversation was on WABA, then a real
+defect remains and has not been found. The next thing to read is that contact's
+`hd_verification_status` on production:
 
-1. `send_prompt()` called `_send_fw_reply` directly, which only exists on the
-   WABA path.
-2. `_handle()` tested `doc.get("type") != "Incoming"`. `WhatsApp Message` calls
-   that field `type`; `WA Message` calls it `direction`. Every WA Line message
-   would have fallen out on the handler's first line.
+- `Unverified` -> the prompt never went out; the question is why, not why the
+  reply was dropped.
+- `Asked` or `Claimed` -> the prompt went out and the claim path is the suspect.
 
-Ruled out during the investigation: the PIN extractor is correct (tested against
-`P051234567X`, lowercase, `My PIN is A123456789B`, `PIN: P012345678`, and a
-phone number, which is correctly rejected), and the ask ordering is correct
-(`send_prompt` runs before the `ASKED` write, so a failed send leaves the contact
-retryable rather than marked-asked-but-never-prompted).
+Also worth checking there: `verification_enabled`, which is **0** on dev, and
+whether that contact already resolves to a customer via `get_customer()`, which
+makes `_handle` return before asking anything.
 
-## Changes
-
-- `wa_verification.send_prompt()` now calls `send_wa_reply(ticket=..., system=True)`.
-  That helper already routes -- a ticket with a `baileys_jid` goes out over its WA
-  Line, one without falls through to `_send_fw_reply` -- and it forwards `system`
-  down both branches, so WABA behaviour is unchanged.
-- `wa_verification._is_incoming()` reads whichever of `type` / `direction` is set.
-- `wa_verification.handle_wa_message_insert()` + `process_wa_message()`: an
-  after_insert hook that ENQUEUES. `_handle` commits, and the hook fires inside
-  the request handling the Evolution webhook, where an early commit would land
-  that whole request's transaction. `bot.handle_wa_message` defers for the same
-  reason. WA Line messages arrive with `reference_name` already set at insert, so
-  there is nothing to wait for beyond the commit.
-- `hooks.py`: `WA Message.after_insert` becomes a list of both handlers.
-
-## Verification
-
-`test_contact_verification.py` grew from 40 to 57 cases. The ones that matter:
-
-- `TestWaLineConversationEndToEnd` drives a real WA Line ticket (with
-  `baileys_jid`) through ask -> PIN -> Claimed. It deliberately does NOT stub
-  `send_prompt` the way `_StateBase` does, because the defect lived inside
-  `send_prompt`; the stub goes one level lower, at the transport. Skips rather
-  than passes vacuously if `baileys_jid` is absent.
-- `TestPromptFollowsTheChannel` asserts the prompt goes through the routing
-  helper AND that a WABA ticket still reaches `_send_fw_reply` with `system=True`.
-- `TestChannelAgnosticDirection` covers all four type/direction combinations plus
-  neither-set.
-- `TestWaLineHookIsWired` asserts the hook entry exists -- the whole defect in one
-  assertion -- and that the bot is still dispatched alongside it.
-- `TestWaLineHookGuards` covers outgoing, unlinked, wrong-doctype, and a message
-  deleted between enqueue and run.
-
-```
-test_contact_verification -> 57 OK
-test_bot                  -> 24 OK
-test_bot_product_scoping  ->  9 OK
-test_baileys              ->  2 OK (2 skipped)
-test_baileys_standalone   ->  4 OK
-```
-
-## Review pass
-
-- **Blocker**: none.
-- **Major**: none.
-- **Minor**: `verification_enabled` lives on `WhatsApp Helpdesk Settings`, a
-  WABA-named singleton, and now gates WA Line too. Correct behaviour, slightly
-  misleading home. Renaming it is a migration, not a fix.
-- **Minor**: not verified against a live Evolution instance -- the end-to-end test
-  stubs the transport. The routing it depends on (`send_wa_reply`) is the same
-  helper every other WA Line send already uses.
-- **Nit**: `verification_enabled` is currently **0** on dev, and all 4,046
-  contacts sit at `Unverified`. Nothing here turns it on.
-
-## Still open
-
-Which line the reported customer was on. If WABA, this fix is not the
-explanation and the next thing to read is that contact's
-`hd_verification_status` -- `Unverified` would mean the prompt never went out.
