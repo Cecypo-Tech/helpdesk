@@ -42,8 +42,15 @@ no porting work.
 - `templates/includes/embed_head.html` (new) -- inline `<head>` script stamping
   `bp-embed` on `<html>` when `window.self !== window.top`.
 - `public/css/portal.css` -- `html.bp-embed` hides `nav.navbar`,
-  `footer.web-footer`, `.page-breadcrumbs`, `.bp-portal-brand`; sets full height
-  and trims the container margin.
+  `footer.web-footer` and `.page-breadcrumbs`; sets full height and trims the
+  container margin.
+
+  The line is drawn at website SHELL vs PORTAL. Suppressed: chrome that wraps
+  the page and that helpdesk already provides. Kept: the brand banner and the
+  nav pills, which belong to the portal itself. The first pass also hid the
+  brand banner on the reasoning that helpdesk names the section -- wrong, since
+  helpdesk's sidebar entry is a link label, not a page heading, and hiding it
+  left the pane opening straight onto the nav pills with no identity.
 - All six `www/backup/*.html` pull the include into their `head_include` block.
 
 ### The one design decision worth recording
@@ -76,9 +83,14 @@ In a real browser at `/helpdesk/backup`, inside the frame:
 
 ```
 {"embedClass":"bp-embed","innerUrl":"/backup","navbar":"hidden",
- "footer":"hidden","breadcrumbs":"hidden","brand":"hidden",
- "navPills":"VISIBLE","tenantStrip":"VISIBLE"}
+ "footer":"hidden","breadcrumbs":"hidden","navPills":"VISIBLE",
+ "tenantStrip":"VISIBLE"}
+
+{"brandDisplay":"block","brandText":"Imara Cloud Backup",
+ "brand":{"top":16,"h":139},"nav":{"top":155,"h":41},"navbar":"none"}
 ```
+
+The banner sits at the top of the pane with the pills below it.
 
 After clicking Plan inside the frame -- the claim that link rewriting is
 unnecessary:
@@ -90,12 +102,17 @@ unnecessary:
 ```
 
 Screenshot confirms the helpdesk sidebar with "Imara Backup" highlighted active,
-the portal in the main body, and no website chrome.
+the Imara Cloud Backup banner heading the pane, and no website chrome.
+
+Note for future browser checks: portal.css is cached aggressively. A CSS change
+verified without restarting the browse daemon can report the PREVIOUS rule set --
+that happened once here and briefly showed the banner as visible while the cached
+stylesheet still hid it.
 
 Tests: `imara_backup/imara_backup/portal/test_portal_embed.py`, 6 cases -- every
 page pulls the include, it sits inside `head_include`, the mechanism is still
-frame detection, the CSS still hides the chrome, and it does NOT hide the nav
-pills. `bench --site dev.localhost run-tests --module
+frame detection, the CSS still hides the website shell, and it does NOT hide the
+brand banner or the nav pills. `bench --site dev.localhost run-tests --module
 imara_backup.imara_backup.portal.test_portal_embed` -> 6 OK.
 `bench build --app helpdesk` succeeds; `BackupPortal-9b06cc9a.js` chunk emitted.
 
