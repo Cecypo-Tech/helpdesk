@@ -152,6 +152,21 @@ const routes = [
     name: "WhatsAppBusinessChat",
     component: () => import("@/pages/whatsapp/WhatsAppBusinessPage.vue"),
   },
+  // Embeds the server-rendered Imara Backup portal in the main body. The SPA is
+  // mounted at /helpdesk/, so this route is the URL /helpdesk/backup and does not
+  // collide with the Frappe web page it embeds, which lives at /backup.
+  //
+  // `public` + `auth` because the sidebar link is shown on the customer portal
+  // too -- the portal does its own permission handling per tenant.
+  {
+    path: "/backup",
+    name: "BackupPortal",
+    component: () => import("@/pages/backup/BackupPortal.vue"),
+    meta: {
+      public: true,
+      auth: true,
+    },
+  },
 
   // Customer Portal Routes
   {

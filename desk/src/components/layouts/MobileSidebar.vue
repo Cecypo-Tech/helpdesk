@@ -59,7 +59,8 @@
                 class="relative"
                 :label="backupPortalOption.label"
                 :icon="backupPortalOption.icon"
-                :on-click="backupPortalOption.onClick"
+                :to="backupPortalOption.to"
+                :is-active="isActiveTab(backupPortalOption.to)"
                 :is-expanded="true"
               />
             </div>
