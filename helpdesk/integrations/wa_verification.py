@@ -31,17 +31,25 @@ def settings():
 
 
 def send_prompt(ticket: str, text: str) -> None:
-	"""Free-form WABA reply. Safe without a template: the customer's inbound
-	message just opened the 24-hour window, so it is open by construction.
+	"""Free-form reply on whichever channel owns this ticket.
 
-	`system=True` because this is not an agent reply. Without it _send_fw_reply
-	would assign the ticket to whoever's session sent it and move it into the
+	`send_wa_reply` already does the routing: a ticket with a `baileys_jid` goes
+	out over its WA Line, and one without falls through to `_send_fw_reply` for
+	WABA. Calling `_send_fw_reply` directly, as this used to, meant the prompt
+	only ever existed on the WABA path — a WA Line customer was never asked.
+
+	Safe without a template on WABA: the customer's inbound message just opened
+	the 24-hour window, so it is open by construction. WA Line has no window.
+
+	`system=True` because this is not an agent reply. Without it the send would
+	assign the ticket to whoever's session sent it and move it into the
 	configured agent-reply status — so ticking verification_enabled would quietly
 	pull every brand-new unknown-number ticket out of the agents' Open queue.
+	`send_wa_reply` forwards the flag down both branches.
 	"""
-	from helpdesk.integrations.wa import _send_fw_reply
+	from helpdesk.integrations.wa import send_wa_reply
 
-	_send_fw_reply(ticket, text, system=True)
+	send_wa_reply(ticket=ticket, message=text, system=True)
 
 
 def contact_state(contact: str) -> dict:
@@ -76,8 +84,18 @@ def handle_incoming(doc) -> None:
 		)
 
 
+def _is_incoming(doc) -> bool:
+	"""True for an inbound message on either channel.
+
+	The two doctypes disagree on the field name: `WhatsApp Message` (WABA) calls
+	it `type`, `WA Message` (WA Line) calls it `direction`. Both use the literal
+	"Incoming", and only one of the two fields is ever set.
+	"""
+	return (doc.get("type") or doc.get("direction")) == "Incoming"
+
+
 def _handle(doc) -> None:
-	if doc.get("type") != "Incoming":
+	if not _is_incoming(doc):
 		return
 	if doc.get("reference_doctype") != "HD Ticket" or not doc.get("reference_name"):
 		return
@@ -156,3 +174,38 @@ def _reask_due(state: dict, s) -> bool:
 		return True
 	days = int(s.get("verification_reask_days") or 7)
 	return frappe.utils.date_diff(frappe.utils.now_datetime(), asked_on) >= days
+
+
+def handle_wa_message_insert(doc, method=None) -> None:
+	"""after_insert hook for WA Message — the WA Line (Evolution API) path.
+
+	Enqueued rather than run inline. `_handle` commits, and this fires inside the
+	request handling the Evolution webhook, where committing early would land
+	that whole request's transaction. `bot.handle_wa_message` defers for the same
+	reason.
+
+	The WABA equivalent needs no hook: `wa_ingest.process_incoming_message` is
+	already a background job and calls `handle_incoming` directly. WA Line
+	messages arrive with `reference_name` already set at insert, so there is
+	nothing to wait for beyond the commit.
+	"""
+	if doc.direction != "Incoming":
+		return
+	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
+		return
+
+	frappe.enqueue(
+		"helpdesk.integrations.wa_verification.process_wa_message",
+		queue="short",
+		job_id=f"wa_verify_{doc.name}",
+		enqueue_after_commit=True,
+		message_name=doc.name,
+	)
+
+
+def process_wa_message(message_name: str) -> None:
+	"""Background entry point for the hook above."""
+	if not frappe.db.exists("WA Message", message_name):
+		# Deleted between enqueue and run.
+		return
+	handle_incoming(frappe.get_doc("WA Message", message_name))

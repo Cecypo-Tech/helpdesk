@@ -111,7 +111,17 @@ doc_events = {
         "on_update": "helpdesk.integrations.wa.on_whatsapp_message_update",
     },
     "WA Message": {
-        "after_insert": "helpdesk.integrations.bot.handle_wa_message",
+        # Both entry points enqueue rather than work inline: this fires inside
+        # the request handling the Evolution webhook, and each of them commits.
+        #
+        # Verification is listed here and NOT for "WhatsApp Message" because the
+        # WABA path already reaches it from wa_ingest.process_incoming_message,
+        # which is itself a background job. Without this line the WA Line path
+        # never asked for a PIN and never recorded one that was volunteered.
+        "after_insert": [
+            "helpdesk.integrations.bot.handle_wa_message",
+            "helpdesk.integrations.wa_verification.handle_wa_message_insert",
+        ],
     },
     "HD Ticket": {
         "before_save": "helpdesk.overrides.ticket_product.stamp_support_status",

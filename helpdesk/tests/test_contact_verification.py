@@ -269,14 +269,135 @@ class TestFailOpen(_StateBase):
 
 class TestPromptIsNotAnAgentReply(unittest.TestCase):
 	def test_send_prompt_marks_the_send_as_system(self):
-		"""_send_fw_reply is not pure transport: by default it assigns the ticket
-		and moves it into agent_reply_status. Ticking verification_enabled must
-		not start pulling brand-new tickets out of the agents' Open queue."""
-		with patch("helpdesk.integrations.wa._send_fw_reply") as send:
+		"""The send is not pure transport: by default it assigns the ticket and
+		moves it into agent_reply_status. Ticking verification_enabled must not
+		start pulling brand-new tickets out of the agents' Open queue."""
+		with patch("helpdesk.integrations.wa.send_wa_reply") as send:
 			wa_verification.send_prompt("SOME-TICKET", "who are you?")
 
 		self.assertTrue(send.called)
 		self.assertIs(send.call_args.kwargs.get("system"), True)
+
+
+class TestPromptFollowsTheChannel(unittest.TestCase):
+	"""The prompt used to call `_send_fw_reply` directly, which only exists on
+	the WABA path. A WA Line customer was therefore never asked for a PIN, and
+	`_handle` never reached the branch that records one -- which is why a PIN a
+	customer volunteered was ignored.
+
+	`send_wa_reply` already routes: a ticket with a `baileys_jid` goes out over
+	its WA Line, one without falls through to `_send_fw_reply`.
+	"""
+
+	def test_prompt_goes_through_the_routing_helper(self):
+		with patch("helpdesk.integrations.wa.send_wa_reply") as send:
+			wa_verification.send_prompt("SOME-TICKET", "who are you?")
+
+		self.assertTrue(send.called)
+		self.assertEqual(send.call_args.kwargs.get("ticket"), "SOME-TICKET")
+		self.assertEqual(send.call_args.kwargs.get("message"), "who are you?")
+
+	def test_waba_still_reaches_the_frappe_whatsapp_sender(self):
+		"""Routing must not have changed WABA behaviour: a ticket with no
+		baileys_jid still ends up in _send_fw_reply, still flagged system."""
+		with patch("helpdesk.integrations.wa._send_fw_reply") as fw:
+			wa_verification.send_prompt("SOME-TICKET", "who are you?")
+
+		self.assertTrue(fw.called)
+		self.assertIs(fw.call_args.kwargs.get("system"), True)
+
+
+class TestChannelAgnosticDirection(unittest.TestCase):
+	"""`WhatsApp Message` calls the field `type`; `WA Message` calls it
+	`direction`. Reading only `type` meant every WA Line message looked
+	not-incoming and fell out of the handler on its first line."""
+
+	def test_waba_incoming(self):
+		self.assertTrue(wa_verification._is_incoming(frappe._dict(type="Incoming")))
+
+	def test_wa_line_incoming(self):
+		self.assertTrue(
+			wa_verification._is_incoming(frappe._dict(direction="Incoming"))
+		)
+
+	def test_waba_outgoing(self):
+		self.assertFalse(wa_verification._is_incoming(frappe._dict(type="Outgoing")))
+
+	def test_wa_line_outgoing(self):
+		self.assertFalse(
+			wa_verification._is_incoming(frappe._dict(direction="Outgoing"))
+		)
+
+	def test_neither_field_set(self):
+		self.assertFalse(wa_verification._is_incoming(frappe._dict()))
+
+
+class TestWaLineHookIsWired(unittest.TestCase):
+	def test_wa_message_after_insert_dispatches_verification(self):
+		"""The whole defect in one assertion: without this entry the WA Line path
+		never reaches verification at all."""
+		from helpdesk import hooks
+
+		handlers = hooks.doc_events["WA Message"]["after_insert"]
+		if isinstance(handlers, str):
+			handlers = [handlers]
+		self.assertIn(
+			"helpdesk.integrations.wa_verification.handle_wa_message_insert",
+			handlers,
+		)
+
+	def test_the_bot_is_still_dispatched_too(self):
+		from helpdesk import hooks
+
+		handlers = hooks.doc_events["WA Message"]["after_insert"]
+		if isinstance(handlers, str):
+			handlers = [handlers]
+		self.assertIn("helpdesk.integrations.bot.handle_wa_message", handlers)
+
+
+class TestWaLineHookGuards(unittest.TestCase):
+	"""The hook fires inside the Evolution webhook request, and `_handle`
+	commits, so it must enqueue rather than run inline."""
+
+	def _doc(self, **kw):
+		base = dict(
+			name="WAMSG-1", direction="Incoming",
+			reference_doctype="HD Ticket", reference_name="TICKET-1",
+		)
+		base.update(kw)
+		return frappe._dict(base)
+
+	def test_incoming_linked_message_is_enqueued(self):
+		with patch("frappe.enqueue") as enqueue:
+			wa_verification.handle_wa_message_insert(self._doc())
+
+		self.assertTrue(enqueue.called)
+		self.assertIs(enqueue.call_args.kwargs.get("enqueue_after_commit"), True)
+		self.assertEqual(enqueue.call_args.kwargs.get("message_name"), "WAMSG-1")
+
+	def test_outgoing_message_is_ignored(self):
+		with patch("frappe.enqueue") as enqueue:
+			wa_verification.handle_wa_message_insert(self._doc(direction="Outgoing"))
+		enqueue.assert_not_called()
+
+	def test_unlinked_message_is_ignored(self):
+		with patch("frappe.enqueue") as enqueue:
+			wa_verification.handle_wa_message_insert(
+				self._doc(reference_doctype="", reference_name="")
+			)
+		enqueue.assert_not_called()
+
+	def test_message_on_another_doctype_is_ignored(self):
+		with patch("frappe.enqueue") as enqueue:
+			wa_verification.handle_wa_message_insert(
+				self._doc(reference_doctype="HD Article", reference_name="ART-1")
+			)
+		enqueue.assert_not_called()
+
+	def test_a_message_deleted_before_the_job_runs_is_a_no_op(self):
+		with patch("helpdesk.integrations.wa_verification.handle_incoming") as h:
+			wa_verification.process_wa_message("does-not-exist")
+		h.assert_not_called()
 
 
 class TestBlankPrompt(_StateBase):
@@ -480,3 +601,99 @@ class TestPinOnlyPromptPatch(unittest.TestCase):
 
 		self.assertNotIn("company name", patch_mod.NEW_DEFAULT.lower())
 		self.assertIn("kra pin", patch_mod.NEW_DEFAULT.lower())
+
+
+class TestWaLineConversationEndToEnd(unittest.TestCase):
+	"""The reported failure, driven end to end on a WA Line ticket.
+
+	Deliberately does NOT stub `send_prompt` the way `_StateBase` does -- the
+	defect lived inside `send_prompt`, so stubbing it would test around the bug.
+	The stub goes one level lower, at the transport.
+	"""
+
+	JID = "254700333444@s.whatsapp.net"
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.cleanup()
+
+		self.contact = frappe.get_doc({
+			"doctype": "Contact",
+			"first_name": PREFIX + "waline",
+			"phone_nos": [{"phone": "254700333444", "is_primary_mobile_no": 1}],
+		}).insert(ignore_permissions=True).name
+
+		ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": PREFIX + "waline-ticket",
+			"contact": self.contact,
+		}).insert(ignore_permissions=True)
+		self.ticket = ticket.name
+		try:
+			frappe.db.set_value("HD Ticket", self.ticket, "baileys_jid", self.JID)
+		except Exception:
+			self.skipTest("baileys_jid custom field absent on this site")
+		frappe.db.commit()
+
+		p = patch.object(wa_verification, "settings", return_value=_settings())
+		p.start()
+		self.addCleanup(p.stop)
+		self.addCleanup(self.cleanup)
+
+	def cleanup(self):
+		for t in frappe.get_all(
+			"HD Ticket", filters={"subject": ["like", PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("HD Ticket", t, force=True, ignore_permissions=True,
+			                  delete_permanently=True)
+		for c in frappe.get_all(
+			"Contact", filters={"first_name": ["like", PREFIX + "%"]}, pluck="name"
+		):
+			frappe.delete_doc("Contact", c, force=True, ignore_permissions=True,
+			                  delete_permanently=True)
+		frappe.db.commit()
+
+	def msg(self, text):
+		"""A WA Message, not a WhatsApp Message: `direction`, not `type`."""
+		return frappe._dict(
+			name=PREFIX + "wamsg", direction="Incoming", message=text,
+			reference_doctype="HD Ticket", reference_name=self.ticket,
+		)
+
+	def status(self):
+		return frappe.db.get_value("Contact", self.contact, "hd_verification_status")
+
+	def test_a_wa_line_customer_is_asked(self):
+		with patch("helpdesk.integrations.wa.send_wa_reply") as send:
+			wa_verification.handle_incoming(self.msg("my printer is broken"))
+
+		self.assertTrue(send.called, "no prompt was sent on the WA Line path")
+		self.assertEqual(send.call_args.kwargs.get("ticket"), self.ticket)
+		self.assertIs(send.call_args.kwargs.get("system"), True)
+		self.assertEqual(self.status(), "Asked")
+
+	def test_a_pin_replied_on_a_wa_line_is_recorded(self):
+		"""The reported symptom: a customer replied with their PIN and it was
+		ignored."""
+		with patch("helpdesk.integrations.wa.send_wa_reply"):
+			wa_verification.handle_incoming(self.msg("my printer is broken"))
+		self.assertEqual(self.status(), "Asked")
+
+		with patch("helpdesk.integrations.wa.send_wa_reply") as send:
+			wa_verification.handle_incoming(self.msg("P051234567X"))
+
+		self.assertEqual(self.status(), "Claimed")
+		self.assertEqual(
+			frappe.db.get_value("Contact", self.contact, "hd_claimed_tax_id"),
+			"P051234567X",
+		)
+		send.assert_not_called()
+
+	def test_an_outgoing_wa_line_message_changes_nothing(self):
+		doc = self.msg("P051234567X")
+		doc.direction = "Outgoing"
+		with patch("helpdesk.integrations.wa.send_wa_reply") as send:
+			wa_verification.handle_incoming(doc)
+
+		send.assert_not_called()
+		self.assertIn(self.status(), (None, "", "Unverified"))
