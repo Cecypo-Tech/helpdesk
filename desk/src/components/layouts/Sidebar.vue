@@ -41,7 +41,8 @@
       class="relative my-0.5 min-h-7"
       :label="backupPortalOption.label"
       :icon="backupPortalOption.icon"
-      :on-click="backupPortalOption.onClick"
+      :to="backupPortalOption.to"
+      :is-active="isActiveTab(backupPortalOption.to)"
       :is-expanded="isExpanded"
     />
     <div class="mb-4" v-if="!isCustomerPortal">

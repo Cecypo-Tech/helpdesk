@@ -74,13 +74,11 @@ export const customerPortalSidebarOptions = [
 // "All Views" section. Both sidebars bind these fields onto a standalone
 // SidebarLink, so this stays the single source of the label, icon and target.
 //
-// /backup is a Frappe www page, not a Vue route, so this navigates with
-// window.location instead of the router. SidebarLink calls onClick before it looks
-// at `to`, so leaving `to` unset is all that is needed to opt out of routing.
+// This used to leave the app entirely with `window.location.href = "/backup"`.
+// It now routes to the BackupPortal page, which embeds that same Frappe web page
+// in helpdesk's main body -- so the sidebar, and the rest of helpdesk, stay put.
 export const backupPortalOption = {
-  label: __("Imara Backup Portal"),
+  label: __("Imara Backup"),
   icon: LucideHardDrive,
-  onClick: () => {
-    window.location.href = "/backup";
-  },
+  to: "BackupPortal",
 };
