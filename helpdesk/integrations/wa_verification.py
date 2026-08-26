@@ -110,20 +110,35 @@ def _handle(doc) -> None:
 	if status in TERMINAL:
 		return
 
-	# CLAIMED is included here, not just ASKED: a later PIN from a contact an
-	# agent has not yet approved is treated as the customer correcting a typo,
-	# and the agent must see the newest claim rather than the first one. This
-	# is intentional overwrite-on-correction, not a missed status guard.
-	if status in (ASKED, CLAIMED):
-		claim = verification.extract_claim(doc.get("message"))
-		if claim["tax_id"]:
-			frappe.db.set_value("Contact", contact, {
-				"hd_claimed_tax_id": claim["tax_id"],
-				"hd_claimed_company": claim["company"],
-				STATUS_FIELD: CLAIMED,
-			})
-			frappe.db.commit()
-			return
+	# Read a PIN out of ANY non-terminal message, not only one that follows an
+	# ask. Gating this on ASKED/CLAIMED silently discarded a PIN in two ordinary
+	# situations, both of which end with the customer having volunteered their
+	# PIN and nothing being recorded:
+	#
+	#   1. It arrives in the customer's FIRST message ("hi, my PIN is P0512...,
+	#      printer broken"). The contact is still Unverified, so the PIN was
+	#      dropped and the bot asked for the very thing it had just been given.
+	#   2. The prompt send failed — Meta rejecting it outside the 24-hour window
+	#      is enough. The contact deliberately stays Unverified so the ask
+	#      retries, but that also meant every later PIN was dropped and the
+	#      prompt re-sent, forever.
+	#
+	# Recording without an ask is safe because a claim is not authorisation: it
+	# is evidence an agent approves. TERMINAL is checked above, so an agent's
+	# decision is still final either way.
+	#
+	# CLAIMED is included: a later PIN from a contact an agent has not yet
+	# approved is the customer correcting a typo, and the agent must see the
+	# newest claim rather than the first. Intentional overwrite-on-correction.
+	claim = verification.extract_claim(doc.get("message"))
+	if claim["tax_id"]:
+		frappe.db.set_value("Contact", contact, {
+			"hd_claimed_tax_id": claim["tax_id"],
+			"hd_claimed_company": claim["company"],
+			STATUS_FIELD: CLAIMED,
+		})
+		frappe.db.commit()
+		return
 
 	if status == CLAIMED:
 		# Waiting on an agent. Do not keep asking.

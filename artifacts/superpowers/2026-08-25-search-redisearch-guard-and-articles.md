@@ -472,3 +472,101 @@ Also worth checking there: `verification_enabled`, which is **0** on dev, and
 whether that contact already resolves to a customer via `get_customer()`, which
 makes `_handle` return before asking anything.
 
+
+---
+
+# Follow-up 4: a volunteered PIN was silently discarded
+
+Date: 2026-08-26
+Branch: `fix/record-unprompted-pin`
+
+## Reported
+
+Two contacts on production, unlinked to any customer, who shared their KRA PIN.
+Nothing was recorded.
+
+## Cause
+
+`_handle` read the claim only inside `if status in (ASKED, CLAIMED)`. A PIN
+arriving in any other state was dropped -- no error, no log, nothing for an agent
+to see. Reproduced locally in two ordinary situations:
+
+**A. The PIN is in the customer's first message.** The contact is still
+Unverified, so the PIN was discarded and the prompt sent -- the bot asking for
+exactly what it had just been given.
+
+```
+"Hi, my PIN is P051234567X, printer broken"
+  prompts sent: 1 | hd_claimed_tax_id: None | status: Asked
+```
+
+**B. The prompt send failed.** A failed send leaves the contact Unverified on
+purpose so the ask retries. That also meant every later PIN was dropped and the
+prompt re-sent, indefinitely.
+
+```
+prompt raises ("outside 24h window")   -> status Unverified
+"P051234567X"                          -> hd_claimed_tax_id: None, prompt re-sent
+```
+
+Both end exactly where the report did. Neither needed production access to
+confirm.
+
+Note this is channel-independent, which retires the WA Line theory from
+follow-up 3 twice over: wrong channel, and the real defect had nothing to do with
+channels.
+
+## Change
+
+Read the claim from ANY non-terminal inbound message. `TERMINAL` is still checked
+first, so a Verified or Rejected contact is untouched and an agent's decision
+stays final. Recording without an ask is safe because a claim is not
+authorisation -- it is evidence an agent approves.
+
+Accepted trade-off, chosen by the owner: any PIN-shaped token from an unlinked
+contact now becomes a claim, so a device serial could land there. Nothing
+auto-links, the claim is visible, and a later PIN overwrites it.
+
+After:
+
+```
+A: prompts sent: 0 | status Claimed | hd_claimed_tax_id P051234567X
+B: prompts sent: 0 | status Claimed | hd_claimed_tax_id P051234567X
+```
+
+## Verification
+
+`test_contact_verification.py` 43 -> 49. `TestUnpromptedPin` covers the PIN in a
+first message, no redundant prompt when the PIN is already present, recording
+after a failed prompt, the ordinary no-PIN path still asking, and both terminal
+states still ignoring a volunteered PIN.
+
+```
+test_contact_verification -> 49 OK
+test_bot                  -> 24 OK
+test_bot_product_scoping  ->  9 OK
+test_entitlement_api      ->  8 OK
+```
+
+## Review pass
+
+- **Blocker**: none.
+- **Major**: none.
+- **Minor**: unprompted claims will be noisier than prompted ones. If that shows
+  up in practice, the narrower option is a stricter pattern for the unprompted
+  case only (`^[A-Z]\d{9}[A-Z]$`), at the cost of missing the nine malformed PINs
+  known to exist in the ERPNext data.
+- **Minor**: a failed prompt send is still only visible in the error log. Worth
+  surfacing, but out of scope here.
+- **Nit**: `verification_enabled` is **0** on dev. Whether it is on in production
+  is still unconfirmed, and if it is off none of this runs at all.
+
+## Not verified against production
+
+No route to it from this bench: the only helpdesk site here is `dev.localhost`
+(`host_name = https://dev.cecypo.tech`), production is
+`cce-support.jh.frappe.cloud`, and there are no stored credentials, no
+`~/.frappe-cloud`, no `.netrc`, no `fc` CLI. Neither reported number
+(+254746127115, +254746771116) exists on this bench, which holds 0 HD Tickets.
+The fix is confirmed by local reproduction of the exact reported state, not by
+reading the live records.
