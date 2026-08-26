@@ -526,3 +526,77 @@ class TestScopeIsWabaOnly(unittest.TestCase):
 
 		self.assertTrue(send.called)
 		self.assertIs(send.call_args.kwargs.get("system"), True)
+
+
+class TestUnpromptedPin(_StateBase):
+	"""A PIN the customer volunteered without being asked.
+
+	Reproduced from a live report: contact unlinked, PIN shared, nothing
+	recorded. The claim used to be read only when the contact was already
+	ASKED/CLAIMED, so a PIN arriving in any other state was silently dropped --
+	no error, no log, nothing for an agent to see.
+	"""
+
+	def test_a_pin_in_the_very_first_message_is_recorded(self):
+		"""The customer leads with it. Dropping the PIN here meant the bot asked
+		for exactly what it had just been given."""
+		wa_verification.handle_incoming(
+			self.msg("Hi, my PIN is P051234567X, printer broken")
+		)
+
+		self.assertEqual(self.status(), "Claimed")
+		self.assertEqual(
+			frappe.db.get_value("Contact", self.contact, "hd_claimed_tax_id"),
+			"P051234567X",
+		)
+
+	def test_no_prompt_is_sent_when_the_pin_is_already_there(self):
+		"""Asking anyway would be the rudest possible version of this feature."""
+		wa_verification.handle_incoming(self.msg("my PIN is P051234567X"))
+		self.assertEqual(self.sent, [])
+
+	def test_a_pin_is_recorded_after_the_prompt_failed_to_send(self):
+		"""A failed send leaves the contact Unverified on purpose, so the ask
+		retries. That also used to mean every later PIN was dropped and the
+		prompt re-sent, forever."""
+		with patch.object(
+			wa_verification, "send_prompt", side_effect=Exception("outside 24h window")
+		):
+			wa_verification.handle_incoming(self.msg("printer broken"))
+		self.assertIn(self.status(), (None, "", "Unverified"))
+
+		wa_verification.handle_incoming(self.msg("P051234567X"))
+
+		self.assertEqual(self.status(), "Claimed")
+		self.assertEqual(
+			frappe.db.get_value("Contact", self.contact, "hd_claimed_tax_id"),
+			"P051234567X",
+		)
+
+	def test_a_message_with_no_pin_still_triggers_the_ask(self):
+		"""The ordinary path must be untouched."""
+		wa_verification.handle_incoming(self.msg("my printer is broken"))
+		self.assertEqual(len(self.sent), 1)
+		self.assertEqual(self.status(), "Asked")
+
+	def test_a_verified_contact_volunteering_a_pin_is_still_ignored(self):
+		"""TERMINAL is checked before the claim is read. An agent's decision stays
+		final -- this must not become a way to relink a settled contact."""
+		frappe.db.set_value("Contact", self.contact, "hd_verification_status", "Verified")
+		frappe.db.commit()
+
+		wa_verification.handle_incoming(self.msg("actually my PIN is P999999999Z"))
+
+		self.assertEqual(self.status(), "Verified")
+		self.assertIsNone(
+			frappe.db.get_value("Contact", self.contact, "hd_claimed_tax_id")
+		)
+
+	def test_a_rejected_contact_volunteering_a_pin_is_still_ignored(self):
+		frappe.db.set_value("Contact", self.contact, "hd_verification_status", "Rejected")
+		frappe.db.commit()
+
+		wa_verification.handle_incoming(self.msg("my PIN is P999999999Z"))
+
+		self.assertEqual(self.status(), "Rejected")
+		self.assertEqual(self.sent, [])
