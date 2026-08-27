@@ -200,18 +200,39 @@ def sync_customers(page_size: int = PAGE_SIZE, full: bool = False) -> dict:
 
 
 @frappe.whitelist()
-def enqueue_customer_sync() -> dict:
-	"""Run the mirror in the background, from the settings screen."""
+def enqueue_customer_sync(full: bool = False) -> dict:
+	"""Run the mirror in the background, from the settings screen.
+
+	`full=True` ignores the stored watermark and re-reads every customer.
+
+	That escape hatch existed in `sync_customers` from the start but had no
+	caller outside the tests, which made it unreachable in practice: this
+	function is the only whitelisted way in, it always ran incrementally, and
+	Frappe Cloud offers no console to call `sync_customers(full=True)` by hand.
+
+	The failure that needs it is silent and looks healthy. An incremental sync
+	asks only for rows modified since the watermark, so a mirror that never got
+	its initial backfill keeps reporting recent successful runs while holding
+	almost nothing — on production it sat at 249 customers with 5 tax_ids, and
+	`last_customer_sync` updated on schedule the whole time. Nothing linked,
+	because HD Customer.tax_id is what an unknown-contact PIN claim resolves
+	against.
+	"""
 	if frappe.session.user != "Administrator":
 		frappe.only_for(["System Manager", "Administrator"])
+
+	full = frappe.utils.cint(full)
 	frappe.enqueue(
 		"helpdesk.integrations.erpnext_sync.sync_customers",
 		queue="long",
 		timeout=1800,
-		job_id="erpnext_customer_sync",
+		# A full resync must not be swallowed by an incremental job already in
+		# flight -- deduplicate() matches on job_id alone.
+		job_id="erpnext_customer_sync_full" if full else "erpnext_customer_sync",
 		deduplicate=True,
+		full=bool(full),
 	)
-	return {"status": "queued"}
+	return {"status": "queued", "full": bool(full)}
 
 
 def run_scheduled_sync() -> dict:

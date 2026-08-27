@@ -570,3 +570,108 @@ No route to it from this bench: the only helpdesk site here is `dev.localhost`
 (+254746127115, +254746771116) exists on this bench, which holds 0 HD Tickets.
 The fix is confirmed by local reproduction of the exact reported state, not by
 reading the live records.
+
+---
+
+# Follow-up 5: the claims had nothing to resolve against
+
+Date: 2026-08-27
+Branch: `feat/full-customer-resync`
+
+## Reported
+
+"PIN being asked for now, but no update being set after that", and separately a
+"pin / no company issue".
+
+## What production actually showed
+
+Queried directly (read-only) with the API token at `~/.cecypo-support-api`.
+
+The capture was never broken. `verification_enabled = 1`, prompts going out,
+**13 claims recorded** — including one from minutes before the report:
+
+```
+victor sum    254710249736  P051199670Z  Claimed
+Annie Muthoni 254746127115  P000591377X  Claimed
+Nikunj Patel  254746771116  P051187945J  Claimed
+```
+
+What was broken sat one step later. `match_claim()` resolves a claimed PIN
+against `HD Customer.tax_id`, and production had **249 HD Customers with 5
+tax_ids**. Every claim resolved to zero candidates: no company, nothing for an
+agent to approve, no update. Checked all 13 — not one matched.
+
+## Why the customers were missing
+
+The sync looked healthy, which is what made this hard to see: `enabled=1`,
+`erp.cecypo.com`, `last_customer_sync` **11:59 that same day**, entitlements
+12:02.
+
+But `sync_customers()` is incremental — it asks only for rows modified since the
+watermark. The initial backfill never happened, so it had been faithfully
+mirroring the handful of recently-changed customers ever since, reporting success
+each time. The docstring already warned about exactly this:
+
+> "the first time this ran against production it did nothing at all, because a
+> stale watermark left by the test suite made it ask for records newer than any
+> that existed."
+
+And **"Sync Now" could not fix it**: `enqueue_customer_sync()` called
+`sync_customers` with no `full=True`. The `full` escape hatch had no caller
+anywhere outside a test — no button, no whitelisted argument — so on Frappe
+Cloud, with no console, it was unreachable.
+
+## A — production unblocked
+
+Cleared `last_customer_sync` (baseline recorded first:
+`2026-08-27 11:59:16.867223`, 249 customers, 5 tax_ids) and triggered the sync.
+With no watermark, `since` is empty and the incremental path reads everything.
+
+```
+before   customers=249    with_tax_id=5
++40s     customers=804    with_tax_id=587
+final    customers=3033   with_tax_id=2803
+```
+
+2,803 — exactly the figure the `verification.py` comment cites. All **14** claims
+now resolve, and the names corroborate the PIN matching rather than merely
+agreeing with it:
+
+```
+254746127115  P000591377X -> Slater & Whittaker Ltd        (contact: "Annie(Slater)")
+254746771116  P051187945J -> Jalaram merchandise Ltd       (contact: "Nikunj Patel (Jalaram Merchandise)")
+254710249736  P051199670Z -> PAVAN AUTO HARDWARE LIMITED
+```
+
+## B — so it never needs a console again
+
+- `enqueue_customer_sync(full=False)` now takes and forwards the flag, through
+  `cint` so the string a button sends ("1"/"0") behaves.
+- A separate `job_id` for full runs: `deduplicate()` matches on job_id alone, so
+  sharing one would let an in-flight incremental job swallow the resync.
+- A **Full Resync** button on the settings form, behind a confirm, since it
+  re-reads every customer rather than the changed handful.
+
+## Verification
+
+```
+test_erpnext_customer_sync -> 21 OK
+```
+
+`TestFullResyncIsReachable` covers: default stays incremental, `full` is passed
+through, the string form a button sends is handled (so "0" does not read as
+True), full runs get their own job_id, and the settings form actually exposes the
+button — a whitelisted argument nobody can reach is the same bug again.
+
+## Review pass
+
+- **Blocker**: none.
+- **Major**: none.
+- **Minor**: the 14 claims are resolvable but still unapproved — 0 Verified, 0
+  Rejected. Whether agents have a surface that shows them a pending-claims queue
+  is unconfirmed and is the next thing to look at.
+- **Minor**: nothing detects "mirror is implausibly small". The sync reports
+  success by advancing a watermark, not by reconciling counts, so this class of
+  failure stays silent until someone notices downstream.
+- **Nit**: production write was one field on a Single, with the prior value
+  recorded above; everything else this session was read-only.
