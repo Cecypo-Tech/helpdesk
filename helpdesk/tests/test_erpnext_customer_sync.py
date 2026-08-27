@@ -304,3 +304,63 @@ class TestWatermark(_Base):
             "2026-03-01 00:00:00",
             "watermark must reflect the page that did succeed",
         )
+
+
+class TestFullResyncIsReachable(unittest.TestCase):
+    """`sync_customers(full=True)` existed from the start but had no caller
+    outside the tests, so in practice it could not be run at all: the whitelisted
+    entry point always went incremental, and Frappe Cloud has no console.
+
+    That mattered because the failure it fixes looks healthy. An incremental sync
+    only asks for rows changed since the watermark, so a mirror that never got
+    its initial backfill keeps logging successful runs while holding almost
+    nothing -- production sat at 249 customers with 5 tax_ids while
+    `last_customer_sync` updated on schedule.
+    """
+
+    def test_default_stays_incremental(self):
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync()
+        self.assertIs(enqueue.call_args.kwargs.get("full"), False)
+
+    def test_full_is_passed_through(self):
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync(full=True)
+        self.assertIs(enqueue.call_args.kwargs.get("full"), True)
+
+    def test_full_accepts_the_string_a_button_sends(self):
+        """frappe.call sends args over HTTP, so `full` arrives as "1", and a bare
+        truthiness check would make "0" mean True."""
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync(full="1")
+        self.assertIs(enqueue.call_args.kwargs.get("full"), True)
+
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync(full="0")
+        self.assertIs(enqueue.call_args.kwargs.get("full"), False)
+
+    def test_a_full_run_uses_its_own_job_id(self):
+        """deduplicate() matches on job_id alone, so sharing one would let an
+        incremental job already in flight swallow the full resync."""
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync(full=True)
+        full_id = enqueue.call_args.kwargs.get("job_id")
+
+        with patch("frappe.enqueue") as enqueue:
+            erpnext_sync.enqueue_customer_sync()
+        incremental_id = enqueue.call_args.kwargs.get("job_id")
+
+        self.assertNotEqual(full_id, incremental_id)
+
+    def test_the_settings_form_exposes_a_button(self):
+        """A whitelisted argument nobody can reach is the same bug again."""
+        import json
+        import pathlib
+
+        base = pathlib.Path(erpnext_sync.__file__).parents[1] / "helpdesk" / "doctype" / "erpnext_sync_settings"
+        schema = json.loads((base / "erpnext_sync_settings.json").read_text())
+        self.assertIn("full_resync", [f["fieldname"] for f in schema["fields"]])
+
+        js = (base / "erpnext_sync_settings.js").read_text()
+        self.assertIn("full_resync(frm)", js)
+        self.assertIn("full: 1", js)

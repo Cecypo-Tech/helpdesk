@@ -17,6 +17,7 @@
   "sync_interval_hours",
   "sync_now",
   "sync_entitlements_now",
+  "full_resync",
   "col_break_sched",
   "last_customer_sync",
   "last_entitlement_sync"
@@ -41,7 +42,7 @@
    "label": "Server URL"
   },
   {
-   "description": "API key of a dedicated ERPNext user. Inside safe_exec the Server Scripts bypass permissions, so this key is the only access control — rotate it like a secret.",
+   "description": "API key of a dedicated ERPNext user. Inside safe_exec the Server Scripts bypass permissions, so this key is the only access control \u2014 rotate it like a secret.",
    "fieldname": "api_key",
    "fieldtype": "Data",
    "label": "API Key"
@@ -57,7 +58,7 @@
   },
   {
    "depends_on": "eval:doc.server_url && doc.api_key",
-   "description": "Fetches one customer. Proves the URL, the credentials, the Server Script being installed, and permissions — all in one call.",
+   "description": "Fetches one customer. Proves the URL, the credentials, the Server Script being installed, and permissions \u2014 all in one call.",
    "fieldname": "test_connection",
    "fieldtype": "Button",
    "label": "Test Connection"
@@ -69,7 +70,7 @@
   },
   {
    "default": "1",
-   "description": "Create an HD Product for an ERPNext item code that has no mapping yet. Safe because only items on Sales Orders carrying an Auto Repeat are considered — a support-contract SKU list, not the whole item master.",
+   "description": "Create an HD Product for an ERPNext item code that has no mapping yet. Safe because only items on Sales Orders carrying an Auto Repeat are considered \u2014 a support-contract SKU list, not the whole item master.",
    "fieldname": "auto_create_products",
    "fieldtype": "Check",
    "label": "Auto-create Products from Item Codes"
@@ -91,7 +92,13 @@
    "fieldname": "sync_entitlements_now",
    "fieldtype": "Button",
    "label": "Sync Entitlements Now",
-   "description": "Reads recurring Sales Orders and mirrors support coverage. Run after a customer sync — entitlements attach to mirrored customers."
+   "description": "Reads recurring Sales Orders and mirrors support coverage. Run after a customer sync \u2014 entitlements attach to mirrored customers."
+  },
+  {
+   "fieldname": "full_resync",
+   "fieldtype": "Button",
+   "label": "Full Resync (ignore watermark)",
+   "description": "Re-reads every customer from ERPNext instead of only those changed since the last run. Use when the mirror looks healthy but is missing records \u2014 an initial backfill that never happened leaves the incremental sync reporting success forever."
   },
   {
    "fieldname": "col_break_sched",

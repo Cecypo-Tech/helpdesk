@@ -21,6 +21,34 @@ frappe.ui.form.on("ERPNext Sync Settings", {
 		});
 	},
 
+	full_resync(frm) {
+		if (frm.is_dirty()) {
+			frappe.msgprint(__("Save the settings first, then sync."));
+			return;
+		}
+		// Confirmed, because it re-reads every customer rather than the handful
+		// that changed -- minutes of work against ERPNext, not seconds.
+		frappe.confirm(
+			__(
+				"Re-read every customer from ERPNext, ignoring the last-sync watermark? This is slower than a normal sync and is meant for a mirror that is missing records."
+			),
+			() => {
+				frappe.call({
+					method: "helpdesk.integrations.erpnext_sync.enqueue_customer_sync",
+					args: { full: 1 },
+					callback() {
+						frappe.show_alert({
+							message: __(
+								"Full resync queued. Last Customer Sync updates when it finishes."
+							),
+							indicator: "blue",
+						});
+					},
+				});
+			}
+		);
+	},
+
 	sync_entitlements_now(frm) {
 		if (frm.is_dirty()) {
 			frappe.msgprint(__("Save the settings first, then sync."));
