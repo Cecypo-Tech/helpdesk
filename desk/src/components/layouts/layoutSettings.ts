@@ -2,6 +2,7 @@ import LucideBookOpen from "~icons/lucide/book-open";
 import LucideCheckSquare from "~icons/lucide/check-square";
 import LucideHardDrive from "~icons/lucide/hard-drive";
 import LucideContact2 from "~icons/lucide/contact-2";
+import LucideBadgeCheck from "~icons/lucide/badge-check";
 import LucideTicket from "~icons/lucide/ticket";
 import { OrganizationsIcon } from "../icons";
 import PhoneIcon from "../icons/PhoneIcon.vue";
@@ -39,6 +40,15 @@ export const agentPortalSidebarOptions = [
     label: __("Contacts"),
     icon: LucideContact2,
     to: "ContactList",
+  },
+  {
+    label: __("Verifications"),
+    icon: LucideBadgeCheck,
+    // Sidebar.vue filters this entry out while nothing is pending, and badges
+    // it with the count when something is. A permanent entry that is empty most
+    // days trains agents to skip past it, and the count is the entire point:
+    // thirteen claims went unread because nothing said a number out loud.
+    to: "PendingClaims",
   },
   {
     label: __("Call Logs"),
