@@ -137,6 +137,13 @@ const routes = [
     name: "CallLogs",
     component: () => import("@/pages/call-logs/CallLogs.vue"),
   },
+  // Agent-only, and deliberately not `public`: a claim names an unrecognised
+  // caller and the company they say they belong to.
+  {
+    path: "/verifications",
+    name: "PendingClaims",
+    component: () => import("@/pages/desk/verification/PendingClaims.vue"),
+  },
   {
     path: "/whatsapp/analytics",
     name: "WhatsAppAnalytics",

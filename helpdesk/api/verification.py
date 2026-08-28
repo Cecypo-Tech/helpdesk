@@ -8,7 +8,13 @@ lets a stranger read another company's support history and account standing.
 import frappe
 
 from helpdesk import verification
-from helpdesk.integrations.wa_verification import REJECTED, VERIFIED, contact_state
+from helpdesk.integrations.wa_verification import (
+	CLAIMED,
+	REJECTED,
+	STATUS_FIELD,
+	VERIFIED,
+	contact_state,
+)
 from helpdesk.utils import agent_only
 
 
@@ -118,3 +124,78 @@ def reject_contact_claim(contact: str) -> dict:
 	frappe.db.set_value("Contact", contact, "hd_verification_status", REJECTED)
 	frappe.db.commit()
 	return {"ok": True}
+
+
+@frappe.whitelist()
+@agent_only
+def get_pending_claims() -> list[dict]:
+	"""Contacts waiting on an agent's verdict, newest claim first.
+
+	The reason this exists: the approve/dismiss controls live on a ticket's
+	Contact tab, so a claim was only ever discoverable by opening the one ticket
+	it came from. On production thirteen claims sat unread for two days, and
+	nothing anywhere said a number out loud.
+
+	This lists; it does not decide. Each row carries the ticket to open, and
+	linking still happens only through approve_contact_link on that ticket, next
+	to the conversation the claim came from.
+	"""
+	try:
+		contacts = frappe.get_all(
+			"Contact",
+			filters={STATUS_FIELD: CLAIMED},
+			fields=["name", "hd_claimed_tax_id", "hd_claimed_company",
+			        "hd_verification_asked_on"],
+			order_by="modified desc",
+		)
+	except Exception as e:
+		# Custom Fields absent on an unmigrated site -- same hazard the rest of
+		# this feature guards. An empty queue is the honest answer there.
+		if frappe.db.is_missing_column(e):
+			return []
+		raise
+
+	rows = []
+	for c in contacts:
+		matches = [
+			{"name": name, "customer_name": _customer_name(name)}
+			for name in verification.match_claim(c.get("hd_claimed_tax_id"))
+		]
+		rows.append({
+			"contact": c["name"],
+			"claimed_tax_id": c.get("hd_claimed_tax_id"),
+			"claimed_company": c.get("hd_claimed_company"),
+			"asked_on": c.get("hd_verification_asked_on"),
+			"matches": matches,
+			"ticket": _latest_ticket(c["name"]),
+		})
+	return rows
+
+
+def _latest_ticket(contact: str) -> int | None:
+	"""The ticket an agent should open to act on this claim.
+
+	Newest, because that is the conversation the PIN most likely arrived in.
+	"""
+	rows = frappe.get_all(
+		"HD Ticket", filters={"contact": contact}, pluck="name",
+		order_by="creation desc", limit=1,
+	)
+	return rows[0] if rows else None
+
+
+@frappe.whitelist()
+@agent_only
+def get_pending_claim_count() -> int:
+	"""Just the number, for the sidebar badge.
+
+	Separate from get_pending_claims because the badge is polled from every
+	page: it must not pay for match_claim, which reads every HD Customer with a
+	tax_id once per claim.
+	"""
+	try:
+		return frappe.db.count("Contact", {STATUS_FIELD: CLAIMED})
+	except Exception as e:
+		if frappe.db.is_missing_column(e):
+			return 0
+		raise

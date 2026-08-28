@@ -600,3 +600,63 @@ class TestUnpromptedPin(_StateBase):
 
 		self.assertEqual(self.status(), "Rejected")
 		self.assertEqual(self.sent, [])
+
+
+class TestPendingClaimsQueue(_StateBase):
+	"""The queue exists because the approve controls live on a ticket's Contact
+	tab, so a claim was only discoverable by opening the one ticket it came from.
+	Thirteen claims sat unread on production for two days.
+
+	It lists; it does not decide. Linking still happens only through
+	approve_contact_link, on the ticket, next to the conversation.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		from helpdesk.api import verification as api
+		self.api = api
+
+	def test_a_claimed_contact_appears(self):
+		wa_verification.handle_incoming(self.msg("my PIN is P051234567X"))
+		self.assertEqual(self.status(), "Claimed")
+
+		rows = self.api.get_pending_claims()
+		mine = [r for r in rows if r["contact"] == self.contact]
+		self.assertEqual(len(mine), 1)
+		self.assertEqual(mine[0]["claimed_tax_id"], "P051234567X")
+
+	def test_the_row_carries_a_ticket_to_open(self):
+		"""Without it the row is a dead end -- the agent is told someone is
+		waiting and given nowhere to act."""
+		wa_verification.handle_incoming(self.msg("my PIN is P051234567X"))
+		row = [r for r in self.api.get_pending_claims() if r["contact"] == self.contact][0]
+		self.assertEqual(str(row["ticket"]), str(self.ticket))
+
+	def test_an_asked_contact_is_not_in_the_queue(self):
+		"""Asked means waiting on the CUSTOMER. Only a claim is waiting on an agent."""
+		wa_verification.handle_incoming(self.msg("my printer is broken"))
+		self.assertEqual(self.status(), "Asked")
+		self.assertNotIn(self.contact, [r["contact"] for r in self.api.get_pending_claims()])
+
+	def test_settled_contacts_leave_the_queue(self):
+		for settled in ("Verified", "Rejected"):
+			frappe.db.set_value("Contact", self.contact, "hd_verification_status", settled)
+			frappe.db.commit()
+			self.assertNotIn(
+				self.contact, [r["contact"] for r in self.api.get_pending_claims()],
+				f"a {settled} contact is still queued",
+			)
+
+	def test_count_matches_the_list(self):
+		"""The badge and the page are separate endpoints -- the cheap one must not
+		drift from the one that does the work."""
+		wa_verification.handle_incoming(self.msg("my PIN is P051234567X"))
+		self.assertEqual(
+			self.api.get_pending_claim_count(),
+			len(self.api.get_pending_claims()),
+		)
+
+	def test_the_queue_is_agent_only(self):
+		"""A claim names an unrecognised caller and the company they say they are."""
+		self.assertTrue(hasattr(self.api.get_pending_claims, "__wrapped__"))
+		self.assertTrue(hasattr(self.api.get_pending_claim_count, "__wrapped__"))

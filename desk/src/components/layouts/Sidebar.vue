@@ -308,6 +308,7 @@ import {
 } from "./layoutSettings";
 
 import { useConfigStore } from "@/stores/config";
+import { useVerificationStore } from "@/stores/verification";
 import { useShortcut } from "@/composables/shortcuts";
 import { useTelephonyStore } from "@/stores/telephony";
 import { useWaLinesStore } from "@/stores/waLines";
@@ -373,6 +374,10 @@ const { pinnedViews, publicViews } = useView();
 const isFCSite = ref(window.is_fc_site);
 
 const { backupPortalEnabled } = storeToRefs(useConfigStore());
+const verificationStore = useVerificationStore();
+// After mount, not at setup: fetching during setup races the session and
+// comes back 403, which reads as "nothing pending" and hides the entry.
+onMounted(() => verificationStore.refresh());
 
 const allViews = computed(() => {
   let items = isCustomerPortal.value
@@ -381,6 +386,12 @@ const allViews = computed(() => {
 
   if (!isCallingEnabled.value) {
     items = items.filter((item) => item.label !== __("Call Logs"));
+  }
+
+  // Verifications appears only while claims are waiting. An entry that is empty
+  // most days trains agents to skip past it, and the count is the whole point.
+  if (!verificationStore.count) {
+    items = items.filter((item) => item.to !== "PendingClaims");
   }
 
   const options = [
@@ -785,6 +796,7 @@ function linkBadge(link: any): number | null {
   if (routeName === "TicketsAgent") return openCounts.data?.tickets || null;
   if (routeName === "TasksAgent") return openCounts.data?.tasks || null;
   if (routeName === "WhatsAppBusinessChat") return openCounts.data?.whatsapp || null;
+  if (routeName === "PendingClaims") return verificationStore.count || null;
   return null;
 }
 

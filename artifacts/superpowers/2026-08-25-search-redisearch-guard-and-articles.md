@@ -675,3 +675,93 @@ button — a whitelisted argument nobody can reach is the same bug again.
   failure stays silent until someone notices downstream.
 - **Nit**: production write was one field on a Single, with the prior value
   recorded above; everything else this session was read-only.
+
+---
+
+# Follow-up 6: a queue for pending claims
+
+Date: 2026-08-28
+Branch: `feat/pending-claims-queue`
+
+## Why
+
+Approve/Dismiss live on a ticket's Contact tab, so a claim was only ever
+discoverable by opening the one ticket it arrived on. Thirteen claims sat unread
+on production for two days. Nothing anywhere said a number out loud.
+
+## Shape (user-chosen)
+
+- **The queue lists; the ticket approves.** A row opens its ticket, where the
+  existing panel does the linking. Keeps the decision next to the conversation it
+  rests on, and leaves exactly one code path able to link a contact to a customer.
+- **Sidebar entry with a count badge, hidden when empty.** An entry that is empty
+  most days trains agents to skip it; the count is the point.
+
+## Changes
+
+- `api/verification.py`: `get_pending_claims()` returns each claimed contact with
+  its PIN, matches and the newest ticket to open. `get_pending_claim_count()` is
+  separate and deliberately cheap — the badge is fetched on every page and must
+  not pay for `match_claim`, which reads every HD Customer with a tax_id once per
+  claim. Both `@agent_only`; both return empty on an unmigrated site.
+- `pages/desk/verification/PendingClaims.vue`: the list. States "No customer
+  matches that PIN" explicitly — that is a data problem, not something to approve.
+- `stores/verification.ts`: the count, shared by badge and page.
+- `Sidebar.vue`: filters the entry out at zero, badges it otherwise, through the
+  `linkBadge()` helper that already existed.
+
+## Three bugs found by looking at it
+
+1. **The badge never appeared.** `createResource({auto: true})` defers its first
+   fetch to `onMounted`, and a Pinia store has no component instance — the
+   request never went out, the count stayed 0, and the entry hid itself forever.
+   Confirmed by the absence of any `get_pending_claim_count` row in the network
+   log, not by reading code.
+2. **Then it 403'd**, because fetching at store-creation races the session. The
+   sidebar now calls `refresh()` from its own `onMounted`.
+3. **`dayjs(...)` instead of `dayjs.tz(...)`** — the codebase convention. Caught
+   because a timestamp stamped seconds earlier rendered as "in 2 hours".
+
+## The timezone finding is a dev misconfiguration, not a bug
+
+Chasing (3) turned up something worth keeping:
+
+```
+dev  System Settings time_zone = Asia/Kolkata     <- wrong
+prod System Settings time_zone = Africa/Nairobi   <- correct
+```
+
+`window.timezone` on dev is `{system: Asia/Kolkata, user: Africa/Nairobi}`. Server
+datetimes are stamped in SYSTEM tz and rendered in USER tz, so on dev every
+server-derived relative timestamp in the whole app is 2.5 hours out. On production
+the two match and it is correct. No code change; the dev site setting is wrong.
+
+## Verification
+
+`test_contact_verification.py` 49 -> 55. `TestPendingClaimsQueue` covers: a
+claimed contact appears, the row carries a ticket to open (without it the row is a
+dead end), an `Asked` contact does NOT appear (that is waiting on the customer,
+not on an agent), `Verified`/`Rejected` leave the queue, the count matches the
+list (badge and page are separate endpoints and must not drift), and both are
+agent-gated.
+
+Exercised in a browser against three seeded claims: the page rendered all three
+with their matched customers (`Slater & Whittaker Ltd`, `PAVAN AUTO HARDWARE
+LIMITED`, `NAYOSA ENTERPRISES`) and ticket links, and the sidebar rendered
+`Verifications` with a badge of `3`. Fixtures removed afterwards; count back to 0.
+
+## Review pass
+
+- **Blocker**: none.
+- **Major**: none.
+- **Minor**: the count is fetched once per page load, not polled. A claim arriving
+  mid-session does not bump the badge until the agent navigates. Polling every
+  agent's session costs more than it tells anyone; realtime would be the better
+  upgrade if it matters.
+- **Minor**: `get_pending_claims` calls `match_claim` per row, and that reads every
+  HD Customer with a tax_id each time — 2,803 rows on production. Fine at 14
+  claims, not at 1,000. The count endpoint is separate precisely so the badge
+  never pays it.
+- **Nit**: I misread a screenshot mid-build and thought the sidebar had lost its
+  entries; they were below the fold in a scrollable list. The DOM text was the
+  thing that settled it, as with the `<mark>` bug earlier.
