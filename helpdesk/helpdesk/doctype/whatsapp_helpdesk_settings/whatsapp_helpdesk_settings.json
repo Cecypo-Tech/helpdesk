@@ -26,7 +26,9 @@
   "restrict_chats_by_team",
   "section_notifications",
   "notification_quiet_minutes",
-  "unread_window_days"
+  "unread_window_days",
+  "section_outbound",
+  "outbound_hold_seconds"
  ],
  "fields": [
   {
@@ -154,6 +156,18 @@
    "fieldname": "unread_window_days",
    "fieldtype": "Int",
    "label": "Unread Window (Days)"
+  },
+  {
+   "fieldname": "section_outbound",
+   "fieldtype": "Section Break",
+   "label": "Outbound"
+  },
+  {
+   "default": "5",
+   "fieldname": "outbound_hold_seconds",
+   "fieldtype": "Int",
+   "label": "Outbound Hold (Seconds)",
+   "description": "Hold an agent's outgoing WhatsApp Business message for this many seconds and merge anything else they type in that window into a single send. Meta bills every business message from 1 Oct 2026, so a reply split across several bubbles is billed several times. WhatsApp Business (WABA) path only \u2014 WA Line is not billed by Meta. 0 = send immediately (off)."
   }
  ],
  "index_web_pages_for_search": 1,

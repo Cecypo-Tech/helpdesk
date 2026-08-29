@@ -62,9 +62,11 @@
       <!-- Reply box. Stays mounted past the 24-hour window: the free-form
            controls disable themselves and the template picker stays live. -->
       <WhatsAppReplyBox
+        ref="replyBox"
         :ticketId="ticketId"
         :replyTo="replyingTo"
         :replyWindowOpen="ticketInfo.data.reply_window_open"
+        :outboundHoldSeconds="ticketInfo.data.outbound_hold_seconds ?? 0"
         @sent="onMessageSent"
         @delivered="onMessageDelivered"
         @clearReply="replyingTo = null"
@@ -110,6 +112,9 @@ const ticketInfo = createResource({
   params: { ticket: props.ticketId },
   auto: true,
 });
+
+// Exposes flush(), so an incoming message can cut the outbound hold short.
+const replyBox = ref<{ flush: () => void } | null>(null);
 
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
@@ -259,6 +264,9 @@ function onMessageDelivered() {
 
 function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
   if (String(data.ticket) === String(props.ticketId)) {
+    // The customer is waiting on us now, so stop batching and get whatever the
+    // agent has already sent out ahead of the refetch.
+    if (data.is_incoming) replyBox.value?.flush();
     messages.reload();
     ticketInfo.reload();
     scrollToBottom();

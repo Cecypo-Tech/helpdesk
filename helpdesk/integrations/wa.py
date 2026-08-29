@@ -2274,6 +2274,26 @@ def _mark_conversation_read_for_all_agents(jid: str, upto) -> None:
 # when the singleton has no stored value for them.
 DEFAULT_UNREAD_WINDOW_DAYS = 30
 DEFAULT_NOTIFICATION_QUIET_MINUTES = 10
+DEFAULT_OUTBOUND_HOLD_SECONDS = 5
+
+
+def _outbound_hold_seconds() -> int:
+    """Seconds the composer holds an outgoing WABA message before sending it.
+
+    From 1 Oct 2026 Meta bills every business message sent inside the 24-hour
+    service window, not only templates. Agents routinely split one thought
+    across several bubbles, and each bubble is now its own charge, so the
+    composer holds the first message briefly and merges anything typed during
+    that window into a single send.
+
+    Same unset-means-default rule as the fields above: Frappe only applies a
+    field default to new documents, so a singleton that predates this field
+    keeps no value for it. Returning 0 for unset would silently disable the
+    feature everywhere it was never explicitly configured.
+    """
+    seconds = _shared_settings().get("outbound_hold_seconds")
+    seconds = DEFAULT_OUTBOUND_HOLD_SECONDS if seconds is None else cint(seconds)
+    return max(0, seconds)
 
 
 def _unread_floor():
@@ -4465,6 +4485,9 @@ def get_whatsapp_ticket_info(ticket: str | int) -> dict:
 		"assignees": assigned_users,
 		"reply_window_open": window_open,
 		"via_frappe_whatsapp": True,
+		# WABA only: the Evolution (WA Line) path above returns without this,
+		# so the composer never delays a message Meta does not bill for.
+		"outbound_hold_seconds": _outbound_hold_seconds(),
 	}
 
 

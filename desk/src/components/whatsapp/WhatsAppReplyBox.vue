@@ -66,6 +66,44 @@
       </div>
     </div>
 
+    <!--
+      Held outgoing text. There is no optimistic bubble in the thread — it only
+      renders after the send response — so without this strip the agent's own
+      message would simply be missing for the length of the hold and they would
+      retype it.
+    -->
+    <div
+      v-if="heldText"
+      class="mb-2 flex items-stretch overflow-hidden rounded-lg border-l-2 border-amber-400 bg-surface-gray-1"
+    >
+      <div class="min-w-0 flex-1 px-3 py-1.5">
+        <p class="text-xs font-medium text-amber-600">
+          {{ __("Sending in {0}s", [heldSecondsLeft]) }}
+        </p>
+        <!-- line-clamp rather than truncate: merged chunks are multi-line, and
+             truncate's white-space:nowrap would fight whitespace-pre-wrap. -->
+        <p class="line-clamp-2 whitespace-pre-wrap text-xs text-ink-gray-5">{{ heldText }}</p>
+      </div>
+      <button
+        class="shrink-0 px-2 text-xs font-medium text-ink-gray-6 hover:text-ink-gray-9"
+        :title="__('Send now')"
+        @click="flushHeld"
+      >
+        {{ __("Send now") }}
+      </button>
+      <!-- Pulls the text back into the composer rather than dropping it, so the
+           hold doubles as a few seconds of undo on a typo. -->
+      <button
+        class="shrink-0 px-2 text-ink-gray-4 hover:text-ink-gray-7"
+        :title="__('Undo send')"
+        @click="recallHeld"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
     <div
       v-if="!replyWindowOpen"
       class="mb-2 flex items-center gap-1.5 text-xs text-ink-gray-5"
@@ -135,7 +173,7 @@
             ? 'WhatsApp templates'
             : 'Reply window closed — send a template'
         "
-        @click="showTemplates = true"
+        @click="flushHeld(); showTemplates = true"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -230,18 +268,23 @@
 
 <script setup lang="ts">
 import { call, createResource, toast } from "frappe-ui";
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 import SavedReplyIcon from "@/components/icons/SavedReplyIcon.vue";
 import SavedRepliesSelectorModal from "@/components/SavedRepliesSelectorModal.vue";
 import WhatsAppTemplateModal from "@/components/whatsapp/WhatsAppTemplateModal.vue";
+import { OutboundHold } from "@/utils/outboundHold";
 
 const props = withDefaults(
   defineProps<{
     ticketId: string;
     replyTo?: Record<string, any> | null;
     replyWindowOpen?: boolean;
+    // Seconds to hold an outgoing message so chunks merge into one billable
+    // send. Comes from WhatsApp Helpdesk Settings via get_whatsapp_ticket_info.
+    // Defaults to 0 so an API response without the key never adds latency.
+    outboundHoldSeconds?: number;
   }>(),
-  { replyWindowOpen: true }
+  { replyWindowOpen: true, outboundHoldSeconds: 0 }
 );
 
 const emit = defineEmits<{
@@ -356,9 +399,23 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener("click", onDocClick));
+// Best-effort: the browser may cut the request short on unload, but losing a
+// held message this way is far less likely than never attempting to send it.
+function flushBeforeUnload() {
+  outboundHold.flush();
+}
+
+onMounted(() => {
+  document.addEventListener("click", onDocClick);
+  window.addEventListener("beforeunload", flushBeforeUnload);
+});
 onBeforeUnmount(() => {
   document.removeEventListener("click", onDocClick);
+  window.removeEventListener("beforeunload", flushBeforeUnload);
+  // Held text belongs to the customer — send it rather than let it die with
+  // the component when the agent switches ticket.
+  outboundHold.destroy();
+  if (holdTicker !== null) clearInterval(holdTicker);
   for (const url of objectUrls) URL.revokeObjectURL(url);
   objectUrls.clear();
 });
@@ -435,6 +492,82 @@ const sendReply = createResource({
   },
 });
 
+// ── Outbound hold ─────────────────────────────────────────────────────────────
+// Meta bills every business message from 1 Oct 2026, so a reply the agent split
+// across four bubbles is billed four times. Holding the first one briefly and
+// merging whatever follows turns that burst into a single charge.
+
+const heldText = ref("");
+const heldSecondsLeft = ref(0);
+let holdTicker: ReturnType<typeof setInterval> | null = null;
+
+// The most recent held send, so the media path can wait for it and keep the
+// conversation in the order the agent typed it.
+let heldSend: Promise<unknown> | null = null;
+
+const outboundHold = new OutboundHold({
+  holdMs: 0,
+  onFlush({ ticket, message, reply_to_message_id }) {
+    syncHeld();
+    // `ticket` comes from the payload, not props: the agent may already have
+    // moved to another conversation by the time the window closes.
+    heldSend = sendReply.submit({
+      ticket,
+      message,
+      content_type: "text",
+      ...(reply_to_message_id ? { reply_to_message_id } : {}),
+    });
+  },
+});
+
+watch(
+  () => props.outboundHoldSeconds,
+  (s) => outboundHold.setHoldMs(Math.max(0, s || 0) * 1000),
+  { immediate: true }
+);
+
+// If the component is reused across a ticket switch, send what is held rather
+// than leaving it to expire — the payload already carries its own ticket, so
+// this is about getting it out promptly and clearing a strip that would
+// otherwise show the previous conversation's text.
+watch(() => props.ticketId, () => flushHeld());
+
+// Mirrors the buffer into refs and runs the countdown only while it has content.
+function syncHeld() {
+  heldText.value = outboundHold.pending;
+  const deadline = outboundHold.deadline;
+  heldSecondsLeft.value = deadline
+    ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+    : 0;
+
+  if (outboundHold.isHolding && holdTicker === null) {
+    holdTicker = setInterval(syncHeld, 250);
+  } else if (!outboundHold.isHolding && holdTicker !== null) {
+    clearInterval(holdTicker);
+    holdTicker = null;
+  }
+}
+
+function flushHeld() {
+  outboundHold.flush();
+  syncHeld();
+}
+
+// Undo: put the held text back in the composer instead of discarding it.
+function recallHeld() {
+  const recalled = outboundHold.pending;
+  outboundHold.cancel();
+  syncHeld();
+  if (!recalled) return;
+  text.value = text.value ? `${recalled}\n${text.value}` : recalled;
+  autoResize();
+  nextTick(() => textareaRef.value?.focus());
+}
+
+// The parent flushes through this when the customer replies — if they are
+// already waiting on us, there is nothing left to batch.
+defineExpose({ flush: flushHeld });
+
 // Upload+send one attachment via send_wa_media. Caption + reply target ride on
 // the first file only; the rest go out bare, one WhatsApp Message per file.
 async function sendMediaUnit(item: Attachment, caption: string, replyToMsgId: string): Promise<boolean> {
@@ -480,19 +613,34 @@ async function send() {
   emit("sent");
 
   if (items.length === 0) {
-    // Submit without awaiting — errors surface via onError toast
-    sendReply.submit({
-      ticket: props.ticketId,
-      message: caption,
-      content_type: "text",
-      ...(replyToMsgId ? { reply_to_message_id: replyToMsgId } : {}),
-    });
+    // Goes through the hold, which submits it once the window closes (or
+    // immediately when the hold is configured to 0). Errors surface via
+    // onError toast, as before.
+    outboundHold.append(caption, props.ticketId, replyToMsgId);
+    syncHeld();
     return;
   }
+
+  // Media takes its own upload path, so anything still held has to go out
+  // ahead of it or the conversation reads out of order. Issuing the text send
+  // first is not enough — the two requests would be in flight together and
+  // could be stored in either order, so wait for it to land.
+  flushHeld();
 
   sending.value = true;
   let anyStored = false;
   try {
+    if (heldSend) {
+      // `await` tolerates a non-thenable, so this holds whatever submit()
+      // returns. A failed text send has already toasted; the attachment
+      // still goes out.
+      try {
+        await heldSend;
+      } catch {
+        // handled by sendReply.onError
+      }
+      heldSend = null;
+    }
     for (let i = 0; i < items.length; i++) {
       const ok = await sendMediaUnit(items[i], i === 0 ? caption : "", i === 0 ? replyToMsgId : "");
       if (!ok) break;
