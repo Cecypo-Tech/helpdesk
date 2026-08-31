@@ -34,11 +34,15 @@ This is a **fork** of `frappe/helpdesk` with a WhatsApp integration added. See `
 ### Key API paths (frontend → backend)
 All WhatsApp APIs: `helpdesk.integrations.wa.<function>`
 
-### Keeping in sync with upstream
+### Pulling the latest develop
+
+`upstream` and `origin` both point at `Cecypo-Tech/helpdesk` — this fork is the
+only remote. There is no `frappe/helpdesk` remote and no merge from it; the fork
+diverged deliberately and stays that way.
+
 ```bash
 git fetch upstream
 git merge upstream/develop
-# resolve conflicts in the modified files above
 bench build --app helpdesk
 ```
 
