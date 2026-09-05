@@ -73,6 +73,8 @@ import { createResource, LoadingIndicator } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
+import { applyEventToConversationList, type WaMessageEvent } from "@/utils/waRealtime";
+import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import WhatsAppConversationItem from "./WhatsAppConversationItem.vue";
 
 const props = defineProps<{ selectedPhone: string | null }>();
@@ -178,19 +180,39 @@ function loadMore() {
   if (hasMore.value && !loadingMore.value) fetchPage({ append: true });
 }
 
-function onWhatsAppMessage() {
-  mergeFirstPage();
+// Ticket status, assignee and company on a row come from the ticket, which an
+// incoming message can create or reopen. The event cannot carry that, so the
+// linked ("ingest") event also schedules one reconciling refetch per burst.
+const reconcileDebounced = useDebounceFn(mergeFirstPage, 1500);
+
+function onWhatsAppMessage(ev: WaMessageEvent) {
+  // The event carries the row, so the list moves it in place. A refetch is
+  // only needed when the phone is not loaded (new conversation, or one on a
+  // page the agent never opened) or for the legacy event shape.
+  const { list, handled } = applyEventToConversationList(loadedList.value, ev);
+  if (!handled) {
+    mergeFirstPage();
+    return;
+  }
+  loadedList.value = list;
+  if (ev.origin === "ingest") reconcileDebounced();
 }
+
+let resync: ResyncHandle | null = null;
 
 onMounted(() => {
   reloadList();
   const { $socket } = globalStore();
   $socket.on("helpdesk:whatsapp-message", onWhatsAppMessage);
+  // Events missed while the socket was down or the tab was hidden are gone;
+  // the first page is the cheapest thing that puts the list right again.
+  resync = watchResync($socket, mergeFirstPage);
 });
 
 onBeforeUnmount(() => {
   const { $socket } = globalStore();
   $socket.off("helpdesk:whatsapp-message", onWhatsAppMessage);
+  resync?.dispose();
 });
 
 watch(activeFilter, reloadList);

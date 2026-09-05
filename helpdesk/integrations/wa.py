@@ -532,11 +532,52 @@ def get_contact_phone(ticket: str) -> str | None:
     return result[0][0] if result else None
 
 
-def _publish_fw_message(ticket_name: str, is_incoming: bool, immediate: bool = False) -> None:
-    """Publish realtime event for a frappe_whatsapp message linked to a ticket.
+def _fw_event_payload(doc, ticket_name, is_incoming: bool, origin: str) -> dict:
+    """What a client needs to apply one WhatsApp Message without refetching.
 
-    The client reloads the thread on this event, so the row must be committed
-    before it fires.
+    The conversation list keys on `phone` and updates its row in place; the
+    thread keys on `ticket` (or `phone` on the Business page) and appends the
+    bubble, so `message` is the whole text, not a preview. `origin` says which
+    stage emitted it: "insert" fires for every stored row the moment it lands,
+    "ingest" fires from the job once a ticket link exists. A client hears both
+    for an incoming message and dedupes on `name`.
+    """
+    sender_full_name = ""
+    if not is_incoming and doc.get("owner"):
+        sender_full_name = frappe.db.get_value("User", doc.owner, "full_name") or ""
+    return {
+        "ticket": str(ticket_name or ""),
+        "is_incoming": is_incoming,
+        "origin": origin,
+        "phone": _wa_message_phone(doc),
+        "name": doc.name,
+        "type": doc.get("type") or ("Incoming" if is_incoming else "Outgoing"),
+        "content_type": doc.get("content_type") or "text",
+        "message": doc.get("message") or "",
+        "attach": doc.get("attach") or "",
+        "status": doc.get("status") or "",
+        "creation": str(doc.get("creation") or now_datetime()),
+        "profile_name": doc.get("profile_name") or "",
+        "message_id": doc.get("message_id") or "",
+        "reply_to_message_id": doc.get("reply_to_message_id") or "",
+        "is_reply": cint(doc.get("is_reply")),
+        "sender_full_name": sender_full_name,
+    }
+
+
+def _publish_fw_message(
+    ticket_name: str | None,
+    is_incoming: bool,
+    immediate: bool = False,
+    doc=None,
+    origin: str = "ingest",
+) -> None:
+    """Publish realtime event for a frappe_whatsapp message.
+
+    With `doc` the event carries the row itself (see _fw_event_payload) so the
+    client can update in place; without it the legacy `{ticket, is_incoming}`
+    shape goes out and the client refetches. The row must be committed before
+    it fires either way.
 
     From a doc event (`immediate=False`) that means after_commit: forcing a
     commit there would put a durability barrier inside Meta's webhook request,
@@ -554,9 +595,13 @@ def _publish_fw_message(ticket_name: str, is_incoming: bool, immediate: bool = F
         # nosemgrep: frappe-manual-commit -- job context, not a doc event; the
         # client refetches on this event and must not race the write.
         frappe.db.commit()
+    if doc is not None:
+        message = _fw_event_payload(doc, ticket_name, is_incoming, origin)
+    else:
+        message = {"ticket": str(ticket_name or ""), "is_incoming": is_incoming}
     frappe.publish_realtime(
         "helpdesk:whatsapp-message",
-        message={"ticket": str(ticket_name), "is_incoming": is_incoming},
+        message=message,
         after_commit=not immediate,
     )
 
@@ -3490,7 +3535,9 @@ def get_whatsapp_conversations(
 
 	# ROW_NUMBER picks each phone's newest message, so the filters above apply to
 	# the row the agent actually sees. limit + 1 decides has_more without a
-	# second COUNT over the same grouping.
+	# second COUNT over the same grouping. Reactions are left out of the
+	# ranking: a thumbs-up is not the last thing said, and as an Incoming row it
+	# used to flag the conversation unread and awaiting a reply.
 	rows = frappe.db.sql(
 		f"""
 		SELECT phone, `type`, message, content_type, creation, profile_name
@@ -3502,6 +3549,7 @@ def get_whatsapp_conversations(
 					PARTITION BY {phone_expr} ORDER BY creation DESC, name DESC
 				) AS rn
 			FROM `tabWhatsApp Message`
+			WHERE IFNULL(content_type, '') != 'reaction'
 		) t
 		WHERE {' AND '.join(clauses)}
 		ORDER BY creation DESC
@@ -4056,20 +4104,29 @@ def on_whatsapp_message_insert(doc, method=None):
 		frappe.db.delete("WhatsApp Message", {"name": doc.name})
 		return
 
+	is_incoming = doc.type == "Incoming"
+	linked_ticket = doc.reference_name if doc.reference_doctype == "HD Ticket" else None
+
+	# Every stored row is announced here, linked or not, integration enabled or
+	# not. The conversation list keys on phone number rather than ticket, and it
+	# used to hear only about ticket-linked messages: an unknown number under
+	# "Skip Ticket Creation", anything while the integration was off, an
+	# outgoing row without a ticket -- all landed in the table and left the list
+	# showing the previous message. after_commit, so the client's row exists.
+	_publish_fw_message(linked_ticket, is_incoming=is_incoming, doc=doc, origin="insert")
+
 	s = _fw_settings()
 	if not s or not s.enabled:
 		return
 
-	# Outgoing: link to ticket and update status
-	if doc.type != "Incoming":
-		if doc.reference_doctype == "HD Ticket" and doc.reference_name:
+	# Outgoing: the status move. The thread already heard about the row above.
+	if not is_incoming:
+		if linked_ticket:
 			# A system send (see _send_fw_reply's `system` flag) is transport
 			# only: an automated housekeeping question must not move a
-			# brand-new ticket out of the agents' Open queue. The realtime
-			# publish still runs -- agents should see it in the thread.
+			# brand-new ticket out of the agents' Open queue.
 			if s.agent_reply_status and not doc.flags.get(_WA_SYSTEM_FLAG):
-				_set_ticket_status(doc.reference_name, s.agent_reply_status)
-			_publish_fw_message(doc.reference_name, is_incoming=False)
+				_set_ticket_status(linked_ticket, s.agent_reply_status)
 		return
 
 	# Everything an inbound message needs — contact resolution, ticket creation,
@@ -4105,7 +4162,9 @@ def _announce_incoming(doc, ticket_name, profile_name: str, s) -> None:
 	for step, run in (
 		("status", lambda: s.customer_reply_status and _set_ticket_status(ticket_name, s.customer_reply_status)),
 		("notification", lambda: _notify_fw_agents(ticket_name, doc.message, profile_name)),
-		("realtime", lambda: _publish_fw_message(ticket_name, is_incoming=True, immediate=True)),
+		("realtime", lambda: _publish_fw_message(
+			ticket_name, is_incoming=True, immediate=True, doc=doc, origin="ingest"
+		)),
 	):
 		try:
 			run()
@@ -4161,6 +4220,22 @@ def link_incoming_message(doc, s=None) -> None:
 		if prev:
 			prev_contact, prev_customer = prev.contact, prev.customer
 
+	# Reuse that ticket only while it is still live. A resolved or closed one
+	# starts a fresh ticket, but its contact/customer carry over (see above).
+	existing_ticket = None
+	if prev_ticket:
+		status_category = frappe.db.get_value("HD Ticket", prev_ticket, "status_category")
+		if status_category and status_category != "Resolved":
+			timeout = int(s.new_conversation_timeout_hours or 24)
+			if time_diff_in_hours(now_datetime(), linked[0].creation) < timeout:
+				existing_ticket = prev_ticket
+
+	# A reaction is a thumbs-up on something already said, not a new request.
+	# It rides along on the live ticket it belongs to; with none, it is left
+	# unlinked rather than opening a ticket (and a contact) of its own.
+	if (doc.get("content_type") or "") == "reaction" and not existing_ticket:
+		return
+
 	contact_name = prev_contact or match_phone_to_contact(phone)
 
 	if not contact_name:
@@ -4185,16 +4260,6 @@ def link_incoming_message(doc, s=None) -> None:
 		email = frappe.db.get_value("Contact", contact_name, "email_id") or f"whatsapp+{phone}@{placeholder_domain}"
 	else:
 		email = f"whatsapp+{phone}@{placeholder_domain}"
-
-	# Reuse that ticket only while it is still live. A resolved or closed one
-	# starts a fresh ticket, but its contact/customer carry over (see above).
-	existing_ticket = None
-	if prev_ticket:
-		status_category = frappe.db.get_value("HD Ticket", prev_ticket, "status_category")
-		if status_category and status_category != "Resolved":
-			timeout = int(s.new_conversation_timeout_hours or 24)
-			if time_diff_in_hours(now_datetime(), linked[0].creation) < timeout:
-				existing_ticket = prev_ticket
 
 	if existing_ticket:
 		doc.db_set("reference_doctype", "HD Ticket", update_modified=False)

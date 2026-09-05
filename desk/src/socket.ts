@@ -17,7 +17,13 @@ export function initSocket() {
 
   const socket = io(url, {
     withCredentials: true,
-    reconnectionAttempts: 5,
+    // Never give up. With a finite cap a laptop that slept or a tunnel that
+    // blipped left the desk permanently deaf: no new messages, no list
+    // updates, until a hard refresh. Backoff is capped so recovery is prompt;
+    // utils/socketResync refetches once the socket is back.
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelayMax: 10000,
   });
 
   return socket;

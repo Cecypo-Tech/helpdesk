@@ -51,6 +51,7 @@ import WhatsAppBusinessChat from "@/components/whatsapp/WhatsAppBusinessChat.vue
 import TicketSidebar from "@/components/ticket-agent/TicketSidebar.vue";
 import { useTicket } from "@/composables/useTicket";
 import { globalStore } from "@/stores/globalStore";
+import { hasRow, type WaMessageEvent } from "@/utils/waRealtime";
 import {
   ActivitiesSymbol,
   AssigneeSymbol,
@@ -155,9 +156,15 @@ function onDocumentMouseUp() {
   onMouseUp();
 }
 
-function handleWhatsAppMessage() {
+function handleWhatsAppMessage(ev: WaMessageEvent) {
   // A new/updated ticket for the selected phone may have flipped which
   // ticket is "active" (e.g. the previous one just resolved).
+  if (hasRow(ev)) {
+    if (ev.phone !== selectedPhone.value) return;
+    // An incoming row is announced before it has a ticket; the link arrives
+    // with the "ingest" event, so that is the one worth re-resolving on.
+    if (ev.is_incoming && ev.origin === "insert") return;
+  }
   reloadActiveTicket();
 }
 

@@ -116,7 +116,10 @@
 <script setup lang="ts">
 import { call, createResource, Dropdown, LoadingIndicator, toast } from "frappe-ui";
 import { computed, h, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
+import { hasRow, upsertMessage, type WaMessageEvent } from "@/utils/waRealtime";
+import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import { foldReactions } from "@/utils/waReactions";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
 import { TicketSymbol } from "@/types";
@@ -328,19 +331,34 @@ function scrollToMessage(messageId: string) {
   setTimeout(() => { el.style.background = ""; }, 1200);
 }
 
-function handleRealtimeMessage() {
-  // frappe_whatsapp events only carry a ticket name, not a phone number, so
-  // there's no cheap client-side way to filter to "does this belong to the
-  // currently open phone conversation" — just re-resolve when one is open.
-  if (props.phone) mergeLatest();
+// One reconciling refetch per burst: the event is applied directly, this
+// catches what it cannot carry (media attached after the row was stored).
+const reconcileDebounced = useDebounceFn(() => mergeLatest(), 2000);
+
+function handleRealtimeMessage(data: WaMessageEvent) {
+  if (!props.phone) return;
+  if (!hasRow(data)) {
+    // Legacy shape without a phone: nothing to filter on, re-resolve.
+    mergeLatest();
+    return;
+  }
+  if (data.phone !== props.phone) return;
+  const wasNearBottom = isNearBottom();
+  loadedMessages.value = upsertMessage(loadedMessages.value, data);
+  if (wasNearBottom || data.type === "Outgoing") scrollToBottom();
+  reconcileDebounced();
 }
+
+let resync: ResyncHandle | null = null;
 
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
+  resync = watchResync($socket, () => mergeLatest());
 });
 
 onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
+  resync?.dispose();
 });
 
 defineExpose({ scrollToBottom, refresh: loadInitial });

@@ -133,6 +133,22 @@ class TestWAConversationPage(FrappeTestCase):
 		listed = self._phones_in(wa.get_whatsapp_conversations(limit=200))
 		self.assertEqual(listed.count(phone), 1)
 
+	def test_a_reaction_is_not_the_last_message(self):
+		phone = self.phones[0]
+		self._message(phone, direction="Outgoing", message=f"sorted {self.tag}")
+		self._message(phone, direction="Incoming", message="👍")
+		frappe.db.set_value(
+			"WhatsApp Message",
+			{"message": "👍", "from": phone},
+			{"content_type": "reaction", "reply_to_message_id": "wamid.x"},
+		)
+		conv = next(
+			c for c in wa.get_whatsapp_conversations(limit=200)["conversations"]
+			if c["phone"] == phone
+		)
+		self.assertEqual(conv["last_message"], f"sorted {self.tag}")
+		self.assertEqual(conv["last_direction"], "Outgoing")
+
 	# ── filters ───────────────────────────────────────────────────────────
 
 	def test_awaiting_filter_returns_only_incoming_last_messages(self):

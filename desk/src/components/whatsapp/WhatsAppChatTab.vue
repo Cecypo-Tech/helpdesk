@@ -88,6 +88,8 @@ import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
+import { hasRow, upsertMessage, type WaMessageEvent } from "@/utils/waRealtime";
+import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
 import WhatsAppReplyBox from "./WhatsAppReplyBox.vue";
@@ -262,16 +264,34 @@ function onMessageDelivered() {
   scrollToBottom();
 }
 
-function handleRealtimeMessage(data: { ticket: string; is_incoming: boolean }) {
-  if (String(data.ticket) === String(props.ticketId)) {
-    // The customer is waiting on us now, so stop batching and get whatever the
-    // agent has already sent out ahead of the refetch.
-    if (data.is_incoming) replyBox.value?.flush();
+// One reconciling refetch per burst of events. The event carries the row and
+// the thread applies it directly; this catches anything the event cannot
+// know (media attached after the row was stored, the reply window reopening,
+// an assignment) without a full refetch per message.
+const reconcileDebounced = useDebounceFn(() => {
+  messages.reload();
+  ticketInfo.reload();
+}, 2000);
+
+function handleRealtimeMessage(data: WaMessageEvent) {
+  if (String(data.ticket) !== String(props.ticketId)) return;
+  // The customer is waiting on us now, so stop batching and get whatever the
+  // agent has already sent out ahead of the refetch.
+  if (data.is_incoming) replyBox.value?.flush();
+  if (hasRow(data) && messages.data) {
+    messages.data = upsertMessage(messages.data, data);
+  } else {
     messages.reload();
     ticketInfo.reload();
-    scrollToBottom();
-    markAsReadDebounced();
   }
+  reconcileDebounced();
+  scrollToBottom();
+  markAsReadDebounced();
+}
+
+function resyncThread() {
+  messages.reload();
+  ticketInfo.reload();
 }
 
 function handleStatusUpdate(data: { ticket: string; message_name: string; status: string }) {
@@ -313,10 +333,13 @@ watch(() => ticketInfo.data, (info) => {
   }
 });
 
+let resync: ResyncHandle | null = null;
+
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
   $socket.on("helpdesk:whatsapp-status-update", handleStatusUpdate);
   $socket.on("helpdesk:whatsapp-message-edit", handleMessageEdit);
+  resync = watchResync($socket, resyncThread);
   scrollToBottom();
   markAsRead();
 });
@@ -325,6 +348,7 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
   $socket.off("helpdesk:whatsapp-status-update", handleStatusUpdate);
   $socket.off("helpdesk:whatsapp-message-edit", handleMessageEdit);
+  resync?.dispose();
 });
 
 defineExpose({ scrollToBottom });
