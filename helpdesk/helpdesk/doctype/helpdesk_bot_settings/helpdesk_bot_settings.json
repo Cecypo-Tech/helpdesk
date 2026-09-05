@@ -10,6 +10,7 @@
   "gemini_api_key",
   "col_break_api",
   "anthropic_api_key",
+  "llm_timeout_seconds",
   "behavior_section",
   "conversation_mode",
   "max_bot_replies",
@@ -63,6 +64,13 @@
    "fieldname": "anthropic_api_key",
    "fieldtype": "Password",
    "label": "Anthropic API Key"
+  },
+  {
+   "default": "30",
+   "description": "Upper bound for one model or embedding call. Past it the bot escalates to a human instead of keeping a worker busy.",
+   "fieldname": "llm_timeout_seconds",
+   "fieldtype": "Int",
+   "label": "Request Timeout (Seconds)"
   },
   {
    "fieldname": "behavior_section",

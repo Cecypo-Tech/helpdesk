@@ -30,6 +30,8 @@ def embed(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
 	"""
 	import google.generativeai as genai
 
+	from helpdesk.integrations.llm import gemini_request_options
+
 	settings = _settings()
 	genai.configure(api_key=settings.get_password("gemini_api_key"))
 	result = genai.embed_content(
@@ -37,6 +39,7 @@ def embed(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
 		content=text,
 		task_type=task_type,
 		output_dimensionality=_EMBED_DIMS,
+		request_options=gemini_request_options(),
 	)
 	return result["embedding"]
 

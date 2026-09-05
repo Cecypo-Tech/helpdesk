@@ -247,6 +247,74 @@ class TestEscalation(unittest.TestCase):
 			)
 
 
+class TestGapTrackingIsDeferred(unittest.TestCase):
+	def test_gap_suggestion_runs_in_its_own_job_after_the_reply(self):
+		"""The gap LLM call used to run inline before the customer got an
+		answer, doubling the wait for exactly the questions the KB could not
+		cover. It is bookkeeping; it goes to a job."""
+		from unittest.mock import patch
+
+		from helpdesk.integrations.bot import _schedule_kb_gap
+
+		with patch("frappe.enqueue") as mock_enqueue:
+			_schedule_kb_gap("TKT-1", "WABA", "how do I export my data")
+		mock_enqueue.assert_called_once()
+		self.assertEqual(
+			mock_enqueue.call_args.args[0], "helpdesk.integrations.bot.record_kb_gap"
+		)
+		self.assertEqual(mock_enqueue.call_args.kwargs.get("queue"), "default")
+		self.assertEqual(mock_enqueue.call_args.kwargs.get("text"), "how do I export my data")
+
+
+class TestConversationHistory(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		if not frappe.db.exists("DocType", "WhatsApp Message"):
+			raise unittest.SkipTest("frappe_whatsapp is not installed")
+		cls.ticket = frappe.get_doc({
+			"doctype": "HD Ticket",
+			"subject": "Bot history test",
+			"raised_by": "Administrator",
+		}).insert(ignore_permissions=True)
+		cls.names = []
+		from unittest.mock import patch
+
+		def add(content_type, message, message_type="Incoming"):
+			with patch("frappe.enqueue"):
+				doc = frappe.get_doc({
+					"doctype": "WhatsApp Message",
+					"type": message_type,
+					"from": "254700000777",
+					"message": message,
+					"content_type": content_type,
+					"message_id": f"wamid.hist.{frappe.generate_hash(length=8)}",
+					"reference_doctype": "HD Ticket",
+					"reference_name": cls.ticket.name,
+				}).insert(ignore_permissions=True)
+			cls.names.append(doc.name)
+
+		add("text", "my printer is broken")
+		add("reaction", "👍")
+		add("button", "btn_yes")
+		add("text", "still broken")
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		for name in cls.names:
+			frappe.delete_doc("WhatsApp Message", name, ignore_permissions=True, force=True)
+		frappe.delete_doc("HD Ticket", cls.ticket.name, ignore_permissions=True, force=True)
+		frappe.db.commit()
+
+	def test_reactions_and_button_ids_are_not_turns(self):
+		from helpdesk.integrations.bot import _get_conversation_history
+
+		history = _get_conversation_history(self.ticket.name, "waba")
+		self.assertEqual(
+			[h["content"] for h in history], ["my printer is broken", "still broken"]
+		)
+
+
 class TestDocEventHandlers(unittest.TestCase):
 	def test_handle_wa_message_skips_outgoing(self):
 		from unittest.mock import patch

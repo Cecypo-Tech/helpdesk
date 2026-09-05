@@ -2712,8 +2712,12 @@ def _wa_account_for_message(account_name: str | None):
         return None
 
 
-def _post_wa_read_receipt(message_id: str, account) -> tuple[bool, str]:
+def _post_wa_read_receipt(message_id: str, account, typing: bool = False) -> tuple[bool, str]:
     r"""POST a read receipt to Meta. Returns (ok, error) with the real failure detail.
+
+    `typing=True` adds Meta's typing indicator to the same call: the customer
+    sees "typing…" until a reply lands or about 25 seconds pass. Used by the
+    bot ahead of its searches and model call.
 
     We own this call rather than delegating to frappe_whatsapp's
     WhatsAppMessage.send_read_receipt(): that method swallows the exception and
@@ -2721,6 +2725,9 @@ def _post_wa_read_receipt(message_id: str, account) -> tuple[bool, str]:
     reads "None\n{}" and tells us nothing. It also lives in a vendored app whose
     only remote is upstream, so patches to it cannot be deployed from here.
     """
+    payload: dict = {"messaging_product": "whatsapp", "status": "read", "message_id": message_id}
+    if typing:
+        payload["typing_indicator"] = {"type": "text"}
     try:
         resp = _requests.post(
             f"{account.url}/{account.version}/{account.phone_id}/messages",
@@ -2728,7 +2735,7 @@ def _post_wa_read_receipt(message_id: str, account) -> tuple[bool, str]:
                 "authorization": f"Bearer {account.get_password('token')}",
                 "content-type": "application/json",
             },
-            json={"messaging_product": "whatsapp", "status": "read", "message_id": message_id},
+            json=payload,
             timeout=10,
         )
         resp.raise_for_status()
@@ -2754,9 +2761,33 @@ def _settle_wa_read_receipt(name: str) -> None:
     )
 
 
+def send_wa_typing_indicator(doc) -> bool:
+    """Show the customer "typing…" for one incoming WABA message, best effort.
+
+    Rides on a read receipt (one POST). The row is deliberately not settled as
+    read locally: the agent has not seen it, and their unread badge must still
+    say so. When they open the thread the receipt goes out again, which Meta
+    accepts. Silent on every failure -- nothing the customer would miss.
+    """
+    message_id = doc.get("message_id")
+    if not message_id:
+        return False
+    account = _wa_account_for_message(doc.get("whatsapp_account"))
+    if not account or not account.allow_auto_read_receipt:
+        return False
+    ok, _ = _post_wa_read_receipt(message_id, account, typing=True)
+    return ok
+
+
 @frappe.whitelist()
 def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
-    """Mark all unread incoming messages as read (Baileys or frappe_whatsapp)."""
+    """Mark all unread incoming messages as read (Baileys or frappe_whatsapp).
+
+    The WABA receipts go to Meta from a job. This is called from the chat tab
+    on mount and on every incoming message, and posting from inside that
+    request -- ten seconds per message, worst case -- made opening a
+    conversation wait on Meta. Returns how many rows were handed off.
+    """
     if not jid and ticket:
         try:
             jid = frappe.db.get_value("HD Ticket", ticket, "baileys_jid")
@@ -2774,7 +2805,29 @@ def mark_wa_messages_read(jid: str = "", ticket: str | int = "") -> int:
     if not ticket or not frappe.db.exists("DocType", "WhatsApp Message"):
         return 0
 
-    # frappe_whatsapp path: send read receipts
+    pending = frappe.db.count(
+        "WhatsApp Message",
+        {
+            "reference_doctype": "HD Ticket",
+            "reference_name": ticket,
+            "type": "Incoming",
+            "status": ["!=", "marked as read"],
+        },
+    )
+    if not pending:
+        return 0
+    frappe.enqueue(
+        "helpdesk.integrations.wa._send_wa_read_receipts",
+        queue="default",
+        job_id=f"wa_read_receipts_{ticket}",
+        deduplicate=True,
+        ticket=ticket,
+    )
+    return pending
+
+
+def _send_wa_read_receipts(ticket: str | int) -> int:
+    """Job body for mark_wa_messages_read on the WABA path: the receipts themselves."""
     count = 0
     unread_fw = frappe.get_all(
         "WhatsApp Message",

@@ -1,5 +1,6 @@
 import importlib
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 import frappe
@@ -61,3 +62,61 @@ class TestLLMRouting(unittest.TestCase):
 			llm.chat([{"role": "user", "content": "what is this?"}], images=[fake_image])
 			args, kwargs = mock_gemini.call_args
 			self.assertEqual(args[1], [fake_image])
+
+
+class TestLLMTimeouts(unittest.TestCase):
+	"""Every model call is bounded. The bot runs in a worker, and an unbounded
+	call (the Anthropic SDK defaults to ten minutes) parks that worker for as
+	long as the provider feels like taking."""
+
+	@classmethod
+	def setUpClass(cls):
+		settings = frappe.get_single("Helpdesk Bot Settings")
+		settings.gemini_api_key = "test-gemini-key"
+		settings.anthropic_api_key = "test-anthropic-key"
+		settings.save(ignore_permissions=True)
+
+	def _reload(self):
+		frappe.clear_cache()
+		from helpdesk.integrations import llm
+		importlib.reload(llm)
+		return llm
+
+	def test_timeout_defaults_to_thirty_seconds(self):
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_timeout_seconds", 0)
+		llm = self._reload()
+		self.assertEqual(llm.request_timeout(), 30)
+
+	def test_timeout_is_read_from_settings(self):
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_timeout_seconds", 12)
+		llm = self._reload()
+		self.assertEqual(llm.request_timeout(), 12)
+
+	def test_anthropic_client_is_bounded_and_uses_the_current_model_id(self):
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_timeout_seconds", 12)
+		llm = self._reload()
+		import anthropic
+
+		fake_client = unittest.mock.MagicMock()
+		fake_client.messages.create.return_value.content = [unittest.mock.MagicMock(text=" hi ")]
+		with patch.object(anthropic, "Anthropic", return_value=fake_client) as ctor:
+			reply = llm._haiku([{"role": "user", "content": "hello"}], None, llm._settings())
+		self.assertEqual(reply, "hi")
+		self.assertEqual(ctor.call_args.kwargs.get("timeout"), 12)
+		self.assertEqual(ctor.call_args.kwargs.get("max_retries"), 2)
+		self.assertEqual(fake_client.messages.create.call_args.kwargs["model"], "claude-haiku-4-5")
+
+	def test_gemini_call_is_bounded(self):
+		frappe.db.set_single_value("Helpdesk Bot Settings", "llm_timeout_seconds", 12)
+		llm = self._reload()
+		import google.generativeai as genai
+
+		fake_model = unittest.mock.MagicMock()
+		fake_model.generate_content.return_value.text = " hi "
+		with patch.object(genai, "configure"), patch.object(
+			genai, "GenerativeModel", return_value=fake_model
+		):
+			reply = llm._gemini([{"role": "user", "content": "hello"}], None, llm._settings())
+		self.assertEqual(reply, "hi")
+		opts = fake_model.generate_content.call_args.kwargs.get("request_options")
+		self.assertEqual(opts, {"timeout": 12})

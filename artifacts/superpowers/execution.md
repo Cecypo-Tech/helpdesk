@@ -32,3 +32,12 @@ Plan: artifacts/superpowers/plan.md
 - Files: `helpdesk/integrations/wa.py` (`_waba_search_phones` also matches the ticket's customer, `Contact.company_name`, and contacts linked to an HD Customer), `desk/src/components/whatsapp/WhatsAppConversationList.vue` (placeholder), `helpdesk/tests/test_wa_conversation_page.py` (2 new tests, failed first, pass after).
 - Verify: `bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_wa_conversation_page` → 16 tests OK.
 
+## Phase 5 — Bot hygiene
+
+- `helpdesk/integrations/llm.py`: `request_timeout()` from the new `llm_timeout_seconds` setting (default 30 s), Anthropic client built with `timeout` + `max_retries=2`, Gemini calls carry `request_options={"timeout": …}`, model id `claude-haiku-4-5`; `embeddings.embed` bounded the same way.
+- `helpdesk_bot_settings.json`: `llm_timeout_seconds` (Int, default 30). `helpdesk_bot_settings.py`: `test_connection` uses the shared client/model constants (the "Gemini Flash 2.0" fallback matched no branch).
+- `helpdesk/integrations/bot.py`: gap suggestion runs in its own job (`record_kb_gap`, queue `default`) after the reply; reactions and button rows no longer feed the model as turns; a read receipt + typing indicator goes out before the searches and model call on WABA.
+- `helpdesk/integrations/wa.py`: `_post_wa_read_receipt(typing=)`, `send_wa_typing_indicator`, and `mark_wa_messages_read` now hands the receipts to `_send_wa_read_receipts` (job, deduplicated per ticket) instead of posting to Meta inside the agent's request.
+- Tests (written first, failed, then pass): test_llm (7), test_bot (27), test_wa_read_receipt (13). Existing receipt tests now call the job body directly.
+- `bench --site dev.localhost reload-doc helpdesk doctype helpdesk_bot_settings` run so the field exists on this site; other sites pick it up on `bench migrate`.
+
