@@ -162,16 +162,22 @@ export const useNotificationStore = defineStore("notification", () => {
     resource.reload();
   });
 
-  $socket.on("helpdesk:whatsapp-message", (data: { is_incoming: boolean }) => {
+  $socket.on("helpdesk:whatsapp-message", (data: { is_incoming: boolean; origin?: string }) => {
     if (isCustomerPortal.value) return;
-    if (data.is_incoming) {
-      resource.reload();
+    if (!data.is_incoming) return;
+    // An incoming message is announced twice: "insert" the moment it is
+    // stored, "ingest" once the job has linked it and written the
+    // HD Notification. Sound on the first (it is the fast one), bell reload on
+    // the second (that is when there is something to show). An event without
+    // an origin is the legacy shape and gets both.
+    if (data.origin !== "ingest") {
       try {
         const audio = new Audio("/assets/frappe/sounds/alert.mp3");
         audio.volume = 0.4;
         audio.play();
       } catch (_) {}
     }
+    if (data.origin !== "insert") resource.reload();
   });
 
   $socket.on("helpdesk:baileys-notification", (data: { jid: string; message: string; sender: string }) => {

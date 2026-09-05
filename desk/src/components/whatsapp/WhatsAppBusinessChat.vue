@@ -88,9 +88,11 @@
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="false"
             :mentionMap="{}"
+            :allowRetry="!!msg._optimistic && msg.status === 'Failed'"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
+            @retry="retryOptimistic"
           />
         </template>
       </div>
@@ -99,10 +101,14 @@
     <!-- Reply box -->
     <WhatsAppReplyBox
       v-if="activeTicketId"
+      ref="replyBox"
       :ticketId="activeTicketId"
       :replyTo="replyingTo"
       @sent="onMessageSent"
       @clearReply="replyingTo = null"
+      @optimistic="addOptimistic"
+      @optimistic-resolve="resolveOptimistic"
+      @optimistic-remove="removeOptimistic"
     />
     <div
       v-else-if="!activeTicketLoading"
@@ -116,7 +122,19 @@
 <script setup lang="ts">
 import { call, createResource, Dropdown, LoadingIndicator, toast } from "frappe-ui";
 import { computed, h, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
+import { hasRow, upsertMessage, type WaMessageEvent } from "@/utils/waRealtime";
+import {
+  applyResolve,
+  markRetrying,
+  mergeThread,
+  removePending,
+  upsertPending,
+  type PendingBubble,
+  type ResolvePayload,
+} from "@/utils/waOptimistic";
+import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import { foldReactions } from "@/utils/waReactions";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
 import { TicketSymbol } from "@/types";
@@ -146,6 +164,9 @@ const replyingTo = ref<Record<string, any> | null>(null);
 
 // Loaded messages accumulate as older pages are fetched — oldest to newest.
 const loadedMessages = ref<Record<string, any>[]>([]);
+// Pending bubbles from the composer, kept apart so a merge cannot drop them.
+const pending = ref<PendingBubble[]>([]);
+const replyBox = ref<{ flush: () => void; retry: (name: string) => void } | null>(null);
 const hasMore = ref(false);
 const initialLoading = ref(false);
 const loadingOlder = ref(false);
@@ -177,6 +198,7 @@ function isNearBottom(): boolean {
 
 async function loadInitial() {
   loadedMessages.value = [];
+  pending.value = [];
   hasMore.value = false;
   if (!props.phone) return;
   initialLoading.value = true;
@@ -254,8 +276,10 @@ const sendReactionResource = createResource({
   },
 });
 
-// All currently-loaded messages (including reactions)
-const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
+// All currently-loaded messages (including reactions), plus whatever is pending
+const allMessages = computed<Record<string, any>[]>(() =>
+  mergeThread(loadedMessages.value, pending.value)
+);
 
 // Main message list — reactions are displayed as badges on bubbles, not as standalone items
 const messageList = computed(() =>
@@ -297,8 +321,29 @@ function scrollToBottom() {
 }
 
 function onMessageSent() {
+  // The bubble is already in the thread; the stored row arrives by event.
   replyingTo.value = null;
-  mergeLatest(true);
+}
+
+// ── Optimistic send ─────────────────────────────────────────────────────────
+function addOptimistic(bubble: PendingBubble) {
+  pending.value = upsertPending(pending.value, bubble);
+  scrollToBottom();
+}
+
+function resolveOptimistic(payload: ResolvePayload) {
+  const result = applyResolve(loadedMessages.value, pending.value, payload);
+  pending.value = result.pending;
+  if (result.base !== loadedMessages.value) loadedMessages.value = result.base;
+}
+
+function removeOptimistic(name: string) {
+  pending.value = removePending(pending.value, name);
+}
+
+function retryOptimistic(name: string) {
+  pending.value = markRetrying(pending.value, name);
+  replyBox.value?.retry(name);
 }
 
 function startReply(message: Record<string, any>) {
@@ -328,19 +373,34 @@ function scrollToMessage(messageId: string) {
   setTimeout(() => { el.style.background = ""; }, 1200);
 }
 
-function handleRealtimeMessage() {
-  // frappe_whatsapp events only carry a ticket name, not a phone number, so
-  // there's no cheap client-side way to filter to "does this belong to the
-  // currently open phone conversation" — just re-resolve when one is open.
-  if (props.phone) mergeLatest();
+// One reconciling refetch per burst: the event is applied directly, this
+// catches what it cannot carry (media attached after the row was stored).
+const reconcileDebounced = useDebounceFn(() => mergeLatest(), 2000);
+
+function handleRealtimeMessage(data: WaMessageEvent) {
+  if (!props.phone) return;
+  if (!hasRow(data)) {
+    // Legacy shape without a phone: nothing to filter on, re-resolve.
+    mergeLatest();
+    return;
+  }
+  if (data.phone !== props.phone) return;
+  const wasNearBottom = isNearBottom();
+  loadedMessages.value = upsertMessage(loadedMessages.value, data);
+  if (wasNearBottom || data.type === "Outgoing") scrollToBottom();
+  reconcileDebounced();
 }
+
+let resync: ResyncHandle | null = null;
 
 onMounted(() => {
   $socket.on("helpdesk:whatsapp-message", handleRealtimeMessage);
+  resync = watchResync($socket, () => mergeLatest());
 });
 
 onBeforeUnmount(() => {
   $socket.off("helpdesk:whatsapp-message", handleRealtimeMessage);
+  resync?.dispose();
 });
 
 defineExpose({ scrollToBottom, refresh: loadInitial });

@@ -8,7 +8,12 @@ from helpdesk.integrations import wa
 
 
 class TestWAReadReceipt(FrappeTestCase):
-	"""Cover the WABA read-receipt path in mark_wa_messages_read().
+	"""Cover the WABA read-receipt path behind mark_wa_messages_read().
+
+	The receipts themselves run in _send_wa_read_receipts, a job: the endpoint
+	is called from the chat tab on mount and on every incoming message, and
+	posting to Meta from inside that request (ten seconds per message, worst
+	case) made opening a conversation wait on Meta.
 
 	Regression cover for the error-log storm: a receipt Meta refuses used to be
 	retried forever, re-logging an empty "None\\n{}" error on every ticket open
@@ -97,7 +102,7 @@ class TestWAReadReceipt(FrappeTestCase):
 
 		with patch.object(wa, "_post_wa_read_receipt", return_value=(False, "HTTP 400: bad id")) as post:
 			for _ in range(wa._WA_RECEIPT_MAX_ATTEMPTS + 2):
-				wa.mark_wa_messages_read(ticket=self.ticket.name)
+				wa._send_wa_read_receipts(self.ticket.name)
 				self._clear_backoff(msg.name)
 
 		# Stops calling Meta once it has given up, however often the tab reopens.
@@ -114,8 +119,8 @@ class TestWAReadReceipt(FrappeTestCase):
 		msg = self._make_message()
 
 		with patch.object(wa, "_post_wa_read_receipt", return_value=(False, "HTTP 500: boom")) as post:
-			wa.mark_wa_messages_read(ticket=self.ticket.name)
-			wa.mark_wa_messages_read(ticket=self.ticket.name)  # no _clear_backoff
+			wa._send_wa_read_receipts(self.ticket.name)
+			wa._send_wa_read_receipts(self.ticket.name)  # no _clear_backoff
 
 		self.assertEqual(post.call_count, 1)
 		self.assertEqual(self._status(msg.name), "received")
@@ -126,7 +131,7 @@ class TestWAReadReceipt(FrappeTestCase):
 		msg = self._make_message(age_hours=wa._WA_RECEIPT_MAX_AGE_HOURS + 6)
 
 		with patch.object(wa, "_post_wa_read_receipt") as post:
-			marked = wa.mark_wa_messages_read(ticket=self.ticket.name)
+			marked = wa._send_wa_read_receipts(self.ticket.name)
 
 		post.assert_not_called()
 		self.assertEqual(marked, 1)
@@ -139,7 +144,7 @@ class TestWAReadReceipt(FrappeTestCase):
 		msg = self._make_message()
 
 		with patch.object(wa, "_post_wa_read_receipt", return_value=(True, "")) as post:
-			marked = wa.mark_wa_messages_read(ticket=self.ticket.name)
+			marked = wa._send_wa_read_receipts(self.ticket.name)
 
 		self.assertEqual(post.call_count, 1)
 		self.assertEqual(marked, 1)
@@ -163,7 +168,7 @@ class TestWAReadReceipt(FrappeTestCase):
 		)
 
 		with patch.object(wa, "_post_wa_read_receipt") as post:
-			wa.mark_wa_messages_read(ticket=self.ticket.name)
+			wa._send_wa_read_receipts(self.ticket.name)
 
 		post.assert_not_called()
 		self.assertEqual(self._status(msg.name), "received")
@@ -199,3 +204,42 @@ class TestWAReadReceipt(FrappeTestCase):
 
 		self.assertFalse(ok)
 		self.assertIn("ConnectTimeout", detail)
+
+	# ── the job boundary ──────────────────────────────────────────────────
+
+	def test_endpoint_hands_the_receipts_to_a_job(self):
+		self._make_message()
+		with patch("frappe.enqueue") as enqueue, patch.object(wa, "_post_wa_read_receipt") as post:
+			wa.mark_wa_messages_read(ticket=self.ticket.name)
+		post.assert_not_called()
+		enqueue.assert_called_once()
+		self.assertEqual(enqueue.call_args.args[0], "helpdesk.integrations.wa._send_wa_read_receipts")
+		self.assertEqual(enqueue.call_args.kwargs.get("queue"), "default")
+		self.assertEqual(str(enqueue.call_args.kwargs.get("ticket")), str(self.ticket.name))
+
+	def test_endpoint_does_not_enqueue_when_nothing_is_unread(self):
+		with patch("frappe.enqueue") as enqueue:
+			wa.mark_wa_messages_read(ticket=self.ticket.name)
+		enqueue.assert_not_called()
+
+	# ── typing indicator ──────────────────────────────────────────────────
+
+	def test_typing_indicator_rides_on_the_read_receipt(self):
+		response = requests.Response()
+		response.status_code = 200
+		response._content = b'{"success": true}'
+		with patch.object(wa._requests, "post", return_value=response) as post:
+			ok, _ = wa._post_wa_read_receipt("wamid.x", self.account, typing=True)
+		self.assertTrue(ok)
+		payload = post.call_args.kwargs["json"]
+		self.assertEqual(payload["status"], "read")
+		self.assertEqual(payload["message_id"], "wamid.x")
+		self.assertEqual(payload["typing_indicator"], {"type": "text"})
+
+	def test_plain_receipt_carries_no_typing_indicator(self):
+		response = requests.Response()
+		response.status_code = 200
+		response._content = b'{"success": true}'
+		with patch.object(wa._requests, "post", return_value=response) as post:
+			wa._post_wa_read_receipt("wamid.x", self.account)
+		self.assertNotIn("typing_indicator", post.call_args.kwargs["json"])

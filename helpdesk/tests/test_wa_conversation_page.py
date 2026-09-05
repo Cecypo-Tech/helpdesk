@@ -133,6 +133,22 @@ class TestWAConversationPage(FrappeTestCase):
 		listed = self._phones_in(wa.get_whatsapp_conversations(limit=200))
 		self.assertEqual(listed.count(phone), 1)
 
+	def test_a_reaction_is_not_the_last_message(self):
+		phone = self.phones[0]
+		self._message(phone, direction="Outgoing", message=f"sorted {self.tag}")
+		self._message(phone, direction="Incoming", message="👍")
+		frappe.db.set_value(
+			"WhatsApp Message",
+			{"message": "👍", "from": phone},
+			{"content_type": "reaction", "reply_to_message_id": "wamid.x"},
+		)
+		conv = next(
+			c for c in wa.get_whatsapp_conversations(limit=200)["conversations"]
+			if c["phone"] == phone
+		)
+		self.assertEqual(conv["last_message"], f"sorted {self.tag}")
+		self.assertEqual(conv["last_direction"], "Outgoing")
+
 	# ── filters ───────────────────────────────────────────────────────────
 
 	def test_awaiting_filter_returns_only_incoming_last_messages(self):
@@ -184,6 +200,46 @@ class TestWAConversationPage(FrappeTestCase):
 			wa.get_whatsapp_conversations(search=self.phones[2], limit=200)
 		)
 		self.assertIn(self.phones[2], listed)
+
+	def _customer(self, name):
+		if not frappe.db.exists("HD Customer", name):
+			frappe.get_doc({"doctype": "HD Customer", "customer_name": name}).insert(
+				ignore_permissions=True
+			)
+			self.addCleanup(
+				frappe.delete_doc, "HD Customer", name, ignore_permissions=True, force=True
+			)
+		return name
+
+	def test_search_matches_the_ticket_customer(self):
+		# The company the list shows on a row is the ticket's customer, so it
+		# has to be what a search for that company finds.
+		company = self._customer(f"Acme Widgets {self.tag}")
+		ticket = self._ticket()
+		frappe.db.set_value("HD Ticket", ticket.name, "customer", company)
+		self._message(self.phones[0], ticket=ticket.name, message=f"about the order {self.tag}")
+		self._message(self.phones[1], message=f"unrelated {self.tag}")
+
+		listed = self._phones_in(wa.get_whatsapp_conversations(search="acme widgets", limit=200))
+		self.assertIn(self.phones[0], listed)
+		self.assertNotIn(self.phones[1], listed)
+
+	def test_search_matches_the_contact_company_name(self):
+		contact = frappe.get_doc({
+			"doctype": "Contact",
+			"first_name": f"Wanjiru {self.tag}",
+			"company_name": f"Kilimo Fresh {self.tag}",
+			"phone_nos": [{"phone": self.phones[2], "is_primary_mobile_no": 1}],
+		}).insert(ignore_permissions=True)
+		self.addCleanup(
+			frappe.delete_doc, "Contact", contact.name, ignore_permissions=True, force=True
+		)
+		self._message(self.phones[2], message=f"hello {self.tag}")
+		self._message(self.phones[3], message=f"unrelated {self.tag}")
+
+		listed = self._phones_in(wa.get_whatsapp_conversations(search="kilimo fresh", limit=200))
+		self.assertIn(self.phones[2], listed)
+		self.assertNotIn(self.phones[3], listed)
 
 	def test_search_with_no_match_returns_nothing(self):
 		self._seed()

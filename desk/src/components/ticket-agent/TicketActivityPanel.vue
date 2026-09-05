@@ -151,7 +151,7 @@ function reloadWaUnreadCount() {
 
 watch(() => ticket.value?.doc?.name, reloadWaUnreadCount, { immediate: true });
 
-function onWaMessageForBadge(data?: { jid?: string; ticket?: string }) {
+function onWaMessageForBadge(data?: { jid?: string; ticket?: string; origin?: string }) {
   // Only refetch when the WhatsApp tab isn't the one currently open —
   // if it's open, the chat component already marks messages read.
   if (activeTabName.value === "whatsapp" || activeTabName.value === "baileys") return;
@@ -164,8 +164,11 @@ function onWaMessageForBadge(data?: { jid?: string; ticket?: string }) {
   if (!doc) return;
   if (doc.baileys_jid) {
     if (data?.jid && data.jid !== doc.baileys_jid) return;
-  } else if (data?.ticket && String(data.ticket) !== String(doc.name)) {
-    return;
+  } else {
+    // An incoming WABA row is announced before it has a ticket ("insert");
+    // the count can only change once it is linked ("ingest"), which carries it.
+    if (data?.origin === "insert" && !data?.ticket) return;
+    if (data?.ticket && String(data.ticket) !== String(doc.name)) return;
   }
   reloadWaUnreadCount();
 }

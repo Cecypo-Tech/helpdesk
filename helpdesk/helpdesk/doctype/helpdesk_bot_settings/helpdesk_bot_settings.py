@@ -59,34 +59,36 @@ def test_chat(message: str, history: str = "[]") -> dict:
 @frappe.whitelist()
 def test_connection():
 	"""Send a minimal ping to the configured LLM and return a status dict."""
+	from helpdesk.integrations import llm
+
 	settings = frappe.get_doc("Helpdesk Bot Settings")
-	provider = settings.llm_provider or "Gemini Flash 2.0"
+	provider = settings.llm_provider or llm.GEMINI_MODEL
 
 	ping = [
 		{"role": "user", "content": "Reply with exactly the word: pong"},
 	]
 
 	try:
-		if provider == "gemini-3.1-flash-lite":
+		if provider == llm.GEMINI_MODEL:
 			import google.generativeai as genai
 
 			api_key = settings.get_password("gemini_api_key")
 			if not api_key:
 				return {"ok": False, "message": "Gemini API key is not set."}
 			genai.configure(api_key=api_key)
-			model = genai.GenerativeModel("gemini-3.1-flash-lite")
-			response = model.generate_content(ping[0]["content"])
+			model = genai.GenerativeModel(llm.GEMINI_MODEL)
+			response = model.generate_content(
+				ping[0]["content"], request_options=llm.gemini_request_options()
+			)
 			reply = response.text.strip()
 
 		elif provider == "claude-haiku-4-5":
-			import anthropic
-
 			api_key = settings.get_password("anthropic_api_key")
 			if not api_key:
 				return {"ok": False, "message": "Anthropic API key is not set."}
-			client = anthropic.Anthropic(api_key=api_key)
+			client = llm.anthropic_client(api_key)
 			response = client.messages.create(
-				model="claude-haiku-4-5-20251001",
+				model=llm.ANTHROPIC_MODEL,
 				max_tokens=16,
 				messages=[{"role": "user", "content": ping[0]["content"]}],
 			)

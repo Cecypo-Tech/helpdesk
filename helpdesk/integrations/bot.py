@@ -282,6 +282,18 @@ class _BotState:
 
 # ── Conversation history ───────────────────────────────────────────────────────
 
+# Turns the model sees. Reactions (an emoji aimed at an earlier message) and
+# button rows (the id of the option tapped, not its label) are not things
+# anybody said; fed in as turns they read as gibberish from the customer.
+_HISTORY_TURNS = 10
+_HISTORY_FETCH = 20
+_NOT_A_TURN = ("reaction", "button")
+
+
+def _conversation_rows(rows: list) -> list:
+	"""Newest-first rows -> the last _HISTORY_TURNS that are actual turns."""
+	return [r for r in rows if (r.get("content_type") or "text") not in _NOT_A_TURN][:_HISTORY_TURNS]
+
 
 def _get_conversation_history(
 	ticket_name: str | None, channel: str, jid: str | None = None
@@ -294,11 +306,11 @@ def _get_conversation_history(
 		rows = frappe.db.get_all(
 			"WhatsApp Message",
 			filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
-			fields=["type", "message", "creation"],
+			fields=["type", "message", "creation", "content_type"],
 			order_by="creation desc",
-			limit=10,
+			limit=_HISTORY_FETCH,
 		)
-		rows = list(reversed(rows))
+		rows = list(reversed(_conversation_rows(rows)))
 		return [
 			{
 				"role": "user" if r.type == "Incoming" else "assistant",
@@ -314,19 +326,19 @@ def _get_conversation_history(
 		rows = frappe.db.get_all(
 			"WA Message",
 			filters={"reference_doctype": "HD Ticket", "reference_name": ticket_name},
-			fields=["direction", "message", "creation"],
+			fields=["direction", "message", "creation", "content_type"],
 			order_by="creation desc",
-			limit=10,
+			limit=_HISTORY_FETCH,
 		)
 	if not rows and jid:
 		rows = frappe.db.get_all(
 			"WA Message",
 			filters={"jid": jid},
-			fields=["direction", "message", "creation"],
+			fields=["direction", "message", "creation", "content_type"],
 			order_by="creation desc",
-			limit=10,
+			limit=_HISTORY_FETCH,
 		)
-	rows = list(reversed(rows))
+	rows = list(reversed(_conversation_rows(rows)))
 	return [
 		{
 			"role": "user" if r.direction == "Incoming" else "assistant",
@@ -546,6 +558,11 @@ def process_message(msg_name: str, channel: str) -> None:
 			_escalate(state)
 			return
 
+	# The customer is about to wait on searches and a model call. Show them
+	# "typing…" (and blue ticks) so the pause reads as attention, not silence.
+	if channel == "waba":
+		_signal_typing(msg)
+
 	# Download image
 	images = []
 	if has_image and image_source:
@@ -578,9 +595,10 @@ def process_message(msg_name: str, channel: str) -> None:
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: resolved ticket search failed")
 
-	# Gap tracking
+	# Gap tracking. Bookkeeping, and it costs a model call of its own, so it
+	# runs in its own job rather than in front of the customer's reply.
 	if not articles and not resolved_context and settings.enable_gap_tracking:
-		_handle_kb_gap(ticket_name, channel_label, text, settings)
+		_schedule_kb_gap(ticket_name, channel_label, text)
 		if settings.auto_escalate_on_no_kb:
 			if state.bot_reply_count == 0 and settings.clarification_message_enabled and settings.clarification_message:
 				try:
@@ -732,6 +750,32 @@ def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
 		return ""
 
 
+def _signal_typing(msg) -> None:
+	"""Best-effort read receipt plus typing indicator for a WABA message."""
+	try:
+		from helpdesk.integrations.wa import send_wa_typing_indicator
+
+		send_wa_typing_indicator(msg)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Helpdesk Bot: typing indicator failed")
+
+
+def _schedule_kb_gap(ticket_name: str | None, channel_label: str, text: str) -> None:
+	"""Record the gap in a job of its own, after the reply rather than before it."""
+	frappe.enqueue(
+		"helpdesk.integrations.bot.record_kb_gap",
+		queue="default",
+		ticket_name=ticket_name or "",
+		channel_label=channel_label,
+		text=text,
+	)
+
+
+def record_kb_gap(ticket_name: str = "", channel_label: str = "", text: str = "") -> None:
+	"""Job body for _schedule_kb_gap."""
+	_handle_kb_gap(ticket_name or None, channel_label, text, _bot_settings())
+
+
 def _handle_kb_gap(
 	ticket_name: str | None,
 	channel_label: str,
@@ -782,9 +826,12 @@ def handle_whatsapp_message(doc, method=None) -> None:
 		if not bot_enabled:
 			return
 
+	# `default`, not `short`: this job makes several serial network calls, the
+	# LLM among them. Inbound ingestion lives on `short` with its own worker,
+	# and a slow model must never sit in front of the next customer's message.
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
-		queue="short",
+		queue="default",
 		job_id=f"bot_msg_{doc.name}",
 		enqueue_after_commit=True,
 		msg_name=doc.name,
@@ -806,9 +853,10 @@ def handle_wa_message(doc, method=None) -> None:
 		if not bot_enabled:
 			return
 
+	# See handle_whatsapp_message for why this is `default` and not `short`.
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
-		queue="short",
+		queue="default",
 		job_id=f"bot_msg_{doc.name}",
 		enqueue_after_commit=True,
 		msg_name=doc.name,
