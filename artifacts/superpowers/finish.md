@@ -52,13 +52,15 @@ preload (optimistic lock on tabItem); the rerun and every later run passed.
 **Blocker** — none.
 
 **Major**
-- Production process manager not touched. The Procfile change only affects
-  `bench start`; the supervisor/systemd config on the production host needs the
-  same split (`bench worker --queue short` on its own) or Phase 1 does nothing
-  there. The `bench start` on this box also needs a restart to pick up the
-  Procfile; a dedicated short worker was started by hand in the meantime and
-  the honcho-managed combined worker is still running old code, so until the
-  restart some jobs may run pre-change code.
+- Phase 1 is a dev-only fix. Production runs on Frappe Cloud, whose agent
+  generates supervisor programs from bench's own template, which already runs
+  separate `short` and `long` worker programs (times `background_workers`).
+  So the short queue was never combined with long jobs there; the single
+  combined worker was an artifact of `bench start`. What carries to
+  production from this phase is the bot moving to `default`. The lever on
+  Frappe Cloud is the bench's background worker count; custom per-queue
+  workers are not exposed (press #1903, open, dedicated servers only).
+  `bench start` here was restarted on 2026-09-05 and now runs the split.
 - Not verified end to end on a real WhatsApp conversation. The integration is
   `enabled = 0` on this site and there is no test number wired up. Every path
   is covered by tests at the boundary, but the browser flow (pending bubble →
@@ -86,7 +88,9 @@ preload (optimistic lock on tabItem); the rerun and every later run passed.
 
 ## Follow-ups
 
-- Restart `bench start` here; apply the worker split to production.
+- On Frappe Cloud, check `/app/rq-worker` on the production site: confirm
+  the `short-worker` and `long-worker` programs are present and raise the
+  bench's background worker count if it is 1.
 - Manual pass on a real WABA ticket with `enabled = 1`.
 - Phase 6 if wanted: thumbnails for WABA images via the existing
   `_save_thumbnail_file`; Meta media upload by id needs upstream
