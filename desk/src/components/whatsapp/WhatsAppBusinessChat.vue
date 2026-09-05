@@ -88,9 +88,11 @@
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="false"
             :mentionMap="{}"
+            :allowRetry="!!msg._optimistic && msg.status === 'Failed'"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
+            @retry="retryOptimistic"
           />
         </template>
       </div>
@@ -99,10 +101,14 @@
     <!-- Reply box -->
     <WhatsAppReplyBox
       v-if="activeTicketId"
+      ref="replyBox"
       :ticketId="activeTicketId"
       :replyTo="replyingTo"
       @sent="onMessageSent"
       @clearReply="replyingTo = null"
+      @optimistic="addOptimistic"
+      @optimistic-resolve="resolveOptimistic"
+      @optimistic-remove="removeOptimistic"
     />
     <div
       v-else-if="!activeTicketLoading"
@@ -119,6 +125,15 @@ import { computed, h, inject, nextTick, onMounted, onBeforeUnmount, ref, watch }
 import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
 import { hasRow, upsertMessage, type WaMessageEvent } from "@/utils/waRealtime";
+import {
+  applyResolve,
+  markRetrying,
+  mergeThread,
+  removePending,
+  upsertPending,
+  type PendingBubble,
+  type ResolvePayload,
+} from "@/utils/waOptimistic";
 import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import { foldReactions } from "@/utils/waReactions";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
@@ -149,6 +164,9 @@ const replyingTo = ref<Record<string, any> | null>(null);
 
 // Loaded messages accumulate as older pages are fetched — oldest to newest.
 const loadedMessages = ref<Record<string, any>[]>([]);
+// Pending bubbles from the composer, kept apart so a merge cannot drop them.
+const pending = ref<PendingBubble[]>([]);
+const replyBox = ref<{ flush: () => void; retry: (name: string) => void } | null>(null);
 const hasMore = ref(false);
 const initialLoading = ref(false);
 const loadingOlder = ref(false);
@@ -180,6 +198,7 @@ function isNearBottom(): boolean {
 
 async function loadInitial() {
   loadedMessages.value = [];
+  pending.value = [];
   hasMore.value = false;
   if (!props.phone) return;
   initialLoading.value = true;
@@ -257,8 +276,10 @@ const sendReactionResource = createResource({
   },
 });
 
-// All currently-loaded messages (including reactions)
-const allMessages = computed<Record<string, any>[]>(() => loadedMessages.value);
+// All currently-loaded messages (including reactions), plus whatever is pending
+const allMessages = computed<Record<string, any>[]>(() =>
+  mergeThread(loadedMessages.value, pending.value)
+);
 
 // Main message list — reactions are displayed as badges on bubbles, not as standalone items
 const messageList = computed(() =>
@@ -300,8 +321,29 @@ function scrollToBottom() {
 }
 
 function onMessageSent() {
+  // The bubble is already in the thread; the stored row arrives by event.
   replyingTo.value = null;
-  mergeLatest(true);
+}
+
+// ── Optimistic send ─────────────────────────────────────────────────────────
+function addOptimistic(bubble: PendingBubble) {
+  pending.value = upsertPending(pending.value, bubble);
+  scrollToBottom();
+}
+
+function resolveOptimistic(payload: ResolvePayload) {
+  const result = applyResolve(loadedMessages.value, pending.value, payload);
+  pending.value = result.pending;
+  if (result.base !== loadedMessages.value) loadedMessages.value = result.base;
+}
+
+function removeOptimistic(name: string) {
+  pending.value = removePending(pending.value, name);
+}
+
+function retryOptimistic(name: string) {
+  pending.value = markRetrying(pending.value, name);
+  replyBox.value?.retry(name);
 }
 
 function startReply(message: Record<string, any>) {

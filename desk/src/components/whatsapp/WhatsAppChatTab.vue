@@ -33,10 +33,12 @@
             :replyToMessage="msg.is_reply && msg.reply_to_message_id ? messageByMsgId[msg.reply_to_message_id] || null : null"
             :isGroup="ticketInfo.data?.is_group ?? false"
             :mentionMap="mentionMap"
+            :allowRetry="!!msg._optimistic && msg.status === 'Failed'"
             @reply="startReply"
             @react="sendReaction"
             @scrollToReply="scrollToMessage"
             @edit="applyEdit"
+            @retry="retryOptimistic"
           />
         </template>
       </div>
@@ -70,6 +72,9 @@
         @sent="onMessageSent"
         @delivered="onMessageDelivered"
         @clearReply="replyingTo = null"
+        @optimistic="addOptimistic"
+        @optimistic-resolve="resolveOptimistic"
+        @optimistic-remove="removeOptimistic"
       />
     </div>
 
@@ -89,6 +94,15 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue"
 import { useDebounceFn } from "@vueuse/core";
 import { globalStore } from "@/stores/globalStore";
 import { hasRow, upsertMessage, type WaMessageEvent } from "@/utils/waRealtime";
+import {
+  applyResolve,
+  markRetrying,
+  mergeThread,
+  removePending,
+  upsertPending,
+  type PendingBubble,
+  type ResolvePayload,
+} from "@/utils/waOptimistic";
 import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import WhatsAppIcon from "@/components/icons/WhatsAppIcon.vue";
 import WhatsAppBubble from "./WhatsAppBubble.vue";
@@ -115,8 +129,35 @@ const ticketInfo = createResource({
   auto: true,
 });
 
-// Exposes flush(), so an incoming message can cut the outbound hold short.
-const replyBox = ref<{ flush: () => void } | null>(null);
+// Exposes flush(), so an incoming message can cut the outbound hold short,
+// and retry(), for a failed bubble's Retry.
+const replyBox = ref<{ flush: () => void; retry: (name: string) => void } | null>(null);
+
+// ── Optimistic send ─────────────────────────────────────────────────────────
+// Pending bubbles are kept apart from the fetched thread so a reload between
+// send and response cannot drop them; mergeThread folds them in for rendering.
+const pending = ref<PendingBubble[]>([]);
+
+function addOptimistic(bubble: PendingBubble) {
+  pending.value = upsertPending(pending.value, bubble);
+  scrollToBottom();
+}
+
+function resolveOptimistic(payload: ResolvePayload) {
+  const base = messages.data || [];
+  const result = applyResolve(base, pending.value, payload);
+  pending.value = result.pending;
+  if (result.base !== base) messages.data = result.base;
+}
+
+function removeOptimistic(name: string) {
+  pending.value = removePending(pending.value, name);
+}
+
+function retryOptimistic(name: string) {
+  pending.value = markRetrying(pending.value, name);
+  replyBox.value?.retry(name);
+}
 
 const markReadResource = createResource({
   url: "helpdesk.integrations.wa.mark_wa_messages_read",
@@ -167,8 +208,10 @@ const pickUpResource = createResource({
   },
 });
 
-// All messages (including reactions)
-const allMessages = computed<Record<string, any>[]>(() => messages.data || []);
+// All messages (including reactions), plus whatever is still pending
+const allMessages = computed<Record<string, any>[]>(() =>
+  mergeThread(messages.data || [], pending.value)
+);
 
 // Main message list — reactions are displayed as badges on bubbles, not as standalone items
 const messageList = computed(() =>
@@ -255,11 +298,10 @@ function onMessageSent() {
 }
 
 function onMessageDelivered() {
-  // The thread used to refresh only on helpdesk:whatsapp-message, so an agent's
-  // own message stayed invisible until they switched conversation and came back
-  // and the list refetched. Refetching on the send's own response makes the
-  // message appear whether or not the socket event arrives.
-  messages.reload();
+  // The bubble is already in the thread (optimistic, then resolved on the
+  // send's response) and the realtime event upserts the stored row, so no
+  // thread refetch here. Sending assigns the ticket to the agent, which the
+  // "Not assigned to you" banner reads from ticket info.
   ticketInfo.reload();
   scrollToBottom();
 }

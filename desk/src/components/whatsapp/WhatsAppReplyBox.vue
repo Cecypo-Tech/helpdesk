@@ -67,10 +67,8 @@
     </div>
 
     <!--
-      Held outgoing text. There is no optimistic bubble in the thread — it only
-      renders after the send response — so without this strip the agent's own
-      message would simply be missing for the length of the hold and they would
-      retype it.
+      Held outgoing text. The thread shows it as a pending bubble already; this
+      strip is where the countdown, "Send now" and undo live.
     -->
     <div
       v-if="heldText"
@@ -273,6 +271,8 @@ import SavedReplyIcon from "@/components/icons/SavedReplyIcon.vue";
 import SavedRepliesSelectorModal from "@/components/SavedRepliesSelectorModal.vue";
 import WhatsAppTemplateModal from "@/components/whatsapp/WhatsAppTemplateModal.vue";
 import { OutboundHold } from "@/utils/outboundHold";
+import { makePendingBubble, type PendingBubble, type ResolvePayload } from "@/utils/waOptimistic";
+import { useAuthStore } from "@/stores/auth";
 
 const props = withDefaults(
   defineProps<{
@@ -291,10 +291,20 @@ const emit = defineEmits<{
   // Fired the moment the agent hits send, so the composer can clear. The
   // message does not exist yet at this point — nothing may fetch on it.
   (e: "sent"): void;
-  // Fired once the server has stored the message, so the thread can refetch.
+  // Fired once the server has stored a message. The thread no longer refetches
+  // on it (the bubble is already there); the ticket info may have changed.
   (e: "delivered"): void;
   (e: "clearReply"): void;
+  // Optimistic-send lifecycle, same contract as BaileysReplyBox: the parent
+  // shows a pending bubble at once, then resolves it to the stored row's
+  // identity, or removes it (undo), or keeps it as Failed with a Retry.
+  (e: "optimistic", bubble: PendingBubble): void;
+  (e: "optimistic-resolve", payload: ResolvePayload): void;
+  (e: "optimistic-remove", name: string): void;
 }>();
+
+const auth = useAuthStore();
+const senderName = computed(() => auth.userName || "");
 
 const text = ref("");
 const sending = ref(false);
@@ -492,6 +502,32 @@ const sendReply = createResource({
   },
 });
 
+// What a failed bubble needs to be sent again, keyed by its temp name. The
+// composer has already been cleared by then, so this is the only copy.
+type FailedSend =
+  | { kind: "text"; params: Record<string, any> }
+  | { kind: "media"; item: Attachment; caption: string; replyToMsgId: string; ticket: string };
+const failedSends = new Map<string, FailedSend>();
+
+function submitText(name: string, params: Record<string, any>): Promise<void> {
+  return sendReply
+    .submit(params)
+    .then((resp: any) => {
+      failedSends.delete(name);
+      emit("optimistic-resolve", {
+        name,
+        realName: resp?.name || "",
+        message_id: resp?.message_id || "",
+        status: resp?.status || "Success",
+      });
+    })
+    .catch(() => {
+      // Already toasted by onError. The bubble stays, marked Failed, with Retry.
+      failedSends.set(name, { kind: "text", params });
+      emit("optimistic-resolve", { name, realName: "", message_id: "", status: "Failed" });
+    });
+}
+
 // ── Outbound hold ─────────────────────────────────────────────────────────────
 // Meta bills every business message from 1 Oct 2026, so a reply the agent split
 // across four bubbles is billed four times. Holding the first one briefly and
@@ -501,6 +537,11 @@ const heldText = ref("");
 const heldSecondsLeft = ref(0);
 let holdTicker: ReturnType<typeof setInterval> | null = null;
 
+// The pending bubble that stands for whatever is held. Chunks merged into the
+// hold update the same bubble; the flush resolves it; undo removes it.
+let heldBubbleName: string | null = null;
+let heldReplyTo = "";
+
 // The most recent held send, so the media path can wait for it and keep the
 // conversation in the order the agent typed it.
 let heldSend: Promise<unknown> | null = null;
@@ -508,10 +549,22 @@ let heldSend: Promise<unknown> | null = null;
 const outboundHold = new OutboundHold({
   holdMs: 0,
   onFlush({ ticket, message, reply_to_message_id }) {
+    const name = heldBubbleName || `temp-${makeId()}`;
+    heldBubbleName = null;
+    heldReplyTo = "";
     syncHeld();
+    // The bubble already shows this text; re-emitting with the merged message
+    // is what makes it exact when several chunks were folded together.
+    emit("optimistic", makePendingBubble({
+      name,
+      content_type: "text",
+      message,
+      reply_to_message_id,
+      sender_full_name: senderName.value,
+    }));
     // `ticket` comes from the payload, not props: the agent may already have
     // moved to another conversation by the time the window closes.
-    heldSend = sendReply.submit({
+    heldSend = submitText(name, {
       ticket,
       message,
       content_type: "text",
@@ -558,25 +611,66 @@ function recallHeld() {
   const recalled = outboundHold.pending;
   outboundHold.cancel();
   syncHeld();
+  if (heldBubbleName) {
+    emit("optimistic-remove", heldBubbleName);
+    heldBubbleName = null;
+    heldReplyTo = "";
+  }
   if (!recalled) return;
   text.value = text.value ? `${recalled}\n${text.value}` : recalled;
   autoResize();
   nextTick(() => textareaRef.value?.focus());
 }
 
+// Send a failed bubble again. The parent has already put it back to Pending.
+async function retry(name: string) {
+  const failed = failedSends.get(name);
+  if (!failed) return;
+  failedSends.delete(name);
+  if (failed.kind === "text") {
+    await submitText(name, failed.params);
+  } else {
+    await sendMediaUnit(failed.item, failed.caption, failed.replyToMsgId, name, failed.ticket);
+  }
+}
+
 // The parent flushes through this when the customer replies — if they are
 // already waiting on us, there is nothing left to batch.
-defineExpose({ flush: flushHeld });
+defineExpose({ flush: flushHeld, retry });
 
 // Upload+send one attachment via send_wa_media. Caption + reply target ride on
 // the first file only; the rest go out bare, one WhatsApp Message per file.
-async function sendMediaUnit(item: Attachment, caption: string, replyToMsgId: string): Promise<boolean> {
+// The preview URL is deliberately not revoked here: it backs the bubble until
+// the stored row's own attach arrives, and everything is revoked on unmount.
+async function sendMediaUnit(
+  item: Attachment,
+  caption: string,
+  replyToMsgId: string,
+  name: string,
+  ticket: string
+): Promise<boolean> {
+  emit("optimistic", makePendingBubble({
+    name,
+    content_type: fileContentType(item.file),
+    message: caption,
+    attach: item.previewUrl,
+    reply_to_message_id: replyToMsgId,
+    sender_full_name: senderName.value,
+  }));
+
   const formData = new FormData();
   formData.append("file", item.file, item.file.name);
-  formData.append("ticket", props.ticketId);
+  formData.append("ticket", ticket);
   formData.append("message", caption);
   formData.append("content_type", fileContentType(item.file));
   if (replyToMsgId) formData.append("reply_to_message_id", replyToMsgId);
+
+  const fail = (label: string) => {
+    toast.error(label);
+    failedSends.set(name, { kind: "media", item, caption, replyToMsgId, ticket });
+    emit("optimistic-resolve", { name, realName: "", message_id: "", status: "Failed" });
+    return false;
+  };
 
   try {
     const response = await fetch("/api/method/helpdesk.integrations.wa.send_wa_media", {
@@ -586,15 +680,20 @@ async function sendMediaUnit(item: Attachment, caption: string, replyToMsgId: st
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      toast.error(err?.exc_type || "Media send failed");
-      return false;
+      return fail(err?.exc_type || "Media send failed");
     }
+    const body = await response.json().catch(() => ({}));
+    const stored = body?.message || {};
+    failedSends.delete(name);
+    emit("optimistic-resolve", {
+      name,
+      realName: stored.name || "",
+      message_id: stored.message_id || "",
+      status: stored.status || "Success",
+    });
     return true;
   } catch {
-    toast.error("Media send failed");
-    return false;
-  } finally {
-    revokeObjectUrl(item.previewUrl);
+    return fail("Media send failed");
   }
 }
 
@@ -613,9 +712,23 @@ async function send() {
   emit("sent");
 
   if (items.length === 0) {
+    // The pending bubble goes in before the hold sees the text, so a hold of
+    // zero (which flushes synchronously inside append) finds it to resolve.
+    // Chunks folded into an open hold grow the same bubble.
+    if (!heldBubbleName) {
+      heldBubbleName = `temp-${makeId()}`;
+      heldReplyTo = replyToMsgId;
+    }
+    const merged = outboundHold.pending ? `${outboundHold.pending}\n${caption}` : caption;
+    emit("optimistic", makePendingBubble({
+      name: heldBubbleName,
+      content_type: "text",
+      message: merged,
+      reply_to_message_id: heldReplyTo,
+      sender_full_name: senderName.value,
+    }));
     // Goes through the hold, which submits it once the window closes (or
-    // immediately when the hold is configured to 0). Errors surface via
-    // onError toast, as before.
+    // immediately when the hold is configured to 0).
     outboundHold.append(caption, props.ticketId, replyToMsgId);
     syncHeld();
     return;
@@ -642,8 +755,19 @@ async function send() {
       heldSend = null;
     }
     for (let i = 0; i < items.length; i++) {
-      const ok = await sendMediaUnit(items[i], i === 0 ? caption : "", i === 0 ? replyToMsgId : "");
-      if (!ok) break;
+      const ok = await sendMediaUnit(
+        items[i],
+        i === 0 ? caption : "",
+        i === 0 ? replyToMsgId : "",
+        `temp-${makeId()}-${i}`,
+        props.ticketId
+      );
+      if (!ok) {
+        // The failed file has its bubble with Retry; the ones after it never
+        // left, so they go back into the composer rather than vanishing.
+        attachments.value = [...items.slice(i + 1), ...attachments.value];
+        break;
+      }
       anyStored = true;
     }
   } finally {

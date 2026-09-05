@@ -21,3 +21,9 @@ Plan: artifacts/superpowers/plan.md
 - `bench build --app helpdesk` → built (2889 modules).
 - Note: the first realtime-test run died in the runner's ERPNext test-record preload (optimistic lock on tabItem); a rerun passed. Environmental, unrelated to the change.
 
+## Phase 3 — Optimistic WABA send
+
+- Files: `desk/src/utils/waOptimistic.ts` (new: pending bubble model, merge, resolve, retry), `desk/src/utils/__tests__/waOptimistic.spec.ts` (11 tests), `WhatsAppReplyBox.vue` (pending bubble on send, held text shown as one growing bubble, undo removes it, media bubbles with blob preview, failed sends kept with Retry, remaining files restored to the composer on a failure), `WhatsAppChatTab.vue` and `WhatsAppBusinessChat.vue` (pending bubbles kept apart from the fetched thread and merged for render, resolve/remove/retry handlers, no thread refetch on `delivered`).
+- Verify: `yarn -s vitest run` → 63 passed; `bench build --app helpdesk` → built (2890 modules).
+- Manual check still required on a real WABA ticket (integration `enabled` is 0 on this site).
+
