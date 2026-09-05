@@ -41,3 +41,9 @@ Plan: artifacts/superpowers/plan.md
 - Tests (written first, failed, then pass): test_llm (7), test_bot (27), test_wa_read_receipt (13). Existing receipt tests now call the job body directly.
 - `bench --site dev.localhost reload-doc helpdesk doctype helpdesk_bot_settings` run so the field exists on this site; other sites pick it up on `bench migrate`.
 
+## Finish
+
+- Final backend run: 16 modules, 197 tests, all OK. `yarn -s vitest run`: 63 passed. `bench build --app helpdesk`: built.
+- Review pass and follow-ups in `artifacts/superpowers/finish.md`.
+- Phase 6 (optional) not done.
+
