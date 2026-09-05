@@ -8,7 +8,7 @@
       <input
         v-model="search"
         type="text"
-        placeholder="Search..."
+        placeholder="Search name, company, phone…"
         class="w-full rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-1.5 text-xs text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none"
       />
     </div>

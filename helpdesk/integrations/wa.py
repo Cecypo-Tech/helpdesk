@@ -3442,22 +3442,63 @@ def _waba_open_phones() -> set[str]:
 
 
 def _waba_search_phones(search: str) -> set[str]:
-	"""Phones of contacts whose name matches the search text.
+	"""Phones of conversations whose contact name or company matches the search.
 
-	The display name comes from Contact, not from the message, so name search
-	has to resolve to phone numbers before the page is cut.
+	The display name and the company come from Contact and HD Ticket, not from
+	the message, so the search has to resolve to phone numbers before the page
+	is cut. Company is matched three ways, because it is stored three ways: the
+	company the row actually shows is the ticket's customer; a Contact may
+	carry a free-text company_name; and a Contact may be linked to an
+	HD Customer through Dynamic Link.
 	"""
 	like = f"%{search}%"
 	phones: set[str] = set()
+
+	# Company as the list displays it: the customer on the phone's ticket.
+	for row in frappe.db.sql(
+		f"""
+		SELECT DISTINCT {_waba_phone_sql('wm')} AS phone
+		FROM `tabWhatsApp Message` wm
+		INNER JOIN `tabHD Ticket` t
+			ON wm.reference_doctype = 'HD Ticket' AND wm.reference_name = t.name
+		WHERE t.customer LIKE %(like)s
+		""",
+		{"like": like},
+		as_dict=True,
+	):
+		if row.phone:
+			phones.add(row.phone)
+
+	linked_to_customer = frappe.get_all(
+		"Dynamic Link",
+		filters={
+			"parenttype": "Contact",
+			"link_doctype": "HD Customer",
+			"link_name": ["like", like],
+		},
+		pluck="parent",
+	)
+
 	contacts = frappe.db.sql(
 		"""
 		SELECT name, phone, mobile_no
 		FROM `tabContact`
-		WHERE first_name LIKE %(like)s OR last_name LIKE %(like)s OR name LIKE %(like)s
+		WHERE first_name LIKE %(like)s
+		   OR last_name LIKE %(like)s
+		   OR name LIKE %(like)s
+		   OR company_name LIKE %(like)s
 		""",
 		{"like": like},
 		as_dict=True,
 	)
+	if linked_to_customer:
+		contacts.extend(
+			frappe.get_all(
+				"Contact",
+				filters={"name": ["in", linked_to_customer]},
+				fields=["name", "phone", "mobile_no"],
+			)
+		)
 	if not contacts:
 		return phones
 	for c in contacts:

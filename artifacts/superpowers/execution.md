@@ -27,3 +27,8 @@ Plan: artifacts/superpowers/plan.md
 - Verify: `yarn -s vitest run` → 63 passed; `bench build --app helpdesk` → built (2890 modules).
 - Manual check still required on a real WABA ticket (integration `enabled` is 0 on this site).
 
+## Phase 4 — Company search
+
+- Files: `helpdesk/integrations/wa.py` (`_waba_search_phones` also matches the ticket's customer, `Contact.company_name`, and contacts linked to an HD Customer), `desk/src/components/whatsapp/WhatsAppConversationList.vue` (placeholder), `helpdesk/tests/test_wa_conversation_page.py` (2 new tests, failed first, pass after).
+- Verify: `bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.test_wa_conversation_page` → 16 tests OK.
+
