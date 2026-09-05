@@ -782,9 +782,12 @@ def handle_whatsapp_message(doc, method=None) -> None:
 		if not bot_enabled:
 			return
 
+	# `default`, not `short`: this job makes several serial network calls, the
+	# LLM among them. Inbound ingestion lives on `short` with its own worker,
+	# and a slow model must never sit in front of the next customer's message.
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
-		queue="short",
+		queue="default",
 		job_id=f"bot_msg_{doc.name}",
 		enqueue_after_commit=True,
 		msg_name=doc.name,
@@ -806,9 +809,10 @@ def handle_wa_message(doc, method=None) -> None:
 		if not bot_enabled:
 			return
 
+	# See handle_whatsapp_message for why this is `default` and not `short`.
 	frappe.enqueue(
 		"helpdesk.integrations.bot.process_message",
-		queue="short",
+		queue="default",
 		job_id=f"bot_msg_{doc.name}",
 		enqueue_after_commit=True,
 		msg_name=doc.name,

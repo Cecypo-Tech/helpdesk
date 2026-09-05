@@ -283,6 +283,35 @@ class TestDocEventHandlers(unittest.TestCase):
 		frappe.db.set_single_value("Helpdesk Bot Settings", "is_enabled", 1)
 		frappe.clear_cache()
 
+	def test_bot_job_stays_off_the_short_queue(self):
+		"""The bot makes several serial network calls, LLM included. On `short`
+		it sits in front of the next customer's message ingestion; on `default`
+		a slow model can never delay a customer reaching the helpdesk."""
+		from unittest.mock import patch
+
+		frappe.db.set_single_value("Helpdesk Bot Settings", "is_enabled", 1)
+		frappe.clear_cache()
+
+		from helpdesk.integrations.bot import handle_wa_message, handle_whatsapp_message
+
+		waba = frappe.new_doc("WhatsApp Message")
+		waba.type = "Incoming"
+		waba.reference_doctype = "HD Ticket"
+		waba.reference_name = "TEST-001"
+		waba.whatsapp_account = None
+
+		wa_line = frappe.new_doc("WA Message")
+		wa_line.direction = "Incoming"
+		wa_line.reference_doctype = "HD Ticket"
+		wa_line.reference_name = "TEST-001"
+		wa_line.line = None
+
+		for handler, doc in ((handle_whatsapp_message, waba), (handle_wa_message, wa_line)):
+			with patch("frappe.enqueue") as mock_enqueue:
+				handler(doc)
+				mock_enqueue.assert_called_once()
+				self.assertEqual(mock_enqueue.call_args.kwargs.get("queue"), "default")
+
 	def test_handle_whatsapp_message_skips_outgoing(self):
 		from unittest.mock import patch
 
