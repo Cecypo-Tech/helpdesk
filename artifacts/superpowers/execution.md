@@ -72,3 +72,11 @@ Plan: artifacts/superpowers/plan.md
 - File: `helpdesk/integrations/wa.py` — `webhook()` enqueues `_handle_contacts_upsert` on `long` and returns `{"status": "queued"}`.
 - Test: `test_contacts_upsert_is_queued_not_processed_inline` (failed first, passes). `test_wa_evolution_contact_sync` (21), `test_wa_contact_dedupe` (11), `test_baileys` (2 skipped) unchanged.
 
+## Step 5 — Thread resync on reconnect (F5)
+
+- File: `desk/src/components/whatsapp/BaileysChat.vue` — `watchResync` reloads the open thread after a reconnect or when the tab becomes visible; disposed on unmount.
+- Verify: `bench build --app helpdesk` → built; `yarn -s vitest run` → 63 passed.
+
+## Finish
+
+- Review pass and follow-ups in `artifacts/superpowers/finish.md`.
