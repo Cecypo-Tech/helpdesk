@@ -1,114 +1,80 @@
-# Finish — WABA reactiveness, contact list, company search, AI bot
+# Finish — WA Line (Evolution API) worker and performance fixes
 
-**Date:** 2026-09-05
-**Branch:** `feat/waba-reactiveness` (off `develop`), 5 commits
+**Date:** 2026-09-06
+**Branch:** `perf/wa-line-workers` (off `develop`), 3 commits
 **Plan:** `artifacts/superpowers/plan.md` · **Log:** `artifacts/superpowers/execution.md`
 
 ## Summary of changes
 
-1. **Dedicated workers.** Procfile (bench root, outside this repo) now runs a
-   `short`-only worker and a `default,long` worker, so inbound WhatsApp
-   ingestion never waits behind embeddings, ERPNext sync, POS invoices or
-   old-message syncs. The bot job moved from `short` to `default`.
-2. **Realtime events carry the message.** Every stored WhatsApp Business
-   message is announced, ticket-linked or not, integration enabled or not.
-   The conversation list moves its row in place and the thread appends the
-   bubble; one debounced reconcile per burst replaces the two full refetches
-   per message per agent. The socket reconnects indefinitely, and the views
-   refetch on reconnect and when the tab regains focus. Reactions no longer
-   count as a conversation's last message or open tickets of their own.
-3. **Optimistic WABA send.** A pending bubble appears the moment the agent
-   hits send (held text shows as one growing bubble; undo removes it), is
-   resolved on the response, and stays as Failed with Retry on error.
-4. **Company search.** The list search now matches the ticket's customer, a
-   contact's company name, and contacts linked to an HD Customer.
-5. **Bot hygiene.** Every model and embedding call is bounded by a new
-   `Request Timeout (Seconds)` setting (default 30); the gap suggestion runs
-   in its own job after the reply; read receipts run in a job instead of the
-   agent's request; a typing indicator goes out before the bot's searches;
-   reactions and button ids no longer reach the model; Haiku is addressed by
-   its current id.
+1. **WhatsApp page no longer refetches the list per message.** The page-level
+   `helpdesk:baileys-message` handler reloaded the whole conversation list and
+   the open thread on every event for every agent; both components already
+   handle the event themselves. Removed.
+2. **Web push runs in a job with a timeout.** `HD Notification.after_insert`
+   enqueues `send_push_to_user` on `default` after commit instead of calling
+   the push service inline; `webpush()` gets `timeout=10`. Applies to WhatsApp,
+   mention and assignment notifications alike.
+3. **Media re-download moved from `short` to `default`.** It is a 60-second
+   call to Evolution; the short workers are what WABA ingestion waits on.
+4. **Bulk `contacts.upsert` events are queued on `long`.** The webhook returns
+   `{"status": "queued"}` immediately instead of merging contacts (with a commit
+   each) while Evolution waits.
+5. **Open WA Line thread resyncs after a reconnect** and when the tab becomes
+   visible, like the list and sidebar already did.
 
-Phase 6 (WABA thumbnails, Meta media-by-id) was optional and was not done.
+F6 (the ticket-tab full refetch per event) was noted as minor and not done.
 
 ## Verification
 
 | Command | Result |
 |---|---|
-| `bench --site dev.localhost run-tests --app helpdesk --module helpdesk.tests.<m>` for test_wa_realtime_events, test_wa_conversation_page, test_wa_conversation_paging, test_bot, test_llm, test_wa_read_receipt, test_wa_outbound_hold, test_wa_templates, test_contact_verification, test_wa_webhook_perf, test_wa_contact_link, test_wa_normalized_phone, test_wa_unread_state, test_wa_notifications, test_bot_product_scoping, test_kb_gap_product | all 16 modules OK, 197 tests (5, 16, 7, 27, 7, 13, 6, 17, 55, 3, 8, 8, 5, 8, 9, 3) |
-| `cd desk && yarn -s vitest run` | 5 files, 63 tests passed |
-| `bench build --app helpdesk` | built, 2890 modules (pre-existing CSS warning only) |
-| `bench --site dev.localhost reload-doc helpdesk doctype helpdesk_bot_settings` | field `llm_timeout_seconds` present |
-
-New tests, each written before its change and seen failing first: 5 realtime
-event tests, 3 conversation-page tests, 3 bot tests, 4 LLM tests, 4 read-receipt
-tests, 30 frontend unit tests (waRealtime 14, socketResync 5, waOptimistic 11).
-
-One run of the realtime module died in the test runner's ERPNext record
-preload (optimistic lock on tabItem); the rerun and every later run passed.
+| `run-tests --module helpdesk.tests.test_push_notifications` | 2 OK (new, failed first) |
+| `run-tests --module helpdesk.tests.test_wa_line_jobs` | 2 OK (new, failed first) |
+| `run-tests --module helpdesk.tests.test_wa_notifications` | 8 OK |
+| `run-tests --module helpdesk.tests.test_wa_evolution_contact_sync` | 21 OK |
+| `run-tests --module helpdesk.tests.test_wa_contact_dedupe` | 11 OK |
+| `run-tests --module helpdesk.tests.test_baileys` | 2 skipped (pre-existing skips) |
+| `cd desk && yarn -s vitest run` | 63 passed |
+| `bench build --app helpdesk` | built |
 
 ## Review pass
 
 **Blocker** — none.
 
-**Major**
-- Phase 1 is a dev-only fix. Production runs on Frappe Cloud, whose agent
-  generates supervisor programs from bench's own template, which already runs
-  separate `short` and `long` worker programs (times `background_workers`).
-  So the short queue was never combined with long jobs there; the single
-  combined worker was an artifact of `bench start`. What carries to
-  production from this phase is the bot moving to `default`. The lever on
-  Frappe Cloud is the bench's background worker count; custom per-queue
-  workers are not exposed (press #1903, open, dedicated servers only).
-  `bench start` here was restarted on 2026-09-05 and now runs the split.
-- Not verified end to end on a real WhatsApp conversation. The integration is
-  `enabled = 0` on this site and there is no test number wired up. Every path
-  is covered by tests at the boundary, but the browser flow (pending bubble →
-  resolve, list moving in place, resync after sleep) needs one manual pass.
+**Major** — none.
 
 **Minor**
-- An incoming message from an unknown number under "Skip Ticket Creation" now
-  plays the alert sound (it is announced like any other row). It was silent
-  before only because it was invisible; if that is unwanted, gate the sound on
-  `ticket` in `stores/notification.ts`.
-- A WABA image bubble from the "insert" event renders as a media placeholder
-  until the "ingest" event or the reconcile brings the attachment, because
-  upstream frappe_whatsapp attaches the file after inserting the row.
-- `mark_wa_messages_read` returns the number of rows handed to the job rather
-  than the number marked; no caller reads the value.
-- `google-generativeai` is the deprecated SDK; the timeout was added on it
-  rather than migrating to `google-genai`. Separate change.
+- `contacts.upsert` now returns before anything is written, so a contact name
+  from a bulk event shows up a few seconds later than before. Names from
+  message `pushName` still land inline via `_upsert_contact_name`.
+- Push delivery is now at the mercy of the `default` worker's backlog; on a
+  busy bench a push can trail the bell by seconds. Acceptable for a
+  notification that already had no delivery guarantee.
+- `_send_push_notification()` is kept only for the existing deep-link test
+  and any manual call; production goes through the job.
 
 **Nit**
-- `_send_wa_read_receipts` and `send_wa_typing_indicator` both post a read
-  receipt for the same message when the bot answered first; Meta accepts the
-  duplicate.
-- `wa.py` mixes tabs and spaces across regions (pre-existing); new code
-  matches whichever region it sits in.
+- The test for the contacts event builds a fake request with werkzeug to
+  reach `webhook()`; a small dispatch helper would make that cleaner.
 
 ## Follow-ups
 
-- On Frappe Cloud, check `/app/rq-worker` on the production site: confirm
-  the `short-worker` and `long-worker` programs are present and raise the
-  bench's background worker count if it is 1.
-- Manual pass on a real WABA ticket with `enabled = 1`.
-- Phase 6 if wanted: thumbnails for WABA images via the existing
-  `_save_thumbnail_file`; Meta media upload by id needs upstream
-  frappe_whatsapp changes.
-- Migrate `google-generativeai` → `google-genai`.
+- F6 if wanted: have `_publish_wa_event` carry the full row so
+  `BaileysGroupChatTab` can upsert instead of refetching.
+- The `default` queue now carries the bot, push, media retries and read
+  receipts. On Frappe Cloud, watch `/app/rq-job` for a growing `default`
+  backlog and raise the worker count if it appears.
 
 ## Manual validation steps
 
-1. `WhatsApp Helpdesk Settings` → Enable WABA Ticket Auto-Creation, save.
-2. Open `/helpdesk/whatsapp-business`; from a test phone send a message.
-   Expect: the list row moves to the top with the text within a second, the
-   thread (if that phone is open) shows the bubble without a spinner.
-3. Reply from the composer. Expect: bubble appears at once with a clock,
-   settles to a tick on the response; with `outbound_hold_seconds > 0` the
-   bubble shows the merged text and the strip counts down; Undo removes it.
-4. Disconnect the network for 30 s, reconnect. Expect: the list and thread
-   catch up without a refresh (watch the network tab for one refetch).
-5. Search the list for part of a company name shown on a row.
-6. `Helpdesk Bot Settings` → set Request Timeout to 1, enable the bot, send a
-   question. Expect: an escalation message, an Error Log with the timeout,
-   and the worker free again within seconds.
+1. Open `/helpdesk/whatsapp/<line>` with the network tab open; receive a
+   message on a chat that is not selected. Expect no request to
+   `get_wa_conversations` (row patches in place) and none to
+   `get_whatsapp_messages`.
+2. Select the chat; receive another message. Expect exactly one
+   `get_whatsapp_messages` request.
+3. Drop the network for 30 s with a chat open, then reconnect. Expect the
+   thread to catch up without switching chats.
+4. Enable push for an agent, send an unattended message. Expect the push to
+   arrive from the worker (Error Log stays empty; `/app/rq-job` shows a
+   completed `send_push_to_user`).

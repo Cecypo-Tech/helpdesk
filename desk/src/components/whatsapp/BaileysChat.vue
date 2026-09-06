@@ -329,6 +329,7 @@
 import { call, createResource, LoadingIndicator, toast } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { globalStore } from "@/stores/globalStore";
+import { watchResync, type ResyncHandle } from "@/utils/socketResync";
 import { useWaLinesStore } from "@/stores/waLines";
 import { foldReactions } from "@/utils/waReactions";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
@@ -913,11 +914,19 @@ function handleDeleteUpdate(data: { message_id: string }) {
   if (msg) msg.is_deleted = 1;
 }
 
+let resync: ResyncHandle | null = null;
+
 onMounted(() => {
   const { $socket } = globalStore();
   $socket.on("helpdesk:baileys-message", handleBaileysMessage);
   $socket.on("helpdesk:whatsapp-message-edit", handleEditUpdate);
   $socket.on("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
+  // The list and the sidebar badge already refetch on reconnect; the open
+  // thread did not, so messages that arrived during a drop stayed missing
+  // until the agent switched chats.
+  resync = watchResync($socket, () => {
+    if (props.jid) loadMessages();
+  });
   if (props.jid?.endsWith("@g.us") && props.line && !participantsResource.data) {
     participantsResource.submit({ jid: props.jid, line: props.line });
   }
@@ -928,6 +937,7 @@ onBeforeUnmount(() => {
   $socket.off("helpdesk:baileys-message", handleBaileysMessage);
   $socket.off("helpdesk:whatsapp-message-edit", handleEditUpdate);
   $socket.off("helpdesk:whatsapp-message-delete", handleDeleteUpdate);
+  resync?.dispose();
 });
 
 defineExpose({

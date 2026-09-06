@@ -170,12 +170,11 @@ function onDocumentMouseUp() {
 }
 
 // ── Socket handlers ──────────────────────────────────────────────────────────
-function handleBaileysMessage(data: { jid: string; is_incoming: boolean }) {
-  convListRef.value?.reload();
-  if (data.jid === selectedJid.value) {
-    baileysChat.value?.refresh();
-  }
-}
+// No message handler here on purpose. BaileysConversationList patches its own
+// row from the event's preview (and merges the first page only when the JID is
+// new to it), and BaileysChat reloads itself for its own JID. A page-level
+// reload on top of that re-ran the list query for every message on any line,
+// for every agent with the page open, and fetched the open thread twice.
 
 function handleBaileysStatusUpdate(data: { message_id: string; status: string; jid: string }) {
   if (data.jid === selectedJid.value) {
@@ -186,7 +185,6 @@ function handleBaileysStatusUpdate(data: { message_id: string; status: string; j
 onMounted(async () => {
   document.addEventListener("mouseup", onDocumentMouseUp);
   window.addEventListener("resize", onWindowResize);
-  $socket.on("helpdesk:baileys-message", handleBaileysMessage);
   $socket.on("helpdesk:baileys-status-update", handleBaileysStatusUpdate);
 
   const qJid = String(route.query.jid || "");
@@ -203,7 +201,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onDocumentMouseUp);
   window.removeEventListener("resize", onWindowResize);
-  $socket.off("helpdesk:baileys-message", handleBaileysMessage);
   $socket.off("helpdesk:baileys-status-update", handleBaileysStatusUpdate);
 });
 

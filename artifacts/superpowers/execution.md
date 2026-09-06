@@ -47,3 +47,36 @@ Plan: artifacts/superpowers/plan.md
 - Review pass and follow-ups in `artifacts/superpowers/finish.md`.
 - Phase 6 (optional) not done.
 
+
+# Execution log — WA Line worker/performance plan (2026-09-06)
+
+Plan: artifacts/superpowers/plan.md
+
+## Step 1 — Stop the page-level refetch (F1)
+
+- File: `desk/src/pages/whatsapp/WhatsAppPage.vue` — removed the `helpdesk:baileys-message` handler that reloaded the whole list and refreshed the open chat on every event; the list and chat components already handle it themselves. Status-update handler kept.
+- Verify: `bench build --app helpdesk` → built. Manual: one message should now cause at most the chat's own reload.
+
+## Step 2 — Push notifications in a job, with a timeout (F2)
+
+- Files: `helpdesk/helpdesk/doctype/hd_notification/hd_notification.py` (`after_insert` enqueues `send_push_to_user` on `default` after commit; `_push_args()` shared with the synchronous `_send_push_notification` the tests use), `helpdesk/helpdesk/api/push_notifications.py` (`timeout=10` on `webpush`).
+- Tests: new `helpdesk/tests/test_push_notifications.py` (2, failed first, pass). `test_wa_notifications` (8) still OK.
+
+## Step 3 — Media retry off the short queue (F3)
+
+- File: `helpdesk/integrations/wa.py` — both `_retry_media_download` enqueues on `default`.
+- Test: `test_media_retry_runs_off_the_short_queue` in new `helpdesk/tests/test_wa_line_jobs.py` (failed with `'short' != 'default'`, passes).
+
+## Step 4 — Contact upserts in a job (F4)
+
+- File: `helpdesk/integrations/wa.py` — `webhook()` enqueues `_handle_contacts_upsert` on `long` and returns `{"status": "queued"}`.
+- Test: `test_contacts_upsert_is_queued_not_processed_inline` (failed first, passes). `test_wa_evolution_contact_sync` (21), `test_wa_contact_dedupe` (11), `test_baileys` (2 skipped) unchanged.
+
+## Step 5 — Thread resync on reconnect (F5)
+
+- File: `desk/src/components/whatsapp/BaileysChat.vue` — `watchResync` reloads the open thread after a reconnect or when the tab becomes visible; disposed on unmount.
+- Verify: `bench build --app helpdesk` → built; `yarn -s vitest run` → 63 passed.
+
+## Finish
+
+- Review pass and follow-ups in `artifacts/superpowers/finish.md`.

@@ -3,6 +3,8 @@ from urllib.parse import quote
 import frappe
 from frappe.model.document import Document
 
+PUSH_METHOD = "helpdesk.helpdesk.api.push_notifications.send_push_to_user"
+
 
 class HDNotification(Document):
     def format_message(self):
@@ -51,7 +53,16 @@ class HDNotification(Document):
             }
 
     def after_insert(self):
-        self._send_push_notification()
+        # Push goes out from a job. Sending it here meant one HTTPS call per
+        # subscription inside whatever request inserted this row -- for a WA
+        # Line message that is the Evolution webhook, which Evolution blocks on,
+        # and one unattended message creates a row per active agent.
+        frappe.enqueue(
+            PUSH_METHOD,
+            queue="default",
+            enqueue_after_commit=True,
+            **self._push_args(),
+        )
         frappe.publish_realtime(
             "helpdesk:new-notification",
             {
@@ -81,8 +92,12 @@ class HDNotification(Document):
             )
 
     def _send_push_notification(self):
+        """Send the push now. after_insert enqueues the same call instead."""
         from helpdesk.helpdesk.api.push_notifications import send_push_to_user
 
+        send_push_to_user(**self._push_args())
+
+    def _push_args(self) -> dict:
         title = "Helpdesk"
         body = self.message or ""
 
@@ -107,10 +122,10 @@ class HDNotification(Document):
         if self.reference_comment:
             url += f"#{self.reference_comment}"
 
-        send_push_to_user(
-            user=self.user_to,
-            title=title,
-            body=body,
-            url=url,
-            tag=f"helpdesk-{self.reference_ticket or self.reference_wa_jid or 'general'}",
-        )
+        return {
+            "user": self.user_to,
+            "title": title,
+            "body": body,
+            "url": url,
+            "tag": f"helpdesk-{self.reference_ticket or self.reference_wa_jid or 'general'}",
+        }
