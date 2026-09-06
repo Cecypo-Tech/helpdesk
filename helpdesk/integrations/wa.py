@@ -1360,8 +1360,17 @@ def webhook():
         data = payload.get("data") or []
         if isinstance(data, dict):
             data = [data]
-        _handle_contacts_upsert(data)
-        return {"status": "ok"}
+        # Evolution sends these in bulk on connect. Each contact can rewrite
+        # every WA Message and HD Ticket for a LID alias and commits on its
+        # own, so a few hundred of them held this request -- which Evolution
+        # blocks on -- open for all of it. Nothing waits on the result.
+        if data:
+            frappe.enqueue(
+                "helpdesk.integrations.wa._handle_contacts_upsert",
+                queue="long",
+                contacts=data,
+            )
+        return {"status": "queued", "contacts": len(data)}
     if event == "connection.update":
         return _handle_connection_update(payload.get("data") or {}, line)
 
@@ -1527,10 +1536,13 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 		frappe.db.set_value("WA Message", doc.name, "owner", owner, update_modified=False)
 		_publish_wa_event(jid, is_incoming=False, line=line.name, doc=doc)
 		if not media_url and raw_message_json:
+			# `default`, not `short`: this is a call out to Evolution with a
+			# 60-second ceiling, and the short workers are what inbound WhatsApp
+			# Business ingestion waits on.
 			frappe.enqueue(
 				"helpdesk.integrations.wa._retry_media_download",
 				message_name=doc.name,
-				queue="short",
+				queue="default",
 			)
 		return {"status": "ok", "mirrored": True}
 
@@ -1566,10 +1578,11 @@ def _handle_upsert(data: dict, line, settings) -> dict:
 	_upsert_contact_name(jid, sender_name)
 	_publish_wa_event(jid, is_incoming=True, line=line.name, doc=incoming_doc)
 	if not media_url and raw_message_json:
+		# See the mirrored branch above for why this is `default`.
 		frappe.enqueue(
 			"helpdesk.integrations.wa._retry_media_download",
 			message_name=incoming_doc.name,
-			queue="short",
+			queue="default",
 		)
 	if content_type != "reaction":
 		_notify_agents(jid, text, sender_name, line, settings)

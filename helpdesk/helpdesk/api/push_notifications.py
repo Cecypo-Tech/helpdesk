@@ -105,6 +105,9 @@ def send_push_to_user(user, title, body, url="/helpdesk", tag="helpdesk"):
 					data=payload,
 					vapid_private_key=settings.get_password("vapid_private_key"),
 					vapid_claims={"sub": vapid_email},
+					# A push service that hangs must not hold a worker; the
+					# notification itself is already stored.
+					timeout=10,
 				)
 			except WebPushException as e:
 				if e.response is not None and e.response.status_code in (404, 410):
