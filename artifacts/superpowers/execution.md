@@ -47,3 +47,13 @@ Plan: artifacts/superpowers/plan.md
 - Review pass and follow-ups in `artifacts/superpowers/finish.md`.
 - Phase 6 (optional) not done.
 
+
+# Execution log — WA Line worker/performance plan (2026-09-06)
+
+Plan: artifacts/superpowers/plan.md
+
+## Step 1 — Stop the page-level refetch (F1)
+
+- File: `desk/src/pages/whatsapp/WhatsAppPage.vue` — removed the `helpdesk:baileys-message` handler that reloaded the whole list and refreshed the open chat on every event; the list and chat components already handle it themselves. Status-update handler kept.
+- Verify: `bench build --app helpdesk` → built. Manual: one message should now cause at most the chat's own reload.
+
