@@ -248,7 +248,12 @@
       </div>
     </div>
 
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto bg-[#e5ddd5] dark:bg-surface-gray-2 px-5 py-4">
+    <div
+      ref="messagesContainer"
+      class="flex-1 overflow-y-auto bg-[#e5ddd5] dark:bg-surface-gray-2 px-5 py-4"
+      @scroll="onScroll"
+      @load.capture="onMediaLoad"
+    >
       <div v-if="messages.loading && !loadedMessages.length" class="flex justify-center py-10">
         <LoadingIndicator :scale="6" class="text-ink-gray-5" />
       </div>
@@ -592,6 +597,7 @@ async function loadMore() {
   try {
     const data = await call("helpdesk.integrations.wa.get_whatsapp_messages", {
       jid: props.jid,
+      line: props.line || "",
       limit: PAGE_SIZE,
       before: oldest?.creation,
       before_name: oldest?.name,
@@ -643,7 +649,7 @@ function saveContact() {
 async function loadMessages({ fresh = false } = {}) {
   if (!props.jid) return;
   const jid = props.jid;
-  const data = await messages.submit({ jid, limit: PAGE_SIZE });
+  const data = await messages.submit({ jid, line: props.line || "", limit: PAGE_SIZE });
   // Ignore a response that landed after the user moved to another conversation.
   if (jid !== props.jid || !data) return;
   mergeMessages(data.messages || []);
@@ -710,7 +716,23 @@ const contactPhone = computed(() => {
   return p.startsWith("+") ? p : `+${p}`;
 });
 
+// Images have no reserved height, so each one that loads after the jump to the
+// bottom grows the thread and pushes the newest messages (often a teammate's
+// reply) out of view. Stay pinned while the agent hasn't scrolled up.
+let pinnedToBottom = true;
+
+function onScroll() {
+  const c = messagesContainer.value;
+  if (c) pinnedToBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 80;
+}
+
+function onMediaLoad() {
+  const c = messagesContainer.value;
+  if (c && pinnedToBottom) c.scrollTop = c.scrollHeight;
+}
+
 function scrollToBottom() {
+  pinnedToBottom = true;
   nextTick(() => {
     if (messagesContainer.value)
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;

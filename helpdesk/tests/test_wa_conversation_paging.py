@@ -25,13 +25,13 @@ class TestWAConversationPaging(FrappeTestCase):
 		self.addCleanup(frappe.db.delete, "WA Message", {"line": LINE})
 		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": ("like", "%pagingtest%")})
 
-	def _msg(self, jid, message="hello", direction="Incoming", minutes_ago=0):
+	def _msg(self, jid, message="hello", direction="Incoming", minutes_ago=0, content_type="text"):
 		doc = frappe.get_doc({
 			"doctype": "WA Message",
 			"jid": jid,
 			"direction": direction,
 			"message": message,
-			"content_type": "text",
+			"content_type": content_type,
 			"message_id": frappe.generate_hash(length=10),
 			"sender_name": "Paging Sender",
 			"sender_jid": jid,
@@ -70,6 +70,39 @@ class TestWAConversationPaging(FrappeTestCase):
 
 		# No overlap or gaps across pages.
 		self.assertEqual(len(set(page1 + page2 + page3)), 5)
+
+	def test_reactions_are_not_the_last_message(self):
+		# The thread hides reaction rows, so a reaction picked as the sidebar's
+		# last message (and its time) never matched what the open chat showed,
+		# and it pushed the chat up the list too.
+		self._msg("arpagingtest@s.whatsapp.net", "agent reply", direction="Outgoing", minutes_ago=30)
+		self._msg("arpagingtest@s.whatsapp.net", "\U0001F44D", content_type="reaction", minutes_ago=1)
+		self._msg("brpagingtest@s.whatsapp.net", "newer chat", minutes_ago=10)
+
+		convs = get_wa_conversations(line=LINE)["conversations"]
+		self.assertEqual([c["jid"] for c in convs], ["brpagingtest@s.whatsapp.net", "arpagingtest@s.whatsapp.net"])
+		self.assertEqual(convs[1]["last_message"], "agent reply")
+		self.assertEqual(convs[1]["last_direction"], "Outgoing")
+
+	def test_thread_is_scoped_to_the_line_like_the_sidebar(self):
+		from helpdesk.integrations.wa import get_whatsapp_messages
+
+		other = "wa-paging-test-line-2"
+		if not frappe.db.exists("WA Line", other):
+			frappe.get_doc({"doctype": "WA Line", "instance_name": other}).insert(ignore_permissions=True)
+			self.addCleanup(frappe.delete_doc, "WA Line", other, ignore_permissions=True, force=True)
+		self.addCleanup(frappe.db.delete, "WA Message", {"line": other})
+
+		jid = "lnpagingtest@s.whatsapp.net"
+		self._msg(jid, "on this line", minutes_ago=10)
+		frappe.db.set_value("WA Message", self._msg(jid, "on the other line").name, "line", other)
+
+		texts = [m["message"] for m in get_whatsapp_messages(jid=jid, line=LINE, limit=30)["messages"]]
+		self.assertEqual(texts, ["on this line"])
+		convs = get_wa_conversations(line=LINE)["conversations"]
+		self.assertEqual(convs[0]["last_message"], texts[-1])
+		# No line keeps the merged history (the "all lines" view and ticket tab).
+		self.assertEqual(len(get_whatsapp_messages(jid=jid, limit=30)["messages"]), 2)
 
 	def test_groups_filter_applies_before_the_page_is_cut(self):
 		for i in range(3):

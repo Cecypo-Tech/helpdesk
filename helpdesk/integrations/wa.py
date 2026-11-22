@@ -2534,7 +2534,10 @@ def get_wa_conversations(
     # Predicates on the grouped-by-JID subquery, so they apply before the page
     # is cut. Raw SQL throughout — frappe.qb generates a derived table without
     # an alias for this shape, which MySQL rejects with OperationalError 1248.
-    sub_clauses = ["jid NOT LIKE '%%@broadcast'"]
+    # Reactions are left out, as in get_whatsapp_conversations: the thread hides
+    # them, so picking one as the last message showed a time and text the open
+    # chat never matched.
+    sub_clauses = ["jid NOT LIKE '%%@broadcast'", "IFNULL(content_type, '') != 'reaction'"]
     params: dict = {"line": line, "limit": limit + 1, "offset": offset}
     if line:
         sub_clauses.append("line = %(line)s")
@@ -2587,6 +2590,7 @@ def get_wa_conversations(
             LIMIT %(limit)s OFFSET %(offset)s
         ) latest ON bm.jid = latest.jid AND bm.creation = latest.latest_creation
         WHERE bm.jid NOT LIKE '%%@broadcast'
+        AND IFNULL(bm.content_type, '') != 'reaction'
         {line_filter}
         ORDER BY bm.creation DESC
         """,
@@ -3840,6 +3844,7 @@ def get_whatsapp_messages(
 	limit: int = 0,
 	before: str = None,
 	before_name: str = None,
+	line: str = None,
 ) -> list[dict] | dict:
 	"""Return messages for a conversation.
 
@@ -3852,6 +3857,9 @@ def get_whatsapp_messages(
 	list: {"messages": [...oldest to newest...], "has_more": bool}. `before` is the
 	`creation` timestamp of the oldest message already loaded on the client — pass
 	it back to fetch the next older page.
+
+	`line` scopes the WA thread to one WA Line, matching get_wa_conversations for
+	that line; without it every line's copy is merged (and deduped).
 	"""
 	from frappe.query_builder import DocType
 
@@ -3868,7 +3876,7 @@ def get_whatsapp_messages(
 		BC = DocType("WA Contact")
 
 		def _select_messages():
-			return (
+			query = (
 				frappe.qb.from_(BM)
 				.left_join(User).on(User.name == BM.owner)
 				.left_join(BC).on(BC.jid == BM.sender_jid)
@@ -3884,6 +3892,7 @@ def get_whatsapp_messages(
 				)
 				.where(BM.jid == jid)
 			)
+			return query.where(BM.line == line) if line else query
 
 		limit = cint(limit)
 		paginated = bool(limit)
