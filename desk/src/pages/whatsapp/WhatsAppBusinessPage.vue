@@ -68,7 +68,7 @@ defineOptions({ inheritAttrs: false });
 const STORAGE_KEY = "whatsapp_business_panel_width";
 const MIN_WIDTH = 160;
 const MAX_WIDTH = 420;
-const DEFAULT_WIDTH = 240;
+const DEFAULT_WIDTH = 300;
 
 const { $socket } = globalStore();
 

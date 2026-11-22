@@ -84,12 +84,22 @@ describe("applyEventToConversationList", () => {
     expect(next).toBe(list);
   });
 
-  it("uses the server's fallback preview for media without a caption", () => {
+  it("keeps the raw text and content type, like the server row, for the item to label", () => {
     const { list: next } = applyEventToConversationList(
       list,
       event({ content_type: "image", message: "" })
     );
-    expect(next[0].last_message).toBe("[image]");
+    expect(next[0].last_message).toBe("");
+    expect(next[0].content_type).toBe("image");
+  });
+
+  it("carries who sent an outgoing message", () => {
+    const { list: next } = applyEventToConversationList(
+      list,
+      event({ type: "Outgoing", is_incoming: false, owner: "mary@acme.test", sender_full_name: "Mary Agent" })
+    );
+    expect(next[0].last_sender_user).toBe("mary@acme.test");
+    expect(next[0].last_sender_name).toBe("Mary Agent");
   });
 
   it("never rolls the preview back to an older message", () => {

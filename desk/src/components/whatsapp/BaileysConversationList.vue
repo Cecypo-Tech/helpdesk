@@ -120,11 +120,11 @@
     </div>
 
     <!-- Filter chips -->
-    <div class="flex items-center gap-1.5 border-b border-outline-gray-2 px-3 py-2">
+    <div class="flex items-center gap-1.5 overflow-x-auto border-b border-outline-gray-2 px-3 py-2">
       <button
         v-for="f in filterOptions"
         :key="f.value"
-        class="rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
+        class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
         :class="
           activeFilter === f.value
             ? 'bg-green-600 text-white'
@@ -155,6 +155,7 @@
         :isGroup="conv.is_group"
         :lastMessage="conv.last_message"
         :lastSenderName="conv.last_sender_name"
+        :lastSenderUser="conv.last_sender_user"
         :lastMessageTime="conv.last_message_time"
         :lastDirection="conv.last_direction"
         :contentType="conv.content_type"
@@ -164,6 +165,7 @@
         :openTaskCount="conv.open_task_count || 0"
         @select="(jid, name, company, team, phone) => $emit('select', jid, name, company, team, phone)"
         @toggle-favourite="toggleFavourite"
+        @add-company="(jid, name, company, team, phone) => $emit('add-company', jid, name, company, team, phone)"
       />
       <div v-if="hasMore" class="px-3 py-2">
         <button
@@ -190,6 +192,7 @@ import BaileysConversationItem from "./BaileysConversationItem.vue";
 const props = defineProps<{ line: string; selectedJid: string | null }>();
 const emit = defineEmits<{
   (e: "select", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
+  (e: "add-company", jid: string, displayName: string, company: string, assignedTeam: string, phone: string): void;
 }>();
 
 const router = useRouter();
@@ -303,6 +306,7 @@ interface BaileysMessageEvent {
     message?: string;
     content_type?: string;
     sender_name?: string;
+    owner?: string;
     direction?: string;
     creation?: string;
   };
@@ -325,10 +329,22 @@ function onBaileysMessage(data: BaileysMessageEvent) {
 
   const p = data.preview;
   const isOpen = props.selectedJid === data.jid;
+  // Reactions aren't bubbles in the thread, so they aren't the last message here
+  // either (the server leaves them out too). They do count as unread there, so
+  // only the badge moves.
+  if (p.content_type === "reaction") {
+    if (data.is_incoming && !isOpen) {
+      loadedList.value = list.map((c) =>
+        c.jid === data.jid ? { ...c, unread_count: (c.unread_count || 0) + 1 } : c
+      );
+    }
+    return;
+  }
   const patched = {
     ...row,
-    last_message: p.message || `[${p.content_type || "media"}]`,
-    last_sender_name: row.is_group ? p.sender_name || "" : "",
+    last_message: p.message || "",
+    last_sender_name: p.sender_name || "",
+    last_sender_user: p.owner || "",
     last_message_time: p.creation,
     last_direction: p.direction || (data.is_incoming ? "Incoming" : "Outgoing"),
     content_type: p.content_type || "text",
