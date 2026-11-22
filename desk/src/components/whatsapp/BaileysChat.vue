@@ -661,9 +661,11 @@ async function loadMessages({ fresh = false } = {}) {
   localStorage.setItem(`baileys_last_read_${jid}`, new Date().toISOString());
 }
 
+// The line matters too: the thread is line-scoped, and switching lines keeps the
+// same chat selected when the contact talks to both.
 watch(
-  () => props.jid,
-  (newJid) => {
+  () => [props.jid, props.line] as const,
+  ([newJid]) => {
     if (newJid) {
       replyingTo.value = null;
       // Drop the previous conversation before fetching. createResource keeps

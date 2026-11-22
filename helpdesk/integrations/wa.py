@@ -2684,9 +2684,20 @@ def get_wa_conversations(
 
     # WA Contact.company is rarely set, so fall back to the HD Customer linked on
     # the matching Contact. An explicit WA Contact.company still wins.
+    def _row_phone(jid: str) -> str:
+        if _is_group(jid):
+            return ""
+        contact = contacts.get(jid) or {}
+        canonical = contact.get("canonical_jid") or ""
+        return (
+            contact.get("phone")
+            or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
+            or (_phone_from_jid(canonical) if canonical.endswith("@s.whatsapp.net") else "")
+        )
+
+    row_phones = {j: _row_phone(j) for j in jids}
     fallback_company = _hd_customers_for_phones([
-        _phone_from_jid(j) for j in jids
-        if j.endswith("@s.whatsapp.net") and not (contacts.get(j) or {}).get("company")
+        row_phones[j] for j in jids if row_phones[j] and not (contacts.get(j) or {}).get("company")
     ])
 
     result = []
@@ -2697,12 +2708,7 @@ def get_wa_conversations(
         assigned_team = contact.get("assigned_team") or ""
         # The team restriction is applied in SQL now (see _team_blocked_jids) —
         # filtering here would cut rows out of an already-sized page.
-        canonical = contact.get("canonical_jid") or ""
-        phone_fallback = (
-            contact.get("phone")
-            or (_phone_from_jid(jid) if jid.endswith("@s.whatsapp.net") else "")
-            or (_phone_from_jid(canonical) if canonical.endswith("@s.whatsapp.net") else "")
-        ) if not is_grp else ""
+        phone_fallback = row_phones[jid]
 
         if is_grp:
             display_name = (
@@ -2720,9 +2726,7 @@ def get_wa_conversations(
         result.append({
             "jid": jid,
             "display_name": display_name or jid,
-            "company": contact.get("company") or (
-                fallback_company.get(_phone_from_jid(jid), "") if jid.endswith("@s.whatsapp.net") else ""
-            ),
+            "company": contact.get("company") or fallback_company.get(phone_fallback, ""),
             "assigned_team": assigned_team,
             "phone": phone_fallback,
             "is_group": is_grp,
@@ -3809,9 +3813,9 @@ def get_whatsapp_conversations(
 	owner_names = dict(
 		frappe.get_all("User", filters={"name": ("in", list(owners))}, fields=["name", "full_name"], as_list=True)
 	) if owners else {}
-	# Company for phones with no ticket comes from the matched Contact instead.
+	# Company for phones whose ticket has no customer (or no ticket) comes from the matched Contact.
 	fallback_company = _hd_customers_for_phones([
-		p for p in phones if not ticket_info.get(phone_to_ticket.get(p))
+		p for p in phones if not getattr(ticket_info.get(phone_to_ticket.get(p)), "customer", None)
 	])
 
 	conversations = []
@@ -3828,7 +3832,7 @@ def get_whatsapp_conversations(
 			"last_message_time": str(r["creation"]),
 			"last_direction": r["type"],
 			"last_sender_user": r.owner or "",
-			"last_sender_name": (owner_names.get(r.owner) or r.owner or "") if r.type == "Outgoing" else "",
+			"last_sender_name": (owner_names.get(r.owner) or "") if r.type == "Outgoing" else "",
 			"ticket_status": ticket.status if ticket else None,
 			"ticket_priority": ticket.priority if ticket else None,
 			"company": (ticket.customer if ticket else None) or fallback_company.get(phone),

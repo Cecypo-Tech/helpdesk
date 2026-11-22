@@ -98,6 +98,20 @@ class TestWASidebarRows(FrappeTestCase):
 		self._msg("Incoming", "hello")
 		self.assertEqual(self._row()["company"], own)
 
+	def test_lid_chat_with_a_known_phone_gets_the_fallback_company(self):
+		# @lid chats hide the number in the JID; the WA Contact still knows it.
+		customer = self._customer_contact()
+		lid = "77001122334455@lid"
+		self.addCleanup(frappe.db.delete, "WA Contact", {"jid": lid})
+		frappe.get_doc({"doctype": "WA Contact", "jid": lid, "phone": PHONE}).insert(ignore_permissions=True)
+		frappe.get_doc({
+			"doctype": "WA Message", "jid": lid, "direction": "Incoming", "message": "hi",
+			"content_type": "text", "message_id": frappe.generate_hash(length=10),
+			"sender_name": "Lid Sender", "sender_jid": lid, "status": "Delivered", "line": LINE,
+		}).insert(ignore_permissions=True)
+		rows = wa.get_wa_conversations(line=LINE)["conversations"]
+		self.assertEqual(next(r for r in rows if r["jid"] == lid)["company"], customer)
+
 	def test_hd_customers_for_phones_maps_only_matched_phones(self):
 		customer = self._customer_contact()
 		self.assertEqual(

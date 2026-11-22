@@ -37,12 +37,12 @@
         <span class="min-w-0 flex-1 truncate text-sm">
           <span class="font-semibold text-ink-gray-9">{{ title }}</span>
           <span v-if="subtitle" class="text-ink-gray-6"> · {{ subtitle }}</span>
-          <button
-            v-if="!company && !isGroup"
-            class="ml-1 hidden text-xs text-ink-gray-5 underline hover:text-ink-gray-8 focus:inline group-hover:inline"
-            @click.stop="$emit('add-company', jid, displayName, '', assignedTeam || '', phone || '')"
-          >+ company</button>
         </span>
+        <button
+          v-if="!company && !isGroup"
+          class="hidden shrink-0 text-xs text-ink-gray-5 underline hover:text-ink-gray-8 group-hover:inline"
+          @click.stop="$emit('add-company', jid, displayName, '', assignedTeam || '', phone || '')"
+        >+ company</button>
         <span
           class="shrink-0 text-[11px]"
           :class="unreadCount > 0 ? 'font-semibold text-ink-green-3' : 'text-ink-gray-6'"

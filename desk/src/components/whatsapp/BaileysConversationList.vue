@@ -328,10 +328,18 @@ function onBaileysMessage(data: BaileysMessageEvent) {
   }
 
   const p = data.preview;
-  // Reactions aren't bubbles in the thread, so they aren't the last message here
-  // either (the server leaves them out too).
-  if (p.content_type === "reaction") return;
   const isOpen = props.selectedJid === data.jid;
+  // Reactions aren't bubbles in the thread, so they aren't the last message here
+  // either (the server leaves them out too). They do count as unread there, so
+  // only the badge moves.
+  if (p.content_type === "reaction") {
+    if (data.is_incoming && !isOpen) {
+      loadedList.value = list.map((c) =>
+        c.jid === data.jid ? { ...c, unread_count: (c.unread_count || 0) + 1 } : c
+      );
+    }
+    return;
+  }
   const patched = {
     ...row,
     last_message: p.message || "",
