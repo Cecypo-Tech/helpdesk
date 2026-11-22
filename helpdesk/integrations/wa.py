@@ -465,6 +465,31 @@ def _resolve_contact_match(normalized: str, contacts: list, phone_rows: list) ->
     return loose.pop() if len(loose) == 1 else None
 
 
+def _hd_customers_for_phones(phones: list[str]) -> dict[str, str]:
+    """{phone: HD Customer} via each phone's matched Contact; unmatched phones are left out.
+
+    A Contact linked to several customers yields the first link — the agent can
+    pin a different one on the WA Contact.
+    """
+    # ponytail: ~2 indexed queries per phone (<= one page); batch the match if pages get slow.
+    contact_for = {p: c for p in dict.fromkeys(phones) if p and (c := match_phone_to_contact(p))}
+    if not contact_for:
+        return {}
+    customer_for_contact = {}
+    for row in frappe.get_all(
+        "Dynamic Link",
+        filters={
+            "parenttype": "Contact",
+            "link_doctype": "HD Customer",
+            "parent": ("in", list(set(contact_for.values()))),
+        },
+        fields=["parent", "link_name"],
+        order_by="idx asc",
+    ):
+        customer_for_contact.setdefault(row.parent, row.link_name)
+    return {p: customer_for_contact[c] for p, c in contact_for.items() if c in customer_for_contact}
+
+
 def match_phone_to_contact(phone: str) -> str | None:
     """Match a raw phone number to a Frappe Contact name.
 
@@ -562,6 +587,7 @@ def _fw_event_payload(doc, ticket_name, is_incoming: bool, origin: str) -> dict:
         "reply_to_message_id": doc.get("reply_to_message_id") or "",
         "is_reply": cint(doc.get("is_reply")),
         "sender_full_name": sender_full_name,
+        "owner": doc.get("owner") or "",
     }
 
 
@@ -1040,6 +1066,7 @@ def _publish_wa_event(jid: str, is_incoming: bool, line: str, ticket: str = "", 
             "message": doc.get("message") or "",
             "content_type": doc.get("content_type") or "text",
             "sender_name": doc.get("sender_name") or "",
+            "owner": doc.get("owner") or "",
             "direction": doc.get("direction") or ("Incoming" if is_incoming else "Outgoing"),
             "creation": str(doc.get("creation") or now_datetime()),
         }
@@ -2579,7 +2606,7 @@ def get_wa_conversations(
     # COUNT over the same grouping.
     rows = frappe.db.sql(
         f"""
-        SELECT bm.jid, bm.sender_name, bm.message, bm.content_type, bm.direction, bm.creation
+        SELECT bm.jid, bm.sender_name, bm.owner, bm.message, bm.content_type, bm.direction, bm.creation
         FROM `tabWA Message` bm
         INNER JOIN (
             SELECT jid, MAX(creation) AS latest_creation
@@ -2655,6 +2682,13 @@ def get_wa_conversations(
         if not _is_group(j) and not (contacts.get(j) or {}).get("custom_name")
     ])
 
+    # WA Contact.company is rarely set, so fall back to the HD Customer linked on
+    # the matching Contact. An explicit WA Contact.company still wins.
+    fallback_company = _hd_customers_for_phones([
+        _phone_from_jid(j) for j in jids
+        if j.endswith("@s.whatsapp.net") and not (contacts.get(j) or {}).get("company")
+    ])
+
     result = []
     for r in deduped:
         jid = r.jid
@@ -2686,12 +2720,16 @@ def get_wa_conversations(
         result.append({
             "jid": jid,
             "display_name": display_name or jid,
-            "company": contact.get("company") or "",
+            "company": contact.get("company") or (
+                fallback_company.get(_phone_from_jid(jid), "") if jid.endswith("@s.whatsapp.net") else ""
+            ),
             "assigned_team": assigned_team,
             "phone": phone_fallback,
             "is_group": is_grp,
-            "last_message": r.get("message") or f"[{r.get('content_type', 'media')}]",
-            "last_sender_name": r.get("sender_name") or "" if is_grp else "",
+            # Raw text: the client labels media and names the sender.
+            "last_message": r.get("message") or "",
+            "last_sender_name": r.get("sender_name") or "",
+            "last_sender_user": r.get("owner") or "",
             "last_message_time": str(r["creation"]),
             "last_direction": r.get("direction", "Incoming"),
             "content_type": r.get("content_type", "text"),
@@ -3651,11 +3689,11 @@ def get_whatsapp_conversations(
 	# used to flag the conversation unread and awaiting a reply.
 	rows = frappe.db.sql(
 		f"""
-		SELECT phone, `type`, message, content_type, creation, profile_name
+		SELECT phone, `type`, message, content_type, creation, profile_name, owner
 		FROM (
 			SELECT
 				{phone_expr} AS phone,
-				`type`, message, content_type, creation, profile_name,
+				`type`, message, content_type, creation, profile_name, owner,
 				ROW_NUMBER() OVER (
 					PARTITION BY {phone_expr} ORDER BY creation DESC, name DESC
 				) AS rn
@@ -3766,6 +3804,16 @@ def get_whatsapp_conversations(
 				first_name = frappe.db.get_value("Contact", row.parent, "first_name")
 				phone_to_contact[norm] = {"name": row.parent, "first_name": first_name}
 
+	# Agents' names for outgoing previews, one query for the page.
+	owners = {r.owner for r in rows if r.type == "Outgoing" and r.owner}
+	owner_names = dict(
+		frappe.get_all("User", filters={"name": ("in", list(owners))}, fields=["name", "full_name"], as_list=True)
+	) if owners else {}
+	# Company for phones with no ticket comes from the matched Contact instead.
+	fallback_company = _hd_customers_for_phones([
+		p for p in phones if not ticket_info.get(phone_to_ticket.get(p))
+	])
+
 	conversations = []
 	for r in rows:
 		phone = r.phone
@@ -3775,12 +3823,15 @@ def get_whatsapp_conversations(
 		conversations.append({
 			"phone": phone,
 			"display_name": display_name,
-			"last_message": r["message"] or f"[{r['content_type']}]",
+			"last_message": r["message"] or "",
+			"content_type": r["content_type"] or "text",
 			"last_message_time": str(r["creation"]),
 			"last_direction": r["type"],
+			"last_sender_user": r.owner or "",
+			"last_sender_name": (owner_names.get(r.owner) or r.owner or "") if r.type == "Outgoing" else "",
 			"ticket_status": ticket.status if ticket else None,
 			"ticket_priority": ticket.priority if ticket else None,
-			"company": ticket.customer if ticket else None,
+			"company": (ticket.customer if ticket else None) or fallback_company.get(phone),
 			"assigned_to": ticket.assigned_to if ticket else None,
 			"open_task_count": task_count.get(phone_to_ticket.get(phone), 0),
 		})

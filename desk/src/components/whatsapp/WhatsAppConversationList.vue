@@ -14,11 +14,11 @@
     </div>
 
     <!-- Filter chips -->
-    <div class="flex items-center gap-1.5 border-b border-outline-gray-2 px-3 py-2">
+    <div class="flex items-center gap-1.5 overflow-x-auto border-b border-outline-gray-2 px-3 py-2">
       <button
         v-for="f in filterOptions"
         :key="f.value"
-        class="rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
+        class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors"
         :class="
           activeFilter === f.value
             ? 'bg-green-600 text-white'
@@ -46,6 +46,9 @@
         :lastMessage="conv.last_message"
         :lastMessageTime="conv.last_message_time"
         :lastDirection="conv.last_direction"
+        :contentType="conv.content_type"
+        :lastSenderName="conv.last_sender_name"
+        :lastSenderUser="conv.last_sender_user"
         :hasUnread="isUnread(conv)"
         :selected="conv.phone === selectedPhone"
         :ticketStatus="conv.ticket_status"

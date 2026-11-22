@@ -1,51 +1,64 @@
 <template>
   <div
-    class="flex cursor-pointer items-center gap-2.5 border-b border-l-2 border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
+    class="flex cursor-pointer items-start gap-2.5 border-b border-l-2 border-outline-gray-2 px-3 py-2.5 hover:bg-surface-gray-2"
     :class="[selected ? 'bg-surface-gray-2' : '', statusBorderClass]"
     @click="$emit('select', phone, displayName)"
   >
     <!-- Avatar -->
-    <div class="relative shrink-0">
+    <div class="mt-0.5 shrink-0">
       <div
-        class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold text-white"
+        class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-white"
         :style="{ background: avatarColor }"
       >
         {{ avatarLetter }}
       </div>
-      <!-- Open task count badge -->
-      <span
-        v-if="openTaskCount > 0"
-        class="absolute -top-1.5 -right-1.5 flex min-w-[14px] h-3.5 items-center justify-center rounded-full bg-blue-600 px-0.5 text-[8px] font-bold text-white ring-1 ring-surface-white leading-none"
-      >{{ openTaskCount }}</span>
     </div>
 
     <div class="min-w-0 flex-1">
-      <div class="flex items-center justify-between gap-1">
-        <span class="truncate text-sm font-semibold text-ink-gray-9">{{ displayName }}</span>
-        <span class="shrink-0 text-[11px] text-ink-gray-5">{{ formattedTime }}</span>
+      <!-- Who: name · company, one truncating line -->
+      <div class="flex items-baseline gap-1.5">
+        <span class="min-w-0 flex-1 truncate text-sm">
+          <span class="font-semibold text-ink-gray-9">{{ title }}</span>
+          <span v-if="subtitle" class="text-ink-gray-6"> · {{ subtitle }}</span>
+        </span>
+        <span
+          class="shrink-0 text-[11px]"
+          :class="hasUnread ? 'font-semibold text-ink-green-3' : 'text-ink-gray-6'"
+          :title="fullTime"
+        >{{ time }}</span>
       </div>
-      <div class="mt-0.5 flex items-center justify-between gap-1">
-        <span class="truncate text-xs text-ink-gray-5">
-          <span v-if="lastDirection === 'Outgoing'" class="text-ink-gray-4">✓✓ </span>
-          <span v-if="!lastMessage" class="italic">[media]</span>
-          <span v-else>{{ lastMessage }}</span>
+      <!-- What: sender + cleaned preview, two lines -->
+      <div class="mt-0.5 flex items-start gap-1">
+        <p
+          class="min-w-0 flex-1 break-words text-xs leading-4 line-clamp-2"
+          :class="hasUnread ? 'text-ink-gray-8' : 'text-ink-gray-6'"
+        >
+          <span v-if="sender" class="font-medium text-ink-gray-7">{{ sender }}: </span>{{ preview }}
+        </p>
+        <span
+          v-if="openTaskCount"
+          class="flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-surface-gray-3 px-1.5 text-[10px] font-medium text-ink-gray-7"
+          :title="`${openTaskCount} open task${openTaskCount === 1 ? '' : 's'}`"
+        >
+          <LucideCheckSquare class="h-2.5 w-2.5" />{{ openTaskCount }}
         </span>
         <span
           v-if="hasUnread"
-          class="ml-1 h-2 w-2 shrink-0 rounded-full bg-green-500"
+          class="mt-1 h-2 w-2 shrink-0 rounded-full bg-green-500"
+          title="Unread"
         />
       </div>
       <div
-        v-if="ticketStatus || company || ticketPriority || assignedTo"
-        class="mt-0.5 flex items-center gap-1 text-[11px] text-ink-gray-4"
+        v-if="ticketStatus || ticketPriority || assignedTo"
+        class="mt-0.5 flex items-center gap-1 text-[11px] text-ink-gray-6"
       >
         <IndicatorIcon
           v-if="ticketStatus"
           class="size-2 shrink-0"
           :class="ticketStatusStore.getStatus(ticketStatus)?.parsed_color"
         />
-        <span v-if="company" class="truncate">{{ company }}</span>
-        <span v-if="company && ticketPriority">·</span>
+        <span v-if="ticketStatus" class="truncate">{{ ticketStatus }}</span>
+        <span v-if="ticketStatus && ticketPriority">·</span>
         <span v-if="ticketPriority" class="shrink-0 truncate">{{ ticketPriority }}</span>
         <UserAvatar
           v-if="assignedTo"
@@ -63,6 +76,9 @@ import { computed } from "vue";
 import { IndicatorIcon } from "@/components/icons";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
 import UserAvatar from "@/components/UserAvatar.vue";
+import LucideCheckSquare from "~icons/lucide/check-square";
+import { useAuthStore } from "@/stores/auth";
+import { formatSidebarTime, fullTimestamp, previewText, senderLabel } from "@/utils/waSidebar";
 
 const ticketStatusStore = useTicketStatusStore();
 
@@ -72,6 +88,9 @@ const props = defineProps<{
   lastMessage: string;
   lastMessageTime: string;
   lastDirection: string;
+  contentType?: string;
+  lastSenderName?: string;
+  lastSenderUser?: string;
   hasUnread: boolean;
   selected: boolean;
   ticketStatus?: string | null;
@@ -107,24 +126,41 @@ const statusBorderClass = computed(() => {
   return STATUS_BORDER[status?.color] ?? "border-l-transparent";
 });
 
-const avatarLetter = computed(() => (props.displayName || "?")[0].toUpperCase());
+const auth = useAuthStore();
+
+// A contact with no saved name is titled by its number; the company says more,
+// so it leads and the number follows.
+const isBareNumber = computed(() => /^\+?[\d\s-]+$/.test(props.displayName || ""));
+const title = computed(() =>
+  props.company && isBareNumber.value ? props.company : props.displayName
+);
+// Skip a company that only repeats the name.
+const subtitle = computed(() => {
+  if (!props.company) return "";
+  if (isBareNumber.value) return props.displayName;
+  return props.company.trim().toLowerCase() === (props.displayName || "").trim().toLowerCase() ? "" : props.company;
+});
+const sender = computed(() =>
+  senderLabel({
+    direction: props.lastDirection,
+    senderName: props.lastSenderName,
+    senderUser: props.lastSenderUser,
+    me: auth.userId,
+  })
+);
+const preview = computed(() => previewText(props.lastMessage, props.contentType || "text"));
+const time = computed(() => formatSidebarTime(props.lastMessageTime));
+const fullTime = computed(() => fullTimestamp(props.lastMessageTime));
+
+// Skip a leading "+" so numbers get a digit, not a plus sign.
+const avatarLetter = computed(
+  () => ((title.value || "").replace(/^[^\p{L}\p{N}]+/u, "") || "?")[0].toUpperCase()
+);
 
 const avatarColor = computed(() => {
   const colors = ["#128c7e", "#7e57c2", "#e67e22", "#c0392b", "#2980b9", "#27ae60", "#8e44ad"];
   let hash = 0;
   for (const ch of props.phone) hash = ((hash * 31) + ch.charCodeAt(0)) & 0x7fffffff;
   return colors[hash % colors.length];
-});
-
-const formattedTime = computed(() => {
-  if (!props.lastMessageTime) return "";
-  const d = new Date(props.lastMessageTime);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffDays === 0) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return d.toLocaleDateString([], { weekday: "short" });
-  return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
 });
 </script>

@@ -963,6 +963,7 @@ onBeforeUnmount(() => {
 });
 
 defineExpose({
+  openEdit,
   refresh() {
     loadMessages();
     scrollToBottom();

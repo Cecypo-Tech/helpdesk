@@ -17,6 +17,7 @@
         :line="lineName"
         :selectedJid="selectedJid"
         @select="onSelect"
+        @add-company="onAddCompany"
       />
       <!-- Resize handle (desktop only) -->
       <div
@@ -62,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import BaileysConversationList from "@/components/whatsapp/BaileysConversationList.vue";
 import BaileysChat from "@/components/whatsapp/BaileysChat.vue";
@@ -78,7 +79,7 @@ defineOptions({ inheritAttrs: false });
 const STORAGE_KEY = "baileys_panel_width";
 const MIN_WIDTH = 160;
 const MAX_WIDTH = 420;
-const DEFAULT_WIDTH = 240;
+const DEFAULT_WIDTH = 300;
 
 const { $socket } = globalStore();
 
@@ -211,6 +212,14 @@ function onSelect(jid: string, displayName: string, company: string, team: strin
   selectedTeam.value = team;
   selectedPhone.value = phone || "";
   mobileShowChat.value = true;
+}
+
+// "+ company" on a row: open that chat, then its contact editor once the chat
+// has the new props.
+async function onAddCompany(jid: string, displayName: string, company: string, team: string, phone: string) {
+  onSelect(jid, displayName, company, team, phone);
+  await nextTick();
+  baileysChat.value?.openEdit();
 }
 
 function onContactSaved(data: { custom_name: string; company: string; assigned_team: string; phone: string }) {

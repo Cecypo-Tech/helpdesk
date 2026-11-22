@@ -26,6 +26,7 @@ export interface WaMessageEvent {
   reply_to_message_id?: string;
   is_reply?: number;
   sender_full_name?: string;
+  owner?: string;
 }
 
 export interface ConversationRow {
@@ -39,11 +40,6 @@ export interface ConversationRow {
 /** An event carrying the row itself, as opposed to the legacy `{ticket, is_incoming}` shape. */
 export function hasRow(ev: WaMessageEvent): ev is WaMessageEvent & { name: string; phone: string } {
   return Boolean(ev && ev.name && ev.phone);
-}
-
-/** The preview the list shows — same fallback the server uses. */
-export function previewFor(ev: WaMessageEvent): string {
-  return ev.message || `[${ev.content_type || "text"}]`;
 }
 
 /**
@@ -71,11 +67,16 @@ export function applyEventToConversationList(
     return { list, handled: true };
   }
 
+  const direction = ev.type || (ev.is_incoming ? "Incoming" : "Outgoing");
+  // Same shape as the server row: raw text, labelled by the item.
   const updated: ConversationRow = {
     ...row,
-    last_message: previewFor(ev),
+    last_message: ev.message || "",
+    content_type: ev.content_type || "text",
     last_message_time: ev.creation || row.last_message_time,
-    last_direction: ev.type || (ev.is_incoming ? "Incoming" : "Outgoing"),
+    last_direction: direction,
+    last_sender_user: ev.owner || "",
+    last_sender_name: direction === "Outgoing" ? ev.sender_full_name || "" : "",
   };
   const rest = list.filter((_, i) => i !== idx);
   return { list: [updated, ...rest], handled: true };
