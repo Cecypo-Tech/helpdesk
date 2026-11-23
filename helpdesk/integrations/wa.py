@@ -877,11 +877,17 @@ def _build_wa_thumbnail(raw_msg: dict, media_url: str, content_type: str) -> str
 
 
 def _strip_media_thumbnails(msg: dict) -> dict:
-    """Strip large preview-only binary fields (jpegThumbnail, scansSidecar) from a raw message
-    dict before storing it, keeping all fields needed for media re-decryption."""
-    _THUMB_FIELDS = {"jpegThumbnail", "scansSidecar", "waveform", "streamingSidecar"}
+    """Strip large binary fields from a raw message dict before storing it, keeping
+    all fields needed for media re-decryption.
+
+    `base64` is the whole file (Evolution's webhook_base64), which is saved as a
+    File anyway; storing it again made WA Message most of the database.
+    """
+    _THUMB_FIELDS = {"jpegThumbnail", "scansSidecar", "waveform", "streamingSidecar", "base64"}
     stripped = {}
     for k, v in msg.items():
+        if k == "base64":
+            continue
         if isinstance(v, dict):
             stripped[k] = {ik: iv for ik, iv in v.items() if ik not in _THUMB_FIELDS}
         else:
@@ -3945,6 +3951,7 @@ def get_whatsapp_messages(
 					BM.is_edited,
 					BM.is_deleted,
 					BM.edit_unrecoverable,
+					BM.media_purged,
 				)
 				.where(BM.jid == jid)
 			)

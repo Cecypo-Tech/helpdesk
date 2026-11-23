@@ -59,6 +59,10 @@ scheduler_events = {
         "helpdesk.integrations.kb_autofill.promote_gaps_to_draft_articles",
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_manager_task_digest",
     ],
+    "daily_long": [
+        # Deletes WhatsApp media past WhatsApp Helpdesk Settings.media_retention_days.
+        "helpdesk.integrations.wa_media_retention.purge_old_media",
+    ],
 }
 
 

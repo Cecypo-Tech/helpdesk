@@ -27,6 +27,7 @@
   "section_notifications",
   "notification_quiet_minutes",
   "unread_window_days",
+  "media_retention_days",
   "section_outbound",
   "outbound_hold_seconds"
  ],
@@ -158,6 +159,13 @@
    "label": "Unread Window (Days)"
   },
   {
+   "default": "30",
+   "description": "WhatsApp photos, videos, voice notes and documents older than this are deleted from the server every night; the chat shows \"Media expired\" in their place. 0 = keep forever.",
+   "fieldname": "media_retention_days",
+   "fieldtype": "Int",
+   "label": "Media Retention (Days)"
+  },
+  {
    "fieldname": "section_outbound",
    "fieldtype": "Section Break",
    "label": "Outbound"
@@ -167,13 +175,13 @@
    "fieldname": "outbound_hold_seconds",
    "fieldtype": "Int",
    "label": "Outbound Hold (Seconds)",
-   "description": "Hold an agent's outgoing WhatsApp Business message for this many seconds and merge anything else they type in that window into a single send. Meta bills every business message from 1 Oct 2026, so a reply split across several bubbles is billed several times. WhatsApp Business (WABA) path only \u2014 WA Line is not billed by Meta. 0 = send immediately (off)."
+   "description": "Hold an agent's outgoing WhatsApp Business message for this many seconds and merge anything else they type in that window into a single send. Meta bills every business message from 1 Oct 2026, so a reply split across several bubbles is billed several times. WhatsApp Business (WABA) path only — WA Line is not billed by Meta. 0 = send immediately (off)."
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-25 16:00:00.000000",
+ "modified": "2026-11-23 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "WhatsApp Helpdesk Settings",
