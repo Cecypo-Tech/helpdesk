@@ -25,6 +25,7 @@ after_install = "helpdesk.setup.install.after_install"
 after_migrate = [
     "helpdesk.search.build_index_in_background",
     "helpdesk.search.download_corpus",
+    "helpdesk.helpdesk.doctype.whatsapp_helpdesk_settings.whatsapp_helpdesk_settings.fill_unset_defaults",
 ]
 
 
@@ -37,6 +38,7 @@ scheduler_events = {
     "all": [
         "helpdesk.search.build_index_if_not_exists",
         "helpdesk.search.download_corpus",
+    "helpdesk.helpdesk.doctype.whatsapp_helpdesk_settings.whatsapp_helpdesk_settings.fill_unset_defaults",
     ],
     "cron": {
         # Recovers inbound messages whose ingestion job died — without this they
