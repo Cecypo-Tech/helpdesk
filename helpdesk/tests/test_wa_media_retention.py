@@ -124,16 +124,21 @@ class TestWAMediaRetention(FrappeTestCase):
 		frappe.db.commit()  # the failure path rolls back the open transaction, as it would mid-run
 		self.addCleanup(frappe.db.delete, "Error Log", {"method": ["like", "%media retention%"]})
 
-		def flaky(url):
+		def flaky(url, pending):
+			ok = real(url, pending)
 			if url == bad.file_url:
-				raise frappe.QueryDeadlockError("deadlock")
-			return real(url)
+				raise frappe.QueryDeadlockError("deadlock")  # after its File row is gone
+			return ok
 
 		with patch.object(wa_media_retention, "_delete_file", side_effect=flaky):
 			wa_media_retention.purge_old_media()
 		self.assertEqual(self._row(stuck).media_purged, 0)
+		# Undone for that message only: its File row is back and the disk file stays.
+		self.assertTrue(frappe.db.exists("File", bad.name))
+		self.assertTrue(os.path.exists(bad.get_full_path()))
 		self.assertEqual(self._row(done).media_purged, 1)
 		self.assertFalse(frappe.db.exists("File", good.name))
+		self.assertFalse(os.path.exists(good.get_full_path()))
 
 	def test_a_second_run_while_one_is_going_does_nothing(self):
 		media = self._file()
