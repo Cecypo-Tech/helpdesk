@@ -139,6 +139,9 @@ class TestWAMediaRetention(FrappeTestCase):
 		self.assertEqual(self._row(done).media_purged, 1)
 		self.assertFalse(frappe.db.exists("File", good.name))
 		self.assertFalse(os.path.exists(good.get_full_path()))
+		# The log says why, not only which file.
+		logs = frappe.get_all("Error Log", filters={"method": ["like", "%media retention%"]}, pluck="error")
+		self.assertTrue(any("QueryDeadlockError" in e for e in logs))
 
 	def test_a_second_run_while_one_is_going_does_nothing(self):
 		media = self._file()

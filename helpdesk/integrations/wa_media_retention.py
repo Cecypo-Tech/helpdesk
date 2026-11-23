@@ -138,18 +138,25 @@ def _commit(pending: set[str]) -> None:
 
 
 def _row(urls, state, pending, work) -> None:
-	"""Run `work` for one message; on any error undo just this message, log it
-	and leave it for the next run."""
-	frappe.db.savepoint("wa_media_row")
-	before = set(pending)
+	"""Run `work` for one message in its own transaction. On any error undo it,
+	log it and leave the message for the next run.
+
+	One commit per message, not per batch: old rows still carry a ~1 MB base64
+	copy in raw_message, and 500 of those in one transaction overran the
+	database's transaction size limit on a production site."""
 	try:
 		work()
+		_commit(pending)
 	except Exception:
-		frappe.db.rollback(save_point="wa_media_row")
+		frappe.db.rollback()
 		for u in urls:
 			state.pop(u, None)
-		pending.intersection_update(before)
-		frappe.log_error(title="WhatsApp media retention: could not delete file", message="\n".join(urls))
+		pending.clear()
+		frappe.log_error(
+			title="WhatsApp media retention: could not delete file",
+			message="\n".join(urls) + "\n\n" + frappe.get_traceback(),
+		)
+		frappe.db.commit()
 
 
 def _strip_base64_copies(cutoff, deadline) -> bool:
@@ -234,7 +241,6 @@ def _purge_wa_line_media(cutoff, deadline, in_use: set[str]) -> bool:
 				)
 
 			_row(urls, state, pending, work)
-		_commit(pending)
 	return False
 
 
@@ -253,9 +259,8 @@ def _purge_waba_media(cutoff, deadline, in_use: set[str]) -> bool:
 	)
 	state: dict[str, str] = {}
 	pending: set[str] = set()
-	for i, r in enumerate(rows):
+	for r in rows:
 		if time.monotonic() > deadline:
-			_commit(pending)
 			return False
 
 		def work(r=r):
@@ -263,7 +268,4 @@ def _purge_waba_media(cutoff, deadline, in_use: set[str]) -> bool:
 				frappe.db.set_value("WhatsApp Message", r.name, "attach", "", update_modified=False)
 
 		_row([r.attach], state, pending, work)
-		if i % BATCH == BATCH - 1:
-			_commit(pending)
-	_commit(pending)
 	return True
