@@ -20,9 +20,11 @@ BATCH = 500
 # Under the long queue's timeout; whatever is left is picked up by a follow-up job.
 TIME_BUDGET_SECONDS = 20 * 60
 JOB_ID = "helpdesk:wa-media-retention"
-# Files that may be deleted with their message. A File attached anywhere else
-# (an HD Ticket, a Communication) is still in use and stays.
-_WA_DOCTYPES = (None, "", "WA Message", "WhatsApp Message")
+# A file is deleted only when every File row for its URL is WhatsApp's own:
+# attached to a WhatsApp message, or saved unattached by WA Line ingest under a
+# wa_media_ name. Frappe reuses one file for identical uploads, so a URL can
+# also belong to a ticket attachment or a File Manager upload; those stay.
+_WA_DOCTYPES = ("WA Message", "WhatsApp Message")
 
 
 def retention_days() -> int:
@@ -42,13 +44,26 @@ def purge_old_media() -> None:
 	days = retention_days()
 	if days <= 0:
 		return
-	cutoff = add_to_date(now_datetime(), days=-days)
-	deadline = time.monotonic() + TIME_BUDGET_SECONDS
-	finished = (
-		_strip_base64_copies(cutoff, deadline)
-		and _purge_wa_line_media(cutoff, deadline)
-		and _purge_waba_media(cutoff, deadline)
-	)
+	# One run at a time: the nightly run, run_media_cleanup_now and a follow-up
+	# job would otherwise take the same batches and delete the same files.
+	lock = frappe.cache.lock(frappe.cache.make_key(JOB_ID), timeout=TIME_BUDGET_SECONDS + 900)
+	if not lock.acquire(blocking=False):
+		return
+	try:
+		cutoff = add_to_date(now_datetime(), days=-days)
+		deadline = time.monotonic() + TIME_BUDGET_SECONDS
+		in_use = _in_use_urls(cutoff)
+		finished = (
+			_strip_base64_copies(cutoff, deadline)
+			and _purge_wa_line_media(cutoff, deadline, in_use)
+			and _purge_waba_media(cutoff, deadline, in_use)
+		)
+	finally:
+		try:
+			lock.release()
+		except Exception:
+			pass  # expired; nothing to release
+	# After the release, or the follow-up would find the lock held and stop.
 	if not finished and not frappe.flags.in_test:
 		# Not deduplicated on JOB_ID: this job may itself hold that id.
 		frappe.enqueue(purge_old_media, queue="long", timeout=TIME_BUDGET_SECONDS + 600)
@@ -58,11 +73,41 @@ def _is_local(url: str) -> bool:
 	return bool(url) and (url.startswith("/files/") or url.startswith("/private/files/"))
 
 
+def _in_use_urls(cutoff) -> set[str]:
+	"""Files a message inside the window still shows, on either integration.
+	Group messages are stored once per WA Line and share one file."""
+	urls = set(
+		frappe.db.sql_list(
+			"""
+			SELECT media_url FROM `tabWA Message` WHERE creation >= %(c)s AND IFNULL(media_url, '') != ''
+			UNION SELECT thumbnail_url FROM `tabWA Message` WHERE creation >= %(c)s AND IFNULL(thumbnail_url, '') != ''
+			""",
+			{"c": cutoff},
+		)
+	)
+	if frappe.db.exists("DocType", "WhatsApp Message"):
+		urls.update(
+			frappe.db.sql_list(
+				"SELECT attach FROM `tabWhatsApp Message` WHERE creation >= %s AND IFNULL(attach, '') != ''",
+				cutoff,
+			)
+		)
+	return urls
+
+
+def _is_ours(f) -> bool:
+	if f.attached_to_doctype:
+		return f.attached_to_doctype in _WA_DOCTYPES
+	return (f.file_name or "").startswith("wa_media_")
+
+
 def _delete_file(url: str) -> bool:
 	"""Delete every File row for `url` (the last one removes it from disk).
-	False when the file is still attached to something other than a WhatsApp message."""
-	files = frappe.get_all("File", filters={"file_url": url}, fields=["name", "attached_to_doctype"])
-	if any(f.attached_to_doctype not in _WA_DOCTYPES for f in files):
+	False, deleting nothing, when any of them is not WhatsApp's own."""
+	files = frappe.get_all(
+		"File", filters={"file_url": url}, fields=["name", "attached_to_doctype", "file_name"]
+	)
+	if not all(_is_ours(f) for f in files):
 		return False
 	for f in files:
 		frappe.delete_doc("File", f.name, ignore_permissions=True, force=True, delete_permanently=True)
@@ -96,60 +141,76 @@ def _strip_base64_copies(cutoff, deadline) -> bool:
 	return True
 
 
-def _purge_wa_line_media(cutoff, deadline) -> bool:
-	# Group messages are stored once per line and share one file; a file a
-	# message inside the window still shows stays until that message ages out.
-	in_use = set(
-		frappe.db.sql_list(
-			"""
-			SELECT media_url FROM `tabWA Message` WHERE creation >= %(c)s AND IFNULL(media_url, '') != ''
-			UNION SELECT thumbnail_url FROM `tabWA Message` WHERE creation >= %(c)s AND IFNULL(thumbnail_url, '') != ''
-			""",
-			{"c": cutoff},
-		)
-	)
-	after = "1970-01-01"  # resume point, so each batch doesn't rescan purged rows from the start
+def _url_states(urls: list[str], in_use: set[str], state: dict) -> dict:
+	"""url -> "gone" (deleted, or remote), "kept" (not WhatsApp's own; stays for
+	good) or "wait" (a recent message still shows it; look again another day)."""
+	out = {}
+	for url in urls:
+		if not _is_local(url):
+			out[url] = "gone"  # remote CDN links expire on their own
+			continue
+		if url not in state:
+			state[url] = "wait" if url in in_use else ("gone" if _delete_file(url) else "kept")
+		out[url] = state[url]
+	return out
+
+
+def _log_failure(urls, state):
+	frappe.db.rollback()
+	frappe.log_error(title="WhatsApp media retention: could not delete file", message="\n".join(urls))
+	for u in urls:
+		state.pop(u, None)  # rolled back with the row; try again next run
+
+
+def _purge_wa_line_media(cutoff, deadline, in_use: set[str]) -> bool:
+	# Resume point on (creation, name): each row is read once per run, even the
+	# ones left for another day.
+	after, after_name = "1970-01-01", ""
+	state: dict[str, str] = {}
 	while time.monotonic() < deadline:
 		rows = frappe.db.sql(
 			"""
 			SELECT name, creation, media_url, thumbnail_url FROM `tabWA Message`
-			WHERE creation >= %(after)s AND creation < %(cutoff)s
-			  AND media_purged = 0 AND content_type IN %(types)s
-			ORDER BY creation LIMIT %(n)s
+			WHERE creation < %(cutoff)s AND media_purged = 0 AND content_type IN %(types)s
+			  AND (creation > %(after)s OR (creation = %(after)s AND name > %(after_name)s))
+			ORDER BY creation, name LIMIT %(n)s
 			""",
-			{"after": after, "cutoff": cutoff, "types": MEDIA_TYPES, "n": BATCH},
+			{"after": after, "after_name": after_name, "cutoff": cutoff, "types": MEDIA_TYPES, "n": BATCH},
 			as_dict=True,
 		)
 		if not rows:
 			return True
-		after = rows[-1].creation
-		kept: dict[str, bool] = {}  # url -> file still exists
-
-		def keep(url: str) -> str:
-			if not _is_local(url):
-				return ""  # remote CDN links expire on their own
-			if url not in kept:
-				kept[url] = url in in_use or not _delete_file(url)
-			return url if kept[url] else ""
-
+		after, after_name = rows[-1].creation, rows[-1].name
 		for r in rows:
+			urls = [u for u in (r.media_url, r.thumbnail_url) if u]
+			try:
+				states = _url_states(urls, in_use, state)
+			except Exception:
+				_log_failure(urls, state)
+				continue
+			if "wait" in states.values():
+				continue  # stays unpurged so a later run deletes the file and marks it
 			frappe.db.sql(
 				"""
 				UPDATE `tabWA Message`
 				SET media_url = %s, thumbnail_url = %s, raw_message = '', media_purged = 1
 				WHERE name = %s
 				""",
-				(keep(r.media_url or ""), keep(r.thumbnail_url or ""), r.name),
+				(
+					r.media_url if states.get(r.media_url) == "kept" else "",
+					r.thumbnail_url if states.get(r.thumbnail_url) == "kept" else "",
+					r.name,
+				),
 			)
-		frappe.db.commit()
+			frappe.db.commit()
 	return False
 
 
-def _purge_waba_media(cutoff, deadline) -> bool:
+def _purge_waba_media(cutoff, deadline, in_use: set[str]) -> bool:
 	if not frappe.db.exists("DocType", "WhatsApp Message"):
 		return True
-	# One pass over every candidate: rows whose file stays (still in use) keep
-	# `attach` and are simply looked at again tomorrow. WABA volume is small.
+	# One pass over every candidate: rows whose file stays keep `attach` and are
+	# simply looked at again tomorrow. WABA volume is small.
 	rows = frappe.db.sql(
 		"""
 		SELECT name, attach FROM `tabWhatsApp Message`
@@ -158,18 +219,15 @@ def _purge_waba_media(cutoff, deadline) -> bool:
 		{"cutoff": cutoff},
 		as_dict=True,
 	)
-	if not rows:
-		return True
-	in_use = set(
-		frappe.db.sql_list(
-			"SELECT attach FROM `tabWhatsApp Message` WHERE creation >= %s AND IFNULL(attach, '') != ''",
-			cutoff,
-		)
-	)
+	state: dict[str, str] = {}
 	for r in rows:
 		if time.monotonic() > deadline:
 			return False
-		if r.attach in in_use or not _delete_file(r.attach):
+		try:
+			if _url_states([r.attach], in_use, state)[r.attach] != "gone":
+				continue
+		except Exception:
+			_log_failure([r.attach], state)
 			continue
 		frappe.db.set_value("WhatsApp Message", r.name, "attach", "", update_modified=False)
 		frappe.db.commit()

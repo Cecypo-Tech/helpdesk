@@ -98,7 +98,53 @@ class TestWAMediaRetention(FrappeTestCase):
 		self._msg(days_ago=2, media_url=media.file_url)
 		wa_media_retention.purge_old_media()
 		self.assertTrue(frappe.db.exists("File", media.name))
+		# Left unpurged, so the run after the recent one ages out deletes the file and marks it.
 		self.assertEqual(self._row(old).media_url, media.file_url)
+		self.assertEqual(self._row(old).media_purged, 0)
+
+	def test_an_unrelated_upload_sharing_the_file_is_kept(self):
+		# Frappe reuses one file for identical content, so a File Manager upload
+		# can share the URL of a WhatsApp image.
+		media = self._file()
+		other = frappe.get_doc({
+			"doctype": "File", "file_url": media.file_url, "file_name": "Screenshot (1).txt", "is_private": 0,
+		}).insert(ignore_permissions=True)
+		self.addCleanup(frappe.db.delete, "File", {"name": other.name})
+		name = self._msg(days_ago=40, media_url=media.file_url)
+		wa_media_retention.purge_old_media()
+		self.assertTrue(frappe.db.exists("File", other.name))
+		self.assertTrue(os.path.exists(media.get_full_path()))
+		self.assertEqual(dict(self._row(name)), {"media_url": media.file_url, "thumbnail_url": "", "raw_message": "", "media_purged": 1})
+
+	def test_a_file_that_fails_to_delete_does_not_stop_the_run(self):
+		bad, good = self._file(), self._file()
+		stuck = self._msg(days_ago=50, media_url=bad.file_url)
+		done = self._msg(days_ago=45, media_url=good.file_url)
+		real = wa_media_retention._delete_file
+		frappe.db.commit()  # the failure path rolls back the open transaction, as it would mid-run
+		self.addCleanup(frappe.db.delete, "Error Log", {"method": ["like", "%media retention%"]})
+
+		def flaky(url):
+			if url == bad.file_url:
+				raise frappe.QueryDeadlockError("deadlock")
+			return real(url)
+
+		with patch.object(wa_media_retention, "_delete_file", side_effect=flaky):
+			wa_media_retention.purge_old_media()
+		self.assertEqual(self._row(stuck).media_purged, 0)
+		self.assertEqual(self._row(done).media_purged, 1)
+		self.assertFalse(frappe.db.exists("File", good.name))
+
+	def test_a_second_run_while_one_is_going_does_nothing(self):
+		media = self._file()
+		self._msg(days_ago=40, media_url=media.file_url)
+		lock = frappe.cache.lock(frappe.cache.make_key(wa_media_retention.JOB_ID), timeout=60)
+		self.assertTrue(lock.acquire(blocking=False))
+		try:
+			wa_media_retention.purge_old_media()
+		finally:
+			lock.release()
+		self.assertTrue(frappe.db.exists("File", media.name))
 
 	def test_a_file_also_attached_to_a_ticket_is_kept(self):
 		media = self._file()
@@ -153,6 +199,8 @@ class TestWABAMediaRetention(FrappeTestCase):
 			"message_id": f"wamid.ret.{frappe.generate_hash(length=10)}", "status": "received",
 		}).insert(ignore_permissions=True)
 		self.addCleanup(frappe.delete_doc, "WhatsApp Message", doc.name, ignore_permissions=True, force=True)
+		# frappe_whatsapp attaches the media File to its message.
+		frappe.db.set_value("File", media.name, {"attached_to_doctype": "WhatsApp Message", "attached_to_name": doc.name})
 		frappe.db.set_value("WhatsApp Message", doc.name, "creation", add_to_date(now_datetime(), days=-45), update_modified=False)
 		wa_media_retention.purge_old_media()
 		self.assertFalse(frappe.db.exists("File", media.name))
