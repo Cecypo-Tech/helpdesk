@@ -82,6 +82,25 @@ class TestWASidebarRows(FrappeTestCase):
 		self.assertEqual(row["last_message"], "")
 		self.assertEqual(row["content_type"], "image")
 
+	# ── unread ────────────────────────────────────────────────────────────
+
+	def test_reactions_do_not_count_as_unread(self):
+		# A customer reacting to our reply is not a message waiting for an answer.
+		self._msg("Incoming", "hello", minutes_ago=2)
+		self._msg("Incoming", "👍", content_type="reaction")
+		self.assertEqual(self._row()["unread_count"], 1)
+		line = next(l for l in wa.get_wa_lines() if l["name"] == LINE)
+		self.assertEqual(line["unread"], 1)
+
+	def test_a_read_chat_with_a_new_reaction_stays_read(self):
+		self._msg("Incoming", "hello", minutes_ago=2)
+		wa._mark_conversation_read_for_user(JID, "Administrator")
+		self.addCleanup(frappe.db.delete, "WA Conversation Read State", {"jid": JID})
+		self._msg("Incoming", "👍", content_type="reaction")
+		self.assertEqual(self._row()["unread_count"], 0)
+		unread = wa.get_wa_conversations(line=LINE, conv_filter="unread")["conversations"]
+		self.assertNotIn(JID, [r["jid"] for r in unread])
+
 	# ── company ───────────────────────────────────────────────────────────
 
 	def test_company_falls_back_to_the_contacts_hd_customer(self):

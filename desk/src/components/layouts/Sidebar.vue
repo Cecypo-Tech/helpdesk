@@ -804,9 +804,13 @@ function linkBadge(link: any): number | null {
 // call waLinesStore.reload(), which re-ran an aggregate over the whole message
 // table — on every agent's sidebar, on every page, for every message in either
 // direction. Outgoing messages never affect an unread count, so they are
-// ignored outright.
-function onBaileysMessage(data: { line?: string; is_incoming?: boolean }) {
-  if (!data?.is_incoming || !data.line) return;
+// ignored outright, and so are reactions, which the server doesn't count.
+function onBaileysMessage(data: {
+  line?: string;
+  is_incoming?: boolean;
+  preview?: { content_type?: string };
+}) {
+  if (!data?.is_incoming || !data.line || data.preview?.content_type === "reaction") return;
   waLinesStore.bumpUnread(data.line, 1);
 }
 

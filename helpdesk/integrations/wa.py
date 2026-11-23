@@ -2275,7 +2275,7 @@ def get_wa_lines() -> list[dict]:
             FROM `tabWA Message` m
             LEFT JOIN `tabWA Conversation Read State` r
               ON r.jid = m.jid AND r.user = %(user)s
-            WHERE m.direction = 'Incoming'
+            WHERE m.direction = 'Incoming' AND IFNULL(m.content_type, '') != 'reaction'
               {floor_filter}
               AND (r.last_read IS NULL OR m.creation > r.last_read)
             GROUP BY m.line
@@ -2426,7 +2426,7 @@ def _unread_counts_for_user(jids: list[str], user: str) -> dict[str, int]:
         FROM `tabWA Message` m
         LEFT JOIN `tabWA Conversation Read State` r
           ON r.jid = m.jid AND r.user = %(user)s
-        WHERE m.direction = 'Incoming' AND m.jid IN %(jids)s
+        WHERE m.direction = 'Incoming' AND m.jid IN %(jids)s AND IFNULL(m.content_type, '') != 'reaction'
           {floor_filter}
           AND (r.last_read IS NULL OR m.creation > r.last_read)
         GROUP BY m.jid
@@ -2512,7 +2512,8 @@ def _search_matched_jids(search: str, line: str) -> set[str]:
 def _unread_jids_for_user(line: str, user: str) -> list[str]:
     """JIDs with at least one unread incoming message for this agent."""
     floor = _unread_floor()
-    clauses = ["m.direction = 'Incoming'"]
+    # Reactions aren't messages awaiting a reply; the thread doesn't show them either.
+    clauses = ["m.direction = 'Incoming'", "IFNULL(m.content_type, '') != 'reaction'"]
     if line:
         clauses.append("m.line = %(line)s")
     if floor:
