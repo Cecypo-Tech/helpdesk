@@ -665,7 +665,9 @@ const replyPreview = computed(() => {
 const formattedTime = computed(() => {
   if (!props.message.creation) return "";
   const d = new Date(props.message.creation);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // "23/11 2:17 PM": the date matters once a thread spans more than a day.
+  const date = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${date} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 });
 
 const editHistoryList = computed(() => {
