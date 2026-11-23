@@ -204,7 +204,7 @@
           class="mb-1 flex items-center gap-2 text-xs italic text-ink-gray-5"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          Image sent
+          {{ message.media_purged ? "Media expired" : "Image sent" }}
         </div>
 
         <!-- Document attachment -->
@@ -227,7 +227,7 @@
           class="mb-1 flex items-center gap-2 text-xs italic text-ink-gray-5"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M9.33 1.33H4a1.33 1.33 0 00-1.33 1.34v10.66A1.33 1.33 0 004 14.67h8a1.33 1.33 0 001.33-1.34V5.33L9.33 1.33z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Document sent
+          {{ message.media_purged ? "Media expired" : "Document sent" }}
         </div>
 
         <!-- Audio -->
@@ -239,7 +239,7 @@
           class="mb-1 flex items-center gap-2 text-xs italic text-ink-gray-5"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-          Voice message
+          {{ message.media_purged ? "Media expired" : "Voice message" }}
         </div>
 
         <!-- Video -->
@@ -270,12 +270,13 @@
           class="mb-1 flex items-center gap-2 text-xs italic text-ink-gray-5"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          Video sent
+          {{ message.media_purged ? "Media expired" : "Video sent" }}
         </div>
 
         <!-- Sticker -->
         <div v-if="message.content_type === 'sticker'" class="mb-1">
           <img v-if="message.attach" :src="message.attach" class="h-24 w-24 object-contain" />
+          <span v-else-if="message.media_purged" class="text-xs italic text-ink-gray-5">Media expired</span>
           <span v-else class="text-2xl">🎭</span>
         </div>
 

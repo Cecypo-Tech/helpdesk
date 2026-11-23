@@ -21,6 +21,7 @@
   "message_id",
   "reply_to_message_id",
   "raw_message",
+  "media_purged",
   "section_meta",
   "status",
   "line",
@@ -126,6 +127,14 @@
    "hidden": 1
   },
   {
+   "default": "0",
+   "description": "The media file was deleted by the retention job.",
+   "fieldname": "media_purged",
+   "fieldtype": "Check",
+   "label": "Media Purged",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_meta",
    "fieldtype": "Section Break",
    "label": "Meta"
@@ -181,7 +190,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-25 16:00:00.000000",
+ "modified": "2026-11-23 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "WA Message",
