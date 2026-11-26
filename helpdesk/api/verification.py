@@ -82,19 +82,29 @@ def approve_contact_link(contact: str, customer: str) -> dict:
 	if not frappe.db.exists("HD Customer", customer):
 		frappe.throw(frappe._("Customer {0} does not exist.").format(customer))
 
-	doc = frappe.get_doc("Contact", contact)
-	already = [
-		link.link_name for link in doc.get("links", []) if link.link_doctype == "HD Customer"
-	]
-	if customer not in already:
-		doc.append("links", {"link_doctype": "HD Customer", "link_name": customer})
-		doc.save(ignore_permissions=True)
-
-	_backfill_ticket_customer(contact, customer)
+	link_contact_to_customer(contact, customer)
 
 	frappe.db.set_value("Contact", contact, "hd_verification_status", VERIFIED)
 	frappe.db.commit()
 	return {"ok": True, "customer": customer}
+
+
+def link_contact_to_customer(contact: str, customer: str) -> bool:
+	"""Add the HD Customer link to the contact if missing, and fill the customer
+	on its blank tickets. No commit and no permission check: callers own both.
+	Returns True when a link was added.
+	"""
+	doc = frappe.get_doc("Contact", contact)
+	already = [
+		link.link_name for link in doc.get("links", []) if link.link_doctype == "HD Customer"
+	]
+	added = customer not in already
+	if added:
+		doc.append("links", {"link_doctype": "HD Customer", "link_name": customer})
+		doc.save(ignore_permissions=True)
+
+	_backfill_ticket_customer(contact, customer)
+	return added
 
 
 def _backfill_ticket_customer(contact: str, customer: str) -> None:
