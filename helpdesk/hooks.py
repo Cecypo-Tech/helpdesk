@@ -52,7 +52,10 @@ scheduler_events = {
         # elapsed. A cron expression cannot read that setting out of a Single,
         # so the decision lives in the function.
         "helpdesk.integrations.erpnext_sync.run_scheduled_sync",
-        # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.
+    ],
+    # Long queue: one fresh ERP snapshot per billing customer can outlast the default timeout.
+    # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.
+    "hourly_long": [
         "helpdesk.integrations.payment_reminders.run",
     ],
     "daily": [

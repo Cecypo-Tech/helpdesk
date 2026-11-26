@@ -341,9 +341,8 @@ class TestReplies(_CycleBase):
 		self.assertEqual(len(self.sent), 1)
 
 	def test_reply_routes_to_reminder_ticket(self):
-		self.assertEqual(pr.live_ticket_for_phone("+254 711 000111", None), self.c.ticket)
-		self.assertIsNone(pr.live_ticket_for_phone("254711000111", datetime(2026, 11, 26, 11)))
-		self.assertIsNone(pr.live_ticket_for_phone("254799999999", None))
+		self.assertEqual(pr.route_ticket("+254 711 000111", None, None, False), self.c.ticket)
+		self.assertIsNone(pr.route_ticket("254799999999", None, None, False))
 
 	def test_bot_skips_reminder_ticket(self):
 		from helpdesk.integrations import bot
@@ -374,3 +373,131 @@ class TestBillingToggle(_CycleBase):
 		self.assertEqual(frappe.db.get_value("Contact", self.contact, "is_billing_contact"), 0)
 		set_ticket_billing_contact(ticket, 1)
 		self.assertEqual(frappe.db.get_value("Contact", self.contact, "is_billing_contact"), 1)
+
+
+# ── Review fixes ──────────────────────────────────────────────────────────────
+
+WA_SETTINGS = "WhatsApp Helpdesk Settings"
+
+
+class TestRouting(_CycleBase):
+	"""Through the real wa.link_incoming_message."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		self.c = self.cycle()
+		frappe.db.set_single_value(WA_SETTINGS, "enabled", 1)
+		frappe.clear_cache(doctype=WA_SETTINGS)
+		self.support = frappe.get_doc({"doctype": "HD Ticket", "subject": PFX + "support",
+		                               "raised_by": "pr.support@example.com", "contact": self.contact}
+		                              ).insert(ignore_permissions=True).name
+
+	def incoming(self, ticket=None, at=None, **kw):
+		data = {"doctype": "WhatsApp Message", "type": "Incoming", "from": "254711000111",
+		        "message": "hi", "content_type": "text",
+		        "message_id": f"wamid.pr.{frappe.generate_hash(length=10)}"}
+		data.update(kw)
+		# db_insert: this test site has no WhatsApp Account, which frappe_whatsapp validates.
+		doc = frappe.get_doc(data)
+		doc.db_insert()
+		self.addCleanup(frappe.db.delete, "WhatsApp Message", {"name": doc.name})
+		if ticket:
+			doc.db_set({"reference_doctype": "HD Ticket", "reference_name": ticket}, update_modified=False)
+		if at:
+			frappe.db.set_value("WhatsApp Message", doc.name, "creation", at, update_modified=False)
+		return doc
+
+	def link(self, doc):
+		from helpdesk.integrations import wa
+
+		with patch("frappe.enqueue"), patch("helpdesk.integrations.wa.frappe.publish_realtime"):
+			wa.link_incoming_message(doc)
+		doc.reload()
+		return str(doc.reference_name)
+
+	def test_first_ever_reply_lands_on_reminder_ticket(self):
+		self.assertEqual(self.link(self.incoming(message="nitalipa Ijumaa")), str(self.c.ticket))
+
+	def test_reply_weeks_after_last_message_lands_on_reminder_ticket(self):
+		self.incoming(ticket=self.support, at="2026-11-01 09:00:00")
+		self.assertEqual(self.link(self.incoming(message="nimelipa")), str(self.c.ticket))
+
+	def test_live_support_conversation_is_not_hijacked(self):
+		self.incoming(ticket=self.support, at=frappe.utils.add_to_date(None, hours=-1))
+		self.assertEqual(self.link(self.incoming(message="the printer works now")), str(self.support))
+
+	def test_quoting_the_reminder_routes_to_it_even_mid_conversation(self):
+		self.incoming(ticket=self.support, at=frappe.utils.add_to_date(None, hours=-1))
+		out = frappe.get_doc({"doctype": "WhatsApp Message", "type": "Outgoing", "to": "254711000111",
+		                      "message": "reminder", "message_id": "wamid.pr.reminder",
+		                      "reference_doctype": "HD Ticket", "reference_name": self.c.ticket})
+		out.db_insert()
+		self.addCleanup(frappe.db.delete, "WhatsApp Message", {"name": out.name})
+		doc = self.incoming(message="kesho", is_reply=1, reply_to_message_id="wamid.pr.reminder")
+		self.assertEqual(self.link(doc), str(self.c.ticket))
+
+
+class TestReviewFixes(_CycleBase):
+	def test_new_cycle_waits_followup_days_after_previous_cycle(self):
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		self.snapshot = snap_ok(invoices=[])
+		pr.run(THURSDAY_10 + timedelta(hours=1))  # paid
+		self.snapshot = snap_ok()
+		self.sent.clear()
+		pr.run(THURSDAY_10 + timedelta(days=1))
+		self.assertEqual(self.sent, [])
+		pr.run(THURSDAY_10 + timedelta(days=7))
+		self.assertEqual(len(self.sent), 1)
+
+	def test_reminder_state_committed_right_after_send(self):
+		events = []
+		self.sent = events
+		pr.run(THURSDAY_10)  # poll
+		c = self.cycle()
+		with patch.object(pr.frappe.db, "commit", side_effect=lambda: events.append("commit")):
+			pr.send_reminder(c, THURSDAY_10, frappe.get_single(pr.SETTINGS))
+		self.assertEqual(events[-1], "commit")
+		self.assertEqual(frappe.db.get_value(pr.DOCTYPE, c.name, "reminders_sent"), 1)
+
+	def test_unticked_contact_holds_cycle(self):
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		self.make_contact("second", "254722000222", billing=1)
+		pr.run(THURSDAY_10)
+		c = self.cycle()
+		first = c.contact
+		frappe.db.set_value("Contact", first, "is_billing_contact", 0)
+		frappe.db.set_value(pr.DOCTYPE, c.name, "last_sent_on", datetime(2026, 11, 1, 9))
+		self.sent.clear()
+		pr.run(THURSDAY_10 + timedelta(hours=1))
+		self.assertEqual(self.cycle().status, "Held")
+		self.assertEqual(self.sent, [])
+
+	def test_reminder_ticket_has_no_fake_customer_message(self):
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		t = self.cycle().ticket
+		self.assertEqual(frappe.db.count("Communication", {"reference_doctype": "HD Ticket", "reference_name": t}), 0)
+
+	def test_snapshot_without_invoices_key_is_not_paid(self):
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		self.snapshot = {"status": "ok", "snapshot": {"advances_total": 0}}
+		self.sent.clear()
+		pr.run(THURSDAY_10 + timedelta(hours=1))
+		self.assertEqual(self.cycle().status, "Sent")
+		self.assertEqual(self.sent, [])
+
+
+class TestEscalationWaits(unittest.TestCase):
+	def test_no_escalation_before_customer_had_time_to_answer(self):
+		c = frappe._dict(status="Sent", reminders_sent=3, unanswered=3,
+		                 last_sent_on=datetime(2026, 11, 25, 9), promise_date=None)
+		self.assertEqual(pr.next_action(c, TODAY, S()), "wait")
+
+	def test_fresh_cycle_after_recent_previous_send_waits(self):
+		c = frappe._dict(status="Draft", reminders_sent=0, unanswered=0,
+		                 last_sent_on=datetime(2026, 11, 24, 9), promise_date=None)
+		self.assertEqual(pr.next_action(c, TODAY, S()), "wait")

@@ -4391,18 +4391,6 @@ def link_incoming_message(doc, s=None) -> None:
 	)
 
 	prev_ticket = linked[0].reference_name if linked and linked[0].reference_name else None
-	# A payment reminder sent to this number after its last message is what the
-	# customer is answering; without this the reply lands on their older ticket.
-	try:
-		from helpdesk.integrations import payment_reminders
-
-		reminder_ticket = payment_reminders.live_ticket_for_phone(
-			doc.get("from"), linked[0].creation if linked else None
-		)
-		if reminder_ticket:
-			prev_ticket = reminder_ticket
-	except Exception:
-		frappe.log_error(title="Payment reminder routing lookup failed")
 	prev_contact = prev_customer = None
 	if prev_ticket:
 		prev = frappe.db.get_value(
@@ -4413,13 +4401,28 @@ def link_incoming_message(doc, s=None) -> None:
 
 	# Reuse that ticket only while it is still live. A resolved or closed one
 	# starts a fresh ticket, but its contact/customer carry over (see above).
+	timeout = int(s.new_conversation_timeout_hours or 24)
+	prev_recent = bool(linked) and time_diff_in_hours(now_datetime(), linked[0].creation) < timeout
 	existing_ticket = None
 	if prev_ticket:
 		status_category = frappe.db.get_value("HD Ticket", prev_ticket, "status_category")
-		if status_category and status_category != "Resolved":
-			timeout = int(s.new_conversation_timeout_hours or 24)
-			if time_diff_in_hours(now_datetime(), linked[0].creation) < timeout:
-				existing_ticket = prev_ticket
+		if status_category and status_category != "Resolved" and prev_recent:
+			existing_ticket = prev_ticket
+
+	# A reply to a payment reminder belongs on the reminder's ticket, however long since the
+	# customer last wrote (route_ticket leaves a live support conversation alone).
+	try:
+		from helpdesk.integrations import payment_reminders
+
+		reminder_ticket = payment_reminders.route_ticket(
+			doc.get("from"), doc.get("reply_to_message_id"), prev_ticket, prev_recent
+		)
+		if reminder_ticket:
+			existing_ticket = reminder_ticket
+			prev = frappe.db.get_value("HD Ticket", reminder_ticket, ["contact", "customer"], as_dict=True)
+			prev_contact, prev_customer = prev.contact, prev.customer
+	except Exception:
+		frappe.log_error(title="Payment reminder routing lookup failed")
 
 	# A reaction is a thumbs-up on something already said, not a new request.
 	# It rides along on the live ticket it belongs to; with none, it is left

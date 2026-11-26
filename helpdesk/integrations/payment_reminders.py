@@ -40,16 +40,21 @@ def qualifying(invoices: list[dict], today: date, min_age: int) -> list[dict]:
 
 def next_action(cycle, today: date, s) -> str:
 	"""'due', 'wait' or 'escalate' for an active cycle."""
-	if (cycle.unanswered or 0) >= int(s.max_unanswered or 3):
-		return "escalate"
-	if not cycle.reminders_sent:
+	followup = int(s.followup_days or 7)
+	if not cycle.last_sent_on:
 		return "due"
 	since = (today - getdate(cycle.last_sent_on)).days
+	if not cycle.reminders_sent:
+		# A fresh cycle seeded from the customer's previous one: no new chase inside followup_days.
+		return "due" if since >= followup else "wait"
+	if (cycle.unanswered or 0) >= int(s.max_unanswered or 3):
+		# Give them followup_days to answer the last reminder before asking the owner to call.
+		return "escalate" if since >= followup else "wait"
 	if since < int(s.min_gap_days or 2):
 		return "wait"
 	if cycle.status == "Promised" and cycle.promise_date:
 		return "due" if today >= getdate(cycle.promise_date) + timedelta(days=2) else "wait"
-	return "due" if since >= int(s.followup_days or 7) else "wait"
+	return "due" if since >= followup else "wait"
 
 
 def in_business_hours(now: datetime) -> bool:
@@ -224,7 +229,7 @@ def refresh_customer(hd_customer: str, contacts: list, now: datetime, s) -> str 
 	erp = frappe.db.get_value("HD Customer", hd_customer, "erpnext_customer")
 	snap = _snapshot(erp)
 	data = snap.get("snapshot") if snap.get("status") == "ok" else None
-	if not data:
+	if not data or "invoices" not in data:
 		return None  # unreachable or PowerPack switched off: never read as "paid"
 
 	cycle = _open_cycle(hd_customer)
@@ -240,7 +245,10 @@ def refresh_customer(hd_customer: str, contacts: list, now: datetime, s) -> str 
 		return None
 
 	if not cycle:
-		cycle = frappe.get_doc({"doctype": DOCTYPE, "hd_customer": hd_customer, "erp_customer": erp, "status": "Draft"})
+		cycle = frappe.get_doc({"doctype": DOCTYPE, "hd_customer": hd_customer, "erp_customer": erp, "status": "Draft",
+		                        "last_sent_on": frappe.db.get_value(
+		                            DOCTYPE, {"hd_customer": hd_customer, "last_sent_on": ["is", "set"]},
+		                            "last_sent_on", order_by="last_sent_on desc")})
 	if not cycle.ticket:  # the contact is fixed once a conversation exists
 		c = _pick_contact(contacts)
 		cycle.contact, cycle.phone = c.contact, c.phone
@@ -249,6 +257,18 @@ def refresh_customer(hd_customer: str, contacts: list, now: datetime, s) -> str 
 	cycle.oldest_due = min(getdate(i.get("due_date") or i.get("posting_date")) for i in due)
 	cycle.invoices = json.dumps([{k: i.get(k) for k in ("name", "posting_date", "due_date", "outstanding_amount")}
 	                             for i in due], default=str)
+
+	if cycle.ticket and cycle.status != "Held" and (
+		cycle.contact not in {c.contact for c in contacts}
+		or frappe.db.get_value("HD Ticket", cycle.ticket, "contact") != cycle.contact
+	):
+		_close_poll(cycle)
+		cycle.status, cycle.hold_reason = "Held", "Billing contact changed – check before chasing"
+		cycle.save(ignore_permissions=True)
+		raven_bridge.post(f"⏸ Payment reminders for {hd_customer} held: billing contact changed. Ticket #{cycle.ticket}")
+		return cycle.name
+	if cycle.status == "Held" and cycle.hold_reason and cycle.hold_reason.startswith("Billing contact"):
+		return cycle.name  # a person decides; resolve or close the cycle by hand
 
 	if float(data.get("advances_total") or 0) > 0:
 		_close_poll(cycle)
@@ -313,10 +333,13 @@ def _ensure_ticket(cycle) -> str:
 		t = frappe.get_doc({
 			"doctype": "HD Ticket",
 			"subject": f"Payment reminder – {cycle.hd_customer}",
-			"description": f"Automated payment reminder cycle {cycle.name}.",
 			"raised_by": email, "contact": cycle.contact, "customer": cycle.hd_customer,
 			"ticket_channel": "WhatsApp",
-		}).insert(ignore_permissions=True)
+		})
+		# The customer did not write this ticket: no "we received your request" email,
+		# and no description (it would show as a message from them).
+		t.flags.skip_ack_email = True
+		t.insert(ignore_permissions=True)
 	finally:
 		frappe.set_user(previous)
 	# Waiting on the customer: keeps it out of the Open queue until they write.
@@ -344,6 +367,10 @@ def send_reminder(cycle, now: datetime, s) -> bool:
 	cycle.last_sent_on = now
 	cycle.promise_date = None
 	cycle.status = "Sent"
+	# Meta has the message now. Commit at once so nothing later in the run can roll the
+	# counters back and make the next hour send it again.
+	cycle.save(ignore_permissions=True)
+	frappe.db.commit()
 	return True
 
 
@@ -387,19 +414,31 @@ def is_reminder_ticket(ticket) -> bool:
 	return bool(ticket) and bool(frappe.db.exists(DOCTYPE, {"ticket": str(ticket), "status": ["in", OPEN]}))
 
 
-def live_ticket_for_phone(phone: str, after) -> str | None:
-	"""The open reminder ticket for this number, if a reminder went out after `after`
-	(the number's last inbound message). Otherwise the reply belongs wherever it went before."""
+def route_ticket(phone: str, reply_to: str | None, prev_ticket, prev_recent: bool) -> str | None:
+	"""The live reminder ticket an inbound message from `phone` belongs on, or None.
+
+	- Quoting a message: follow the quote (the reminder ticket only if it quotes that thread).
+	- Otherwise: the reminder ticket, unless the number is mid-conversation on another live
+	  ticket (`prev_ticket`, last inbound within the conversation timeout).
+	"""
 	want = _digits(phone)
 	if not want:
 		return None
-	filters = {"status": ["in", OPEN], "ticket": ["is", "set"], "last_sent_on": ["is", "set"]}
-	if after:
-		filters["last_sent_on"] = [">", after]
-	for c in frappe.get_all(DOCTYPE, filters=filters, fields=["ticket", "phone"], order_by="last_sent_on desc"):
+	reminder = None
+	for c in frappe.get_all(DOCTYPE, filters={"status": ["in", OPEN], "ticket": ["is", "set"],
+	                                          "last_sent_on": ["is", "set"]},
+	                        fields=["ticket", "phone"], order_by="last_sent_on desc"):
 		if _digits(c.phone) == want:
-			return c.ticket
-	return None
+			reminder = str(c.ticket)
+			break
+	if not reminder or frappe.db.get_value("HD Ticket", reminder, "status_category") == "Resolved":
+		return None
+	if reply_to:
+		quoted = frappe.db.get_value("WhatsApp Message", {"message_id": reply_to}, "reference_name")
+		return reminder if quoted and str(quoted) == reminder else None
+	if prev_ticket and str(prev_ticket) != reminder and prev_recent:
+		return None
+	return reminder
 
 
 def on_incoming(doc) -> None:
@@ -429,6 +468,8 @@ def handle_reply(ticket, text: str, now: datetime) -> None:
 	if not name:
 		return
 	cycle = frappe.get_doc(DOCTYPE, name)
+	if cycle.status == "With Team":
+		return  # an agent is handling the conversation
 	try:
 		result = parse_classification(_classify(text, now.date()), now.date())
 	except Exception:
