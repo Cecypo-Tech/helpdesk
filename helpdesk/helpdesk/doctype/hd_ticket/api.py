@@ -679,7 +679,7 @@ def get_ticket_contact(ticket: str | int):
     return frappe.db.get_value(
         "Contact",
         contact,
-        ["name", "email_id", "phone", "mobile_no", "image", "designation", "company_name"],
+        ["name", "email_id", "phone", "mobile_no", "image", "designation", "company_name", "is_billing_contact"],
         as_dict=1,
     )
 

@@ -63,6 +63,21 @@
             "
           />
         </div>
+        <!-- Billing contact: only ticked contacts get payment reminders -->
+        <label
+          v-if="ticket?.doc?.contact"
+          class="flex gap-2 items-center p-1.5 cursor-pointer"
+          title="Payment reminders for overdue invoices go only to billing contacts"
+        >
+          <input
+            type="checkbox"
+            class="rounded border-outline-gray-3"
+            :checked="!!contact.data.is_billing_contact"
+            :disabled="billingToggle.loading"
+            @change="toggleBilling(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="text-p-sm text-ink-gray-6">Billing contact</span>
+        </label>
         <!-- Support Coverage -->
         <div
           v-if="entitlement.data?.customer"
@@ -284,6 +299,19 @@ const entitlement = createResource({
 // WhatsApp page the sidebar can mount before the ticket doc resolves, so the
 // watcher (not a one-shot auto fetch) is also what lets it retry once the
 // name becomes available.
+const billingToggle = createResource({
+  url: "helpdesk.api.entitlement.set_ticket_billing_contact",
+});
+function toggleBilling(checked: boolean) {
+  billingToggle
+    .submit({ ticket: ticket.value?.doc?.name, value: checked ? 1 : 0 })
+    .then((v: number) => {
+      contact.value.data.is_billing_contact = v;
+      toast.success(v ? "Marked as billing contact" : "No longer a billing contact");
+    })
+    .catch(() => toast.error("Could not update billing contact"));
+}
+
 const standing = createResource({
   url: "helpdesk.api.entitlement.get_ticket_standing",
   makeParams: () => ({ ticket: ticket.value?.doc?.name }),

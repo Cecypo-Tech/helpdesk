@@ -584,6 +584,7 @@ export interface TicketContact {
   phone: string;
   mobile_no: string;
   image: string;
+  is_billing_contact?: number;
 }
 
 export type RecentTicket = Record<

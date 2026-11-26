@@ -52,6 +52,8 @@ scheduler_events = {
         # elapsed. A cron expression cannot read that setting out of a Single,
         # so the decision lives in the function.
         "helpdesk.integrations.erpnext_sync.run_scheduled_sync",
+        # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.
+        "helpdesk.integrations.payment_reminders.run",
     ],
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",

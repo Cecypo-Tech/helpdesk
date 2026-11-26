@@ -361,3 +361,16 @@ class TestReplies(_CycleBase):
 		pr._resolve(self.c.ticket)
 		pr.run(THURSDAY_10 + timedelta(hours=1))
 		self.assertEqual(frappe.db.get_value(pr.DOCTYPE, self.c.name, "status"), "Closed")
+
+
+class TestBillingToggle(_CycleBase):
+	def test_agent_sets_billing_contact_on_ticket_contact(self):
+		from helpdesk.api.entitlement import set_ticket_billing_contact
+
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		ticket = self.cycle().ticket
+		set_ticket_billing_contact(ticket, 0)
+		self.assertEqual(frappe.db.get_value("Contact", self.contact, "is_billing_contact"), 0)
+		set_ticket_billing_contact(ticket, 1)
+		self.assertEqual(frappe.db.get_value("Contact", self.contact, "is_billing_contact"), 1)
