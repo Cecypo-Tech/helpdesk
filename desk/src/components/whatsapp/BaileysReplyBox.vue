@@ -243,6 +243,7 @@
         :placeholder="attachments.length ? 'Add a caption (optional)...' : isGroup ? 'Type a message… use @ to mention' : 'Type a message...'"
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-white px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
+        :class="{ '!border-outline-red-3 !border-2': customerPending }"
         @input="onTextInput"
         @keydown="onTextKeydown"
         @paste="onPaste"
@@ -267,6 +268,7 @@
 <script setup lang="ts">
 import { call, createListResource, createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
+import { useCustomerPending } from "@/composables/useCustomerPending";
 
 interface Participant {
   jid: string;
@@ -281,6 +283,9 @@ const props = defineProps<{
   jid?: string | null;
   line?: string;
 }>();
+
+// Red when the ticket has no customer, or the customer has overdue invoices.
+const { pending: customerPending } = useCustomerPending(() => props.ticketId);
 
 const emit = defineEmits<{
   (e: "sent"): void;

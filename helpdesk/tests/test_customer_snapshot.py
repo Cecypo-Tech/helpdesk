@@ -76,3 +76,19 @@ class TestFetchSnapshot(unittest.TestCase):
 		erpnext_standing.fetch_snapshot("ACME Ltd")
 		erpnext_standing.fetch_snapshot("ACME Ltd")
 		call.assert_called_once()
+
+
+class TestTicketSnapshotEndpoint(unittest.TestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.ticket = frappe.get_doc({"doctype": "HD Ticket", "subject": "_SNAP ticket"}).insert(
+			ignore_permissions=True
+		)
+		self.addCleanup(
+			frappe.delete_doc, "HD Ticket", self.ticket.name, force=True, ignore_permissions=True
+		)
+
+	def test_ticket_without_customer_is_flagged_missing(self):
+		from helpdesk.api.entitlement import get_ticket_customer_snapshot
+
+		self.assertTrue(get_ticket_customer_snapshot(self.ticket.name)["missing_customer"])

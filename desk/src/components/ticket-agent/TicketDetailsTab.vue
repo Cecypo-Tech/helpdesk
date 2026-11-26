@@ -25,8 +25,8 @@
               :id="field.fieldname"
               :class="[
                 section.group ? 'flex-1' : 'min-w-0 flex-1',
-                field.fieldname === 'customer' && !field.value
-                  ? '[&_button]:!border [&_button]:!border-outline-red-3'
+                field.fieldname === 'customer' && (!field.value || pending)
+                  ? '[&_button]:!border [&_button]:!border-outline-red-3 [&_button_span]:!text-ink-red-3'
                   : '',
               ]"
               :page-length="10"
@@ -91,6 +91,7 @@ import { computed, inject, ref } from "vue";
 import TicketField from "../TicketField.vue";
 import AssignTo from "./AssignTo.vue";
 import CustomerSnapshotDialog from "./CustomerSnapshotDialog.vue";
+import { useCustomerPending } from "@/composables/useCustomerPending";
 import TicketContact from "./TicketContact.vue";
 
 const ticket = inject(TicketSymbol);
@@ -99,6 +100,9 @@ const customizations = inject(CustomizationSymbol);
 const activities = inject(ActivitiesSymbol);
 const { getFields, getField } = getMeta("HD Ticket");
 const { notifyTicketUpdate } = useNotifyTicketUpdate(ticket.value?.name);
+const { pending, reload: reloadPending } = useCustomerPending(
+  () => ticket.value?.doc?.name
+);
 
 // ticket_type, priority, customer, agent_group
 const coreFields = computed(() => {
@@ -208,6 +212,8 @@ function handleFieldUpdate(
         if (fieldname === "agent_group") {
           assignees.value.reload();
         }
+        // After the save, not on the value change: earlier reads the old customer.
+        if (fieldname === "customer") reloadPending();
         activities.value.reload();
       },
     }

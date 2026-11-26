@@ -72,32 +72,19 @@
 </template>
 
 <script setup lang="ts">
-import { Dialog, createResource } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { Dialog } from "frappe-ui";
+import { computed, ref } from "vue";
 import LucideInfo from "~icons/lucide/info";
+import { useCustomerPending } from "@/composables/useCustomerPending";
 
 // Agent-only figures from ERPNext (powerpack's customer snapshot). Hidden when
 // ERPNext can't answer or the ticket has no linked ERPNext customer.
 const props = defineProps<{ ticket?: string | number; customer?: string }>();
 const show = ref(false);
 
-const res = createResource({
-  url: "helpdesk.api.entitlement.get_ticket_customer_snapshot",
-  makeParams: () => ({ ticket: props.ticket }),
-});
-
-watch(
-  () => [props.ticket, props.customer],
-  () => (props.ticket && props.customer ? res.reload() : res.reset()),
-  { immediate: true }
-);
-
-const snap = computed(() =>
-  res.data?.status === "ok" ? res.data.snapshot : null
-);
-const erpUrl = computed(() => (res.data?.erp_url || "").replace(/\/$/, ""));
-const hasOverdue = computed(() =>
-  (snap.value?.invoices || []).some((i) => i.days_overdue > 0)
+// Reloaded by TicketDetailsTab once a customer change is saved.
+const { snapshot: snap, erpUrl, hasOverdue } = useCustomerPending(
+  () => props.ticket
 );
 const title = computed(() => snap.value?.customer_name || props.customer);
 
