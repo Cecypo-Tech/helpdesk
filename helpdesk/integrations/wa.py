@@ -4391,6 +4391,18 @@ def link_incoming_message(doc, s=None) -> None:
 	)
 
 	prev_ticket = linked[0].reference_name if linked and linked[0].reference_name else None
+	# A payment reminder sent to this number after its last message is what the
+	# customer is answering; without this the reply lands on their older ticket.
+	try:
+		from helpdesk.integrations import payment_reminders
+
+		reminder_ticket = payment_reminders.live_ticket_for_phone(
+			doc.get("from"), linked[0].creation if linked else None
+		)
+		if reminder_ticket:
+			prev_ticket = reminder_ticket
+	except Exception:
+		frappe.log_error(title="Payment reminder routing lookup failed")
 	prev_contact = prev_customer = None
 	if prev_ticket:
 		prev = frappe.db.get_value(

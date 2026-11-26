@@ -817,6 +817,12 @@ def handle_whatsapp_message(doc, method=None) -> None:
 	if doc.reference_doctype != "HD Ticket" or not doc.reference_name:
 		return
 
+	# Payment reminder conversations are answered by payment_reminders, never by the support bot.
+	from helpdesk.integrations import payment_reminders
+
+	if payment_reminders.is_reminder_ticket(doc.reference_name):
+		return
+
 	settings = _bot_settings()
 	if not settings.is_enabled:
 		return

@@ -368,3 +368,104 @@ def _resolve(ticket: str) -> None:
 		t.save(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title=f"Payment reminder: resolving ticket {ticket} failed")
+
+
+# ── Replies ───────────────────────────────────────────────────────────────────
+
+CLASSIFIER_PROMPT = """You read a customer's WhatsApp reply to a polite overdue-invoice reminder from a Kenyan
+company. Replies may be English, Swahili or Sheng ("kesho" = tomorrow, "wiki ijayo" = next week,
+"mwisho wa mwezi" = end of month). Today is {today} ({weekday}).
+
+Answer with JSON only: {{"class": "<promise|paid|dispute_or_question|other>", "date": "<YYYY-MM-DD or null>"}}
+- promise: they commit to pay on a specific day. Give that date.
+- paid: they say they have already paid.
+- dispute_or_question: they dispute the amount, ask a question, or want to talk to someone.
+- other: anything else, or if unsure."""
+
+
+def is_reminder_ticket(ticket) -> bool:
+	return bool(ticket) and bool(frappe.db.exists(DOCTYPE, {"ticket": str(ticket), "status": ["in", OPEN]}))
+
+
+def live_ticket_for_phone(phone: str, after) -> str | None:
+	"""The open reminder ticket for this number, if a reminder went out after `after`
+	(the number's last inbound message). Otherwise the reply belongs wherever it went before."""
+	want = _digits(phone)
+	if not want:
+		return None
+	filters = {"status": ["in", OPEN], "ticket": ["is", "set"], "last_sent_on": ["is", "set"]}
+	if after:
+		filters["last_sent_on"] = [">", after]
+	for c in frappe.get_all(DOCTYPE, filters=filters, fields=["ticket", "phone"], order_by="last_sent_on desc"):
+		if _digits(c.phone) == want:
+			return c.ticket
+	return None
+
+
+def on_incoming(doc) -> None:
+	"""Called from wa_ingest once an inbound WABA message is linked to its ticket."""
+	if doc.reference_doctype == "HD Ticket" and is_reminder_ticket(doc.reference_name):
+		frappe.enqueue("helpdesk.integrations.payment_reminders.process_reply", queue="default",
+		               job_id=f"payrem_{doc.name}", enqueue_after_commit=True, msg_name=doc.name)
+
+
+def process_reply(msg_name: str) -> None:
+	msg = frappe.db.get_value("WhatsApp Message", msg_name, ["reference_name", "message"], as_dict=True)
+	if msg and msg.message:
+		handle_reply(msg.reference_name, msg.message, frappe.utils.now_datetime())
+		frappe.db.commit()
+
+
+def _classify(text: str, today: date) -> str:
+	from helpdesk.integrations import llm
+
+	system = CLASSIFIER_PROMPT.format(today=today.isoformat(), weekday=today.strftime("%A"))
+	return llm.chat([{"role": "system", "content": system}, {"role": "user", "content": text}], max_tokens=100)
+
+
+def handle_reply(ticket, text: str, now: datetime) -> None:
+	"""Record what the customer said; acknowledge promises and payments at once, hand the rest to the team."""
+	name = frappe.db.get_value(DOCTYPE, {"ticket": str(ticket), "status": ["in", OPEN]}, "name")
+	if not name:
+		return
+	cycle = frappe.get_doc(DOCTYPE, name)
+	try:
+		result = parse_classification(_classify(text, now.date()), now.date())
+	except Exception:
+		frappe.log_error(title="Payment reminder: reply classification failed")
+		result = {"class": "other", "date": None}
+	cycle.unanswered = 0
+	cycle.last_reply_class = result["class"]
+
+	if result["class"] == "promise":
+		cycle.status, cycle.promise_date = "Promised", result["date"]
+		_ack(cycle, f"Thank you, noted for {result['date'].strftime('%A %-d %b')} 🙏")
+	elif result["class"] == "paid":
+		snap = _snapshot(cycle.erp_customer)
+		data = snap.get("snapshot") if snap.get("status") == "ok" else None
+		s = _settings()
+		if data and not qualifying(data.get("invoices"), now.date(), int(s.min_invoice_age_days or 7)):
+			cycle.status = "Paid"
+			send_thanks(cycle, now)
+		else:
+			# Never claim a payment we cannot see: the team checks.
+			cycle.status = "With Team"
+			_ack(cycle, "Thank you, we'll confirm shortly 🙏")
+			_reopen(cycle.ticket)
+	else:
+		cycle.status = "With Team"
+		_reopen(cycle.ticket)
+	_close_poll(cycle)
+	cycle.save(ignore_permissions=True)
+
+
+def _ack(cycle, text: str) -> None:
+	try:
+		_send_text(cycle.ticket, text)
+	except Exception:
+		frappe.log_error(title=f"Payment reminder acknowledgement failed for {cycle.name}")
+
+
+def _reopen(ticket: str) -> None:
+	if frappe.db.get_value("HD Ticket", ticket, "status") != "Open":
+		frappe.db.set_value("HD Ticket", ticket, "status", "Open")

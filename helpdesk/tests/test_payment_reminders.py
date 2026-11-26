@@ -282,3 +282,82 @@ class TestCycles(_CycleBase):
 		frappe.db.set_single_value(pr.SETTINGS, "enabled", 0)
 		pr.run(THURSDAY_10)
 		self.assertIsNone(self.cycle())
+
+
+# ── Replies ───────────────────────────────────────────────────────────────────
+
+
+class TestReplies(_CycleBase):
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_single_value(pr.SETTINGS, "auto_send", 1)
+		pr.run(THURSDAY_10)
+		self.c = self.cycle()
+		self.assertEqual(self.c.status, "Sent")
+		self.sent.clear()
+		self.llm = '{"class": "other"}'
+		p = patch.object(pr, "_classify", side_effect=lambda text, today: self.llm)
+		p.start()
+		self.addCleanup(p.stop)
+
+	def test_promise_reply_records_date_and_acks(self):
+		self.llm = '{"class": "promise", "date": "2026-11-27"}'
+		pr.handle_reply(self.c.ticket, "nitalipa kesho", THURSDAY_10)
+		self.c.reload()
+		self.assertEqual(self.c.status, "Promised")
+		self.assertEqual(str(self.c.promise_date), "2026-11-27")
+		self.assertEqual(self.c.unanswered, 0)
+		self.assertEqual(self.sent[0][0], "text")
+		self.assertIn("27", self.sent[0][2])
+
+	def test_paid_reply_confirmed_thanks_and_closes(self):
+		self.llm = '{"class": "paid"}'
+		self.snapshot = snap_ok(invoices=[])
+		pr.handle_reply(self.c.ticket, "I paid", THURSDAY_10)
+		self.assertEqual(self.cycle().status, "Paid")
+		self.assertEqual(len(self.sent), 1)
+
+	def test_paid_reply_unconfirmed_goes_to_team(self):
+		self.llm = '{"class": "paid"}'
+		pr.handle_reply(self.c.ticket, "I paid", THURSDAY_10)
+		self.assertEqual(self.cycle().status, "With Team")
+		self.assertIn("confirm", self.sent[0][2])
+
+	def test_dispute_goes_to_team_no_reply(self):
+		self.llm = '{"class": "dispute_or_question"}'
+		pr.handle_reply(self.c.ticket, "this invoice is wrong", THURSDAY_10)
+		self.assertEqual(self.cycle().status, "With Team")
+		self.assertEqual(self.sent, [])
+
+	def test_with_team_pauses_reminders(self):
+		self.llm = '{"class": "other"}'
+		pr.handle_reply(self.c.ticket, "call me", THURSDAY_10)
+		pr.run(THURSDAY_10 + timedelta(days=9))
+		self.assertEqual(self.sent, [])
+
+	def test_ack_ignores_business_hours(self):
+		self.llm = '{"class": "promise", "date": "2026-12-01"}'
+		pr.handle_reply(self.c.ticket, "Monday", datetime(2026, 11, 29, 22))  # Sunday night
+		self.assertEqual(len(self.sent), 1)
+
+	def test_reply_routes_to_reminder_ticket(self):
+		self.assertEqual(pr.live_ticket_for_phone("+254 711 000111", None), self.c.ticket)
+		self.assertIsNone(pr.live_ticket_for_phone("254711000111", datetime(2026, 11, 26, 11)))
+		self.assertIsNone(pr.live_ticket_for_phone("254799999999", None))
+
+	def test_bot_skips_reminder_ticket(self):
+		from helpdesk.integrations import bot
+
+		self.assertTrue(pr.is_reminder_ticket(self.c.ticket))
+		doc = frappe._dict(type="Incoming", reference_doctype="HD Ticket", reference_name=self.c.ticket,
+		                   whatsapp_account=None, name="X")
+		with patch.object(bot, "_bot_settings", return_value=frappe._dict(is_enabled=1)), \
+		     patch.object(frappe, "enqueue") as enq:
+			bot.handle_whatsapp_message(doc)
+		enq.assert_not_called()
+
+	def test_resolved_with_team_ticket_closes_cycle(self):
+		pr.handle_reply(self.c.ticket, "call me", THURSDAY_10)
+		pr._resolve(self.c.ticket)
+		pr.run(THURSDAY_10 + timedelta(hours=1))
+		self.assertEqual(frappe.db.get_value(pr.DOCTYPE, self.c.name, "status"), "Closed")
