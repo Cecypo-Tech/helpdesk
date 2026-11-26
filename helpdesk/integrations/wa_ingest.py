@@ -66,6 +66,16 @@ def process_incoming_message(message_name: str) -> None:
 			message=f"Message {doc.name} is linked to ticket {doc.reference_name}; the bot did not run.",
 		)
 
+	try:
+		from helpdesk.integrations import payment_reminders
+
+		payment_reminders.on_incoming(doc)
+	except Exception:
+		frappe.log_error(
+			title="Payment reminder reply dispatch failed",
+			message=f"Message {doc.name} is linked to ticket {doc.reference_name}.",
+		)
+
 	# Same discipline as the bot dispatch above: the ticket is already committed
 	# and an automated question must not be able to undo it. handle_incoming
 	# swallows its own errors too; this is belt and braces.

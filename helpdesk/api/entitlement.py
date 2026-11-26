@@ -119,3 +119,20 @@ def get_ticket_customer_snapshot(ticket: str | int) -> dict:
 		return {"status": "unknown", "snapshot": None, "missing_customer": True}
 	erp_customer = frappe.db.get_value("HD Customer", customer, "erpnext_customer")
 	return {**erpnext_standing.fetch_snapshot(erp_customer), "missing_customer": False}
+
+
+@frappe.whitelist()
+@agent_only
+def set_ticket_billing_contact(ticket: str | int, value: int) -> int:
+	"""Tick or untick Is Billing Contact on this ticket's contact.
+
+	Only ticked contacts receive payment reminders (with invoice figures), so this
+	is the opt-in. Agents often lack Contact write permission, hence the bypass.
+	"""
+	frappe.has_permission("HD Ticket", "read", ticket, throw=True)
+	contact = frappe.db.get_value("HD Ticket", ticket, "contact")
+	if not contact:
+		frappe.throw(frappe._("This ticket has no contact."))
+	value = 1 if frappe.utils.cint(value) else 0
+	frappe.db.set_value("Contact", contact, "is_billing_contact", value)
+	return value

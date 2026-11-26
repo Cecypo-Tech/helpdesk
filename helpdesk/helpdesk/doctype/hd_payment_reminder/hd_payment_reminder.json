@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "creation": "2026-11-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "hd_customer",
+  "erp_customer",
+  "status",
+  "contact",
+  "phone",
+  "ticket",
+  "figures_section",
+  "total",
+  "invoice_count",
+  "oldest_due",
+  "invoices",
+  "hold_reason",
+  "progress_section",
+  "reminders_sent",
+  "unanswered",
+  "last_sent_on",
+  "promise_date",
+  "last_reply_class",
+  "poll_id",
+  "poll_message",
+  "poll_posted_on",
+  "skipped_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "hd_customer",
+   "fieldtype": "Link",
+   "label": "Hd Customer",
+   "options": "HD Customer",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "erp_customer",
+   "fieldtype": "Data",
+   "label": "ERP Customer"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nAwaiting Approval\nApproved\nSent\nPromised\nWith Team\nEscalated\nHeld\nPaid\nClosed",
+   "default": "Draft",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "contact",
+   "fieldtype": "Link",
+   "label": "Contact",
+   "options": "Contact"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone"
+  },
+  {
+   "fieldname": "ticket",
+   "fieldtype": "Link",
+   "label": "Ticket",
+   "options": "HD Ticket"
+  },
+  {
+   "fieldname": "figures_section",
+   "fieldtype": "Section Break",
+   "label": "Figures"
+  },
+  {
+   "fieldname": "total",
+   "fieldtype": "Currency",
+   "label": "Total",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "invoice_count",
+   "fieldtype": "Int",
+   "label": "Invoice Count"
+  },
+  {
+   "fieldname": "oldest_due",
+   "fieldtype": "Date",
+   "label": "Oldest Due"
+  },
+  {
+   "fieldname": "invoices",
+   "fieldtype": "JSON",
+   "label": "Invoices"
+  },
+  {
+   "fieldname": "hold_reason",
+   "fieldtype": "Data",
+   "label": "Hold Reason"
+  },
+  {
+   "fieldname": "progress_section",
+   "fieldtype": "Section Break",
+   "label": "Progress"
+  },
+  {
+   "fieldname": "reminders_sent",
+   "fieldtype": "Int",
+   "label": "Reminders Sent",
+   "default": "0"
+  },
+  {
+   "fieldname": "unanswered",
+   "fieldtype": "Int",
+   "label": "Unanswered",
+   "default": "0"
+  },
+  {
+   "fieldname": "last_sent_on",
+   "fieldtype": "Datetime",
+   "label": "Last Sent On"
+  },
+  {
+   "fieldname": "promise_date",
+   "fieldtype": "Date",
+   "label": "Promise Date"
+  },
+  {
+   "fieldname": "last_reply_class",
+   "fieldtype": "Data",
+   "label": "Last Reply Class"
+  },
+  {
+   "fieldname": "poll_id",
+   "fieldtype": "Data",
+   "label": "Poll Id"
+  },
+  {
+   "fieldname": "poll_message",
+   "fieldtype": "Data",
+   "label": "Poll Message"
+  },
+  {
+   "fieldname": "poll_posted_on",
+   "fieldtype": "Date",
+   "label": "Poll Posted On"
+  },
+  {
+   "fieldname": "skipped_on",
+   "fieldtype": "Date",
+   "label": "Skipped On"
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Payment Reminder",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Agent Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "hash",
+ "track_changes": 1
+}

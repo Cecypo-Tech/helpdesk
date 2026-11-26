@@ -1,0 +1,145 @@
+{
+ "actions": [],
+ "creation": "2026-11-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "auto_send",
+  "rules_section",
+  "min_invoice_age_days",
+  "min_gap_days",
+  "followup_days",
+  "max_unanswered",
+  "templates_section",
+  "template_reminder",
+  "template_nudge",
+  "template_thanks",
+  "raven_section",
+  "raven_channel",
+  "raven_user",
+  "approver"
+ ],
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "description": "Master switch. Nothing is checked or sent while this is off."
+  },
+  {
+   "fieldname": "auto_send",
+   "fieldtype": "Check",
+   "label": "Send Without Approval",
+   "description": "Off: every reminder waits for a Raven poll vote."
+  },
+  {
+   "fieldname": "rules_section",
+   "fieldtype": "Section Break",
+   "label": "Rules"
+  },
+  {
+   "fieldname": "min_invoice_age_days",
+   "fieldtype": "Int",
+   "label": "Min Invoice Age Days",
+   "default": "7",
+   "description": "Only invoices past due and at least this many days old."
+  },
+  {
+   "fieldname": "min_gap_days",
+   "fieldtype": "Int",
+   "label": "Min Gap Days",
+   "default": "2",
+   "description": "Never two reminders to a customer closer than this."
+  },
+  {
+   "fieldname": "followup_days",
+   "fieldtype": "Int",
+   "label": "Followup Days",
+   "default": "7",
+   "description": "Days between unanswered reminders."
+  },
+  {
+   "fieldname": "max_unanswered",
+   "fieldtype": "Int",
+   "label": "Max Unanswered",
+   "default": "3",
+   "description": "Unanswered reminders before stopping and alerting."
+  },
+  {
+   "fieldname": "templates_section",
+   "fieldtype": "Section Break",
+   "label": "WhatsApp Templates"
+  },
+  {
+   "fieldname": "template_reminder",
+   "fieldtype": "Link",
+   "label": "Template Reminder",
+   "options": "WhatsApp Templates",
+   "description": "Variables: 1 name, 2 invoice count, 3 total, 4 oldest due date."
+  },
+  {
+   "fieldname": "template_nudge",
+   "fieldtype": "Link",
+   "label": "Template Nudge",
+   "options": "WhatsApp Templates",
+   "description": "Variables: 1 name, 2 promised date, 3 total."
+  },
+  {
+   "fieldname": "template_thanks",
+   "fieldtype": "Link",
+   "label": "Template Thanks",
+   "options": "WhatsApp Templates",
+   "description": "Variables: 1 name."
+  },
+  {
+   "fieldname": "raven_section",
+   "fieldtype": "Section Break",
+   "label": "Raven"
+  },
+  {
+   "fieldname": "raven_channel",
+   "fieldtype": "Data",
+   "label": "Raven Channel",
+   "description": "Raven Channel document name for approval polls and alerts."
+  },
+  {
+   "fieldname": "raven_user",
+   "fieldtype": "Link",
+   "label": "Raven User",
+   "options": "User",
+   "description": "User the polls are posted as (must be in the channel)."
+  },
+  {
+   "fieldname": "approver",
+   "fieldtype": "Link",
+   "label": "Approver",
+   "options": "User",
+   "description": "Only this user's votes count."
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Payment Reminder Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Agent Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "issingle": 1
+}
