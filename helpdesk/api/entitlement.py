@@ -111,11 +111,11 @@ def get_ticket_customer_snapshot(ticket: str | int) -> dict:
 	"""
 	from helpdesk.integrations import erpnext_standing
 
-	unknown = {"status": "unknown", "snapshot": None}
 	if not ticket:
-		return unknown
+		return {"status": "unknown", "snapshot": None, "missing_customer": False}
 	customer = frappe.db.get_value("HD Ticket", ticket, "customer")
 	if not customer:
-		return unknown
+		# Drives the red "something is pending" warning in the agent UI.
+		return {"status": "unknown", "snapshot": None, "missing_customer": True}
 	erp_customer = frappe.db.get_value("HD Customer", customer, "erpnext_customer")
-	return erpnext_standing.fetch_snapshot(erp_customer)
+	return {**erpnext_standing.fetch_snapshot(erp_customer), "missing_customer": False}

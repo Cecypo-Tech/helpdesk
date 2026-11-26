@@ -228,6 +228,7 @@
         "
         rows="1"
         class="flex-1 resize-none rounded-lg border border-outline-gray-3 bg-surface-gray-2 px-3 py-2 text-sm text-ink-gray-9 placeholder:text-ink-gray-4 focus:border-outline-gray-4 focus:outline-none disabled:opacity-50"
+        :class="{ '!border-outline-red-3 !border-2': customerPending }"
         @input="autoResize"
         @keydown.enter.exact.prevent="send"
         @paste="onPaste"
@@ -273,6 +274,7 @@ import WhatsAppTemplateModal from "@/components/whatsapp/WhatsAppTemplateModal.v
 import { OutboundHold } from "@/utils/outboundHold";
 import { makePendingBubble, type PendingBubble, type ResolvePayload } from "@/utils/waOptimistic";
 import { useAuthStore } from "@/stores/auth";
+import { useCustomerPending } from "@/composables/useCustomerPending";
 
 const props = withDefaults(
   defineProps<{
@@ -286,6 +288,9 @@ const props = withDefaults(
   }>(),
   { replyWindowOpen: true, outboundHoldSeconds: 0 }
 );
+
+// Red when the ticket has no customer, or the customer has overdue invoices.
+const { pending: customerPending } = useCustomerPending(() => props.ticketId);
 
 const emit = defineEmits<{
   // Fired the moment the agent hits send, so the composer can clear. The
