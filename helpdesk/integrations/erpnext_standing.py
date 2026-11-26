@@ -142,3 +142,64 @@ def fetch(customer: str | None, use_cache: bool = True) -> dict:
 		pass
 
 	return out
+
+
+# ── Per-invoice snapshot for the (i) dialog ───────────────────────────────────
+
+SNAPSHOT_METHOD = "cecypo_powerpack.api.get_customer_snapshot"
+SNAPSHOT_FAILURE_TTL = 60  # seconds
+
+
+def snapshot_cache_key(customer: str) -> str:
+	return f"erpnext:snapshot:{customer}"
+
+
+def fetch_snapshot(customer: str | None) -> dict:
+	"""powerpack's customer snapshot (invoices, totals) from ERPNext.
+
+	Same rules as fetch(): cached, never raises, and an outage shows nothing.
+	It honours the breaker but does not feed it: a refusal here (e.g. the API
+	user lacking Sales Invoice read) is not an outage and must not switch off
+	the standing badge on every ticket.
+	"""
+	if not customer:
+		return {"status": "unknown", "snapshot": None}
+
+	try:
+		cached = frappe.cache().get_value(snapshot_cache_key(customer))
+		if cached:
+			return cached
+	except Exception:
+		pass
+
+	if breaker_is_open():
+		return {"status": "unavailable", "snapshot": None}
+
+	try:
+		result = call(SNAPSHOT_METHOD, {"customer": customer})
+	except Exception:
+		return {"status": "unavailable", "snapshot": None}
+
+	if not result.get("ok"):
+		# Cached briefly: a lasting refusal (e.g. a 403) would otherwise cost a
+		# remote call and an Error Log row on every ticket view.
+		frappe.log_error(title="ERPNext customer snapshot failed", message=str(result.get("error")))
+		return _remember(customer, {"status": "unavailable", "snapshot": None}, SNAPSHOT_FAILURE_TTL)
+
+	data = result.get("data")
+	if not data:
+		# powerpack answers {} when its warnings switch is off: a definite answer
+		return _remember(customer, {"status": "unknown", "snapshot": None}, CACHE_TTL)
+
+	from helpdesk.integrations.erpnext_remote import settings
+
+	out = {"status": "ok", "snapshot": data, "erp_url": settings().get("server_url") or ""}
+	return _remember(customer, out, CACHE_TTL)
+
+
+def _remember(customer: str, out: dict, ttl: int) -> dict:
+	try:
+		frappe.cache().set_value(snapshot_cache_key(customer), out, expires_in_sec=ttl)
+	except Exception:
+		pass
+	return out

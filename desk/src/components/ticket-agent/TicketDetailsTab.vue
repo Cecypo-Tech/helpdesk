@@ -11,7 +11,9 @@
           v-for="(section, index) in coreFields"
           :key="index"
           :class="
-            section.group ? 'flex gap-2 items-center w-full mb-3' : 'mb-3'
+            section.group
+              ? 'flex gap-2 items-center w-full mb-3'
+              : 'mb-3 flex items-end gap-2'
           "
         >
           <template v-for="field in section.fields">
@@ -21,7 +23,12 @@
               :ref="(el) => setFieldRef(field.fieldname, el)"
               class="form-control-core"
               :id="field.fieldname"
-              :class="section.group ? 'flex-1' : 'w-full'"
+              :class="[
+                section.group ? 'flex-1' : 'min-w-0 flex-1',
+                field.fieldname === 'customer' && !field.value
+                  ? '[&_button]:!border [&_button]:!border-outline-red-3'
+                  : '',
+              ]"
               :page-length="10"
               :label="field.label"
               :placeholder="field.placeholder"
@@ -31,6 +38,13 @@
               @update:model-value="
               (val:string) => handleFieldUpdate(field.fieldname, val,true)
             "
+            />
+            <CustomerSnapshotDialog
+              v-if="field.visible && field.fieldname === 'customer'"
+              :key="field.fieldname + '-snapshot'"
+              class="mb-2"
+              :ticket="ticket.doc?.name"
+              :customer="field.value"
             />
           </template>
         </div>
@@ -76,6 +90,7 @@ import {
 import { computed, inject, ref } from "vue";
 import TicketField from "../TicketField.vue";
 import AssignTo from "./AssignTo.vue";
+import CustomerSnapshotDialog from "./CustomerSnapshotDialog.vue";
 import TicketContact from "./TicketContact.vue";
 
 const ticket = inject(TicketSymbol);

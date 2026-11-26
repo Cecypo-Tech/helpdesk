@@ -100,3 +100,22 @@ def get_ticket_standing(ticket: str | int) -> dict:
 		return unknown
 
 	return erpnext_standing.fetch(erp_customer)
+
+
+@frappe.whitelist()
+@agent_only
+def get_ticket_customer_snapshot(ticket: str | int) -> dict:
+	"""Per-invoice overdue detail for the ticket's customer, for the (i) dialog.
+
+	Agent-only, like get_ticket_standing: never for the portal or the bot.
+	"""
+	from helpdesk.integrations import erpnext_standing
+
+	unknown = {"status": "unknown", "snapshot": None}
+	if not ticket:
+		return unknown
+	customer = frappe.db.get_value("HD Ticket", ticket, "customer")
+	if not customer:
+		return unknown
+	erp_customer = frappe.db.get_value("HD Customer", customer, "erpnext_customer")
+	return erpnext_standing.fetch_snapshot(erp_customer)
