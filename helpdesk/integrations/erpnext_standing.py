@@ -147,6 +147,7 @@ def fetch(customer: str | None, use_cache: bool = True) -> dict:
 # ── Per-invoice snapshot for the (i) dialog ───────────────────────────────────
 
 SNAPSHOT_METHOD = "cecypo_powerpack.api.get_customer_snapshot"
+SNAPSHOT_FAILURE_TTL = 60  # seconds
 
 
 def snapshot_cache_key(customer: str) -> str:
@@ -180,19 +181,25 @@ def fetch_snapshot(customer: str | None) -> dict:
 		return {"status": "unavailable", "snapshot": None}
 
 	if not result.get("ok"):
+		# Cached briefly: a lasting refusal (e.g. a 403) would otherwise cost a
+		# remote call and an Error Log row on every ticket view.
 		frappe.log_error(title="ERPNext customer snapshot failed", message=str(result.get("error")))
-		return {"status": "unavailable", "snapshot": None}
+		return _remember(customer, {"status": "unavailable", "snapshot": None}, SNAPSHOT_FAILURE_TTL)
 
 	data = result.get("data")
 	if not data:
-		# powerpack answers {} when its warnings switch is off
-		return {"status": "unknown", "snapshot": None}
+		# powerpack answers {} when its warnings switch is off: a definite answer
+		return _remember(customer, {"status": "unknown", "snapshot": None}, CACHE_TTL)
 
 	from helpdesk.integrations.erpnext_remote import settings
 
 	out = {"status": "ok", "snapshot": data, "erp_url": settings().get("server_url") or ""}
+	return _remember(customer, out, CACHE_TTL)
+
+
+def _remember(customer: str, out: dict, ttl: int) -> dict:
 	try:
-		frappe.cache().set_value(snapshot_cache_key(customer), out, expires_in_sec=CACHE_TTL)
+		frappe.cache().set_value(snapshot_cache_key(customer), out, expires_in_sec=ttl)
 	except Exception:
 		pass
 	return out

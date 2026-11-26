@@ -18,6 +18,10 @@ SNAP = {
 
 class TestFetchSnapshot(unittest.TestCase):
 	def setUp(self):
+		self.clear()
+		self.addCleanup(self.clear)
+
+	def clear(self):
 		frappe.cache().delete_value(erpnext_standing.snapshot_cache_key("ACME Ltd"))
 		erpnext_standing.reset_breaker()
 
@@ -51,6 +55,24 @@ class TestFetchSnapshot(unittest.TestCase):
 	@patch("helpdesk.integrations.erpnext_standing.call")
 	def test_second_call_is_cached(self, call):
 		call.return_value = {"ok": True, "data": SNAP, "error": None}
+		erpnext_standing.fetch_snapshot("ACME Ltd")
+		erpnext_standing.fetch_snapshot("ACME Ltd")
+		call.assert_called_once()
+
+	@patch("helpdesk.integrations.erpnext_standing.frappe.log_error")
+	@patch("helpdesk.integrations.erpnext_standing.call")
+	def test_failure_is_cached_briefly(self, call, log_error):
+		# A lasting refusal (e.g. a 403) must not cost a remote call and an
+		# Error Log row on every ticket view.
+		call.return_value = {"ok": False, "data": None, "error": "HTTP 403"}
+		erpnext_standing.fetch_snapshot("ACME Ltd")
+		erpnext_standing.fetch_snapshot("ACME Ltd")
+		call.assert_called_once()
+		log_error.assert_called_once()
+
+	@patch("helpdesk.integrations.erpnext_standing.call")
+	def test_unknown_is_cached(self, call):
+		call.return_value = {"ok": True, "data": {}, "error": None}
 		erpnext_standing.fetch_snapshot("ACME Ltd")
 		erpnext_standing.fetch_snapshot("ACME Ltd")
 		call.assert_called_once()

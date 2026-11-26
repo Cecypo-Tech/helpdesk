@@ -7,6 +7,7 @@ import frappe
 from helpdesk.utils import get_customer
 
 PREFIX = "_AL "
+PORTAL_USER = "al.portal@example.com"
 
 
 class TestTicketCustomerAutolink(unittest.TestCase):
@@ -26,6 +27,9 @@ class TestTicketCustomerAutolink(unittest.TestCase):
 		}).insert(ignore_permissions=True).name
 
 	def cleanup(self):
+		frappe.set_user("Administrator")
+		if frappe.db.exists("User", PORTAL_USER):
+			frappe.delete_doc("User", PORTAL_USER, force=True, ignore_permissions=True)
 		for t in frappe.get_all("HD Ticket", filters={"subject": ["like", PREFIX + "%"]}, pluck="name"):
 			frappe.delete_doc("HD Ticket", t, force=True, ignore_permissions=True, delete_permanently=True)
 		for c in frappe.get_all("Contact", filters={"first_name": ["like", PREFIX + "%"]}, pluck="name"):
@@ -84,3 +88,18 @@ class TestTicketCustomerAutolink(unittest.TestCase):
 	def test_insert_with_customer_links(self):
 		self.ticket(customer=self.a)
 		self.assertEqual(get_customer(self.contact), [self.a])
+
+	def test_portal_user_setting_customer_does_not_link(self):
+		# A customer on the portal can write `customer` on their own ticket.
+		# Linking from that would grant them every ticket of any customer they name.
+		frappe.get_doc({
+			"doctype": "User", "email": PORTAL_USER, "first_name": "AL portal",
+			"user_type": "Website User", "send_welcome_email": 0,
+		}).insert(ignore_permissions=True)
+		t = self.ticket()
+		frappe.set_user(PORTAL_USER)
+		try:
+			self.set_customer(t, self.a)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual(get_customer(self.contact), [])

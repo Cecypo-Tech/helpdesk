@@ -2,12 +2,17 @@
 
 Only a contact with no customer link is linked: an office handset can serve
 several customers, so an existing link is never added to or replaced.
+
+Agents only. A portal customer can write `customer` on their own ticket, and
+a link made from that would grant them every ticket of the customer they named.
 """
 
-from helpdesk.utils import get_customer
+from helpdesk.utils import get_customer, is_agent
 
 
 def link_contact_on_customer_set(doc, method=None) -> None:
+	if not is_agent():
+		return
 	if not (doc.customer and doc.contact and doc.has_value_changed("customer")):
 		return
 	if get_customer(doc.contact):
