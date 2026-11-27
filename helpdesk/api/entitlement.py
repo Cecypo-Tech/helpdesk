@@ -113,12 +113,14 @@ def get_ticket_customer_snapshot(ticket: str | int) -> dict:
 
 	if not ticket:
 		return {"status": "unknown", "snapshot": None, "missing_customer": False}
-	customer = frappe.db.get_value("HD Ticket", ticket, "customer")
+	customer, contact = frappe.db.get_value("HD Ticket", ticket, ["customer", "contact"]) or (None, None)
 	if not customer:
 		# Drives the red "something is pending" warning in the agent UI.
 		return {"status": "unknown", "snapshot": None, "missing_customer": True}
 	erp_customer = frappe.db.get_value("HD Customer", customer, "erpnext_customer")
-	return {**erpnext_standing.fetch_snapshot(erp_customer), "missing_customer": False}
+	# The dialog warns before figures go to a number that isn't a billing contact.
+	billing = bool(contact and frappe.db.get_value("Contact", contact, "is_billing_contact"))
+	return {**erpnext_standing.fetch_snapshot(erp_customer), "missing_customer": False, "billing_contact": billing}
 
 
 @frappe.whitelist()

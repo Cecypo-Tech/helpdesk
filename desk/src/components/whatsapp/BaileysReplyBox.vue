@@ -268,7 +268,7 @@
 <script setup lang="ts">
 import { call, createListResource, createResource, toast } from "frappe-ui";
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
-import { useCustomerPending } from "@/composables/useCustomerPending";
+import { onReplyInsert, useCustomerPending } from "@/composables/useCustomerPending";
 
 interface Participant {
   jid: string;
@@ -299,6 +299,11 @@ const emit = defineEmits<{
 }>();
 
 const text = ref("");
+// Invoice summary from the (i) dialog: appended, never replacing what the agent typed.
+onReplyInsert(
+  () => props.ticketId,
+  (t) => (text.value = text.value ? `${text.value}\n\n${t}` : t)
+);
 const sending = ref(false);
 const bannerError = ref("");
 const dragging = ref(false);

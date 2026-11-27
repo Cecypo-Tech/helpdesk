@@ -21,7 +21,7 @@ SETTINGS = "HD Weekly Digest Settings"
 REMINDER = "HD Payment Reminder"
 GUESS_BATCH = 20
 UNHAPPY_CAP = 200
-STALE_CAP = 30
+STALE_CAP = 5
 
 GUESS_PROMPT = (
 	"You sort IT support tickets for a software company into one work type.\n"
@@ -233,12 +233,13 @@ def build(now: datetime) -> str:
 	s = frappe.get_cached_doc(SETTINGS)
 	cutoff = getdate(now) - timedelta(days=s.open_days or 3)
 	stale = [t for t in frappe.get_all("HD Ticket", filters={"status_category": "Open", "opening_date": ["<", cutoff]},
-	                                   fields=["name", "subject", "opening_date"], order_by="opening_date")
+	                                   fields=["name", "subject", "opening_date"], order_by="opening_date desc")
 	         if str(t.name) not in skip]
 	if stale:
-		more = f"\n…and {len(stale) - STALE_CAP} more" if len(stale) > STALE_CAP else ""
-		sections.append(f"**Open more than {s.open_days or 3} days**\n" + "\n".join(
-			f"- {tlink(t.name, t.subject)} (since {t.opening_date:%d %b})" for t in stale[:STALE_CAP]) + more)
+		days = s.open_days or 3
+		sections.append(f"**Open**\n[{len(stale)} tickets open more than {days} days]({base}/helpdesk/tickets)"
+		                ", newest:\n" + "\n".join(
+			f"- {tlink(t.name, (t.subject or '')[:60])} (since {t.opening_date:%d %b})" for t in stale[:STALE_CAP]))
 
 	sad = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "unhappy": 1},
 	                     fields=["name", "subject", "unhappy_reason"], order_by="name")

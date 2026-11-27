@@ -92,3 +92,30 @@ class TestTicketSnapshotEndpoint(unittest.TestCase):
 		from helpdesk.api.entitlement import get_ticket_customer_snapshot
 
 		self.assertTrue(get_ticket_customer_snapshot(self.ticket.name)["missing_customer"])
+
+
+class TestBillingContactFlag(unittest.TestCase):
+	"""The (i) dialog warns before an agent sends figures to a non-billing contact."""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		cust = "ACME Snapshot Billing"
+		if not frappe.db.exists("HD Customer", cust):
+			frappe.get_doc({"doctype": "HD Customer", "customer_name": cust}).insert(ignore_permissions=True)
+		self.contact = frappe.get_doc({"doctype": "Contact", "first_name": "Snap Billing"}).insert(
+			ignore_permissions=True
+		)
+		self.ticket = frappe.get_doc({"doctype": "HD Ticket", "subject": "_SNAP billing", "customer": cust,
+		                              "contact": self.contact.name}).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	@patch("helpdesk.integrations.erpnext_standing.fetch_snapshot", return_value={"status": "unknown", "snapshot": None})
+	def test_reports_billing_contact(self, _):
+		from helpdesk.api.entitlement import get_ticket_customer_snapshot
+
+		frappe.db.set_value("HD Ticket", self.ticket.name, "contact", self.contact.name)
+		self.assertFalse(get_ticket_customer_snapshot(self.ticket.name)["billing_contact"])
+		frappe.db.set_value("Contact", self.contact.name, "is_billing_contact", 1)
+		self.assertTrue(get_ticket_customer_snapshot(self.ticket.name)["billing_contact"])

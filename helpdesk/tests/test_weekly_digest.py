@@ -190,6 +190,15 @@ class TestDigest(_DB):
 		# Sales Invoice has no base_outstanding_amount; outstanding_amount is already company currency.
 		self.assertEqual(c.call_args[0][1]["fields"], '["outstanding_amount"]')
 
+	def test_open_section_is_short(self):
+		for i in range(12):
+			self.ticket(subject=f"Stale {i}", opening_date=MONDAY.date() - timedelta(days=5 + i))
+		text = self.build()
+		self.assertIn("12 tickets open more than 3 days", text)
+		self.assertEqual(text.count("/helpdesk/tickets/"), 5)  # only the 5 newest listed
+		self.assertIn("Stale 0", text)
+		self.assertNotIn("Stale 11", text)
+
 	def test_quiet_week_line(self):
 		self.assertIn("Quiet week", self.build(overdue=0.0))
 

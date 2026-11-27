@@ -274,7 +274,7 @@ import WhatsAppTemplateModal from "@/components/whatsapp/WhatsAppTemplateModal.v
 import { OutboundHold } from "@/utils/outboundHold";
 import { makePendingBubble, type PendingBubble, type ResolvePayload } from "@/utils/waOptimistic";
 import { useAuthStore } from "@/stores/auth";
-import { useCustomerPending } from "@/composables/useCustomerPending";
+import { onReplyInsert, useCustomerPending } from "@/composables/useCustomerPending";
 
 const props = withDefaults(
   defineProps<{
@@ -312,6 +312,11 @@ const auth = useAuthStore();
 const senderName = computed(() => auth.userName || "");
 
 const text = ref("");
+// Invoice summary from the (i) dialog: appended, never replacing what the agent typed.
+onReplyInsert(
+  () => props.ticketId,
+  (t) => (text.value = text.value ? `${text.value}\n\n${t}` : t)
+);
 const sending = ref(false);
 const dragging = ref(false);
 const showSavedReplies = ref(false);
