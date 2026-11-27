@@ -16,6 +16,7 @@
   "oldest_due",
   "invoices",
   "hold_reason",
+  "advance_amount",
   "progress_section",
   "reminders_sent",
   "unanswered",
@@ -150,6 +151,12 @@
    "fieldname": "skipped_on",
    "fieldtype": "Date",
    "label": "Skipped On"
+  },
+  {
+   "fieldname": "advance_amount",
+   "fieldtype": "Currency",
+   "label": "Unallocated Amount",
+   "read_only": 1
   }
  ],
  "links": [],

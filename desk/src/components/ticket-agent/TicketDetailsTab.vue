@@ -49,6 +49,15 @@
           </template>
         </div>
 
+        <!-- Charge / Waive: asked for every work type except Software -->
+        <TicketField
+          v-if="chargeField?.visible"
+          class="mb-3"
+          :field="chargeField"
+          :value="chargeField.value"
+          @change="({ fieldname, value }) => handleFieldUpdate(fieldname, value)"
+        />
+
         <!-- Assignee component -->
         <AssignTo />
       </div>
@@ -139,6 +148,12 @@ const coreFields = computed(() => {
     });
   });
   return _coreFields;
+});
+
+const chargeField = computed(() => {
+  const meta = getField("charge");
+  if (!meta || !ticket.value?.doc) return null;
+  return getFieldInFormat(meta, parseField(meta, ticket.value.doc));
 });
 
 const customFields = computed(() => {
