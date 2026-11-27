@@ -70,3 +70,4 @@ helpdesk.patches.add_contact_verification_fields
 helpdesk.patches.pin_only_verification_prompt
 helpdesk.patches.backfill_sync_interval_hours
 helpdesk.patches.add_work_types
+helpdesk.patches.remove_subject_only_embeddings

@@ -29,6 +29,9 @@ class TestParsers(unittest.TestCase):
 
 class _DB(unittest.TestCase):
 	def setUp(self):
+		p = patch.object(frappe.db, "commit")  # keep test rows inside the rolled-back transaction
+		p.start()
+		self.addCleanup(p.stop)
 		add_work_types.execute()
 		frappe.db.delete("HD Ticket")  # rolled back in tearDown
 		frappe.db.delete("HD Payment Reminder")

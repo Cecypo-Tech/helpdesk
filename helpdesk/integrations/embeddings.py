@@ -147,7 +147,8 @@ def embed_resolved_tickets() -> None:
 
 	count = 0
 	for ticket in resolved:
-		if ticket.name in existing or not ticket.subject:
+		# Subject lines alone match the wrong questions; approved notes (learn.py) carry the fixes.
+		if ticket.name in existing or not ticket.subject or not _strip_html(ticket.resolution_details or ""):
 			continue
 
 		text = ticket.subject

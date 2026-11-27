@@ -30,7 +30,11 @@
   "gap_section",
   "enable_gap_tracking",
   "prompt_section",
-  "system_prompt"
+  "system_prompt",
+  "learn_section",
+  "learn_from_tickets",
+  "learn_raven_channel",
+  "learn_raven_user"
  ],
  "fields": [
   {
@@ -185,6 +189,31 @@
    "fieldname": "system_prompt",
    "fieldtype": "Long Text",
    "label": "System Prompt"
+  },
+  {
+   "fieldname": "learn_section",
+   "fieldtype": "Section Break",
+   "label": "Learn From Team"
+  },
+  {
+   "fieldname": "learn_from_tickets",
+   "fieldtype": "Check",
+   "label": "Learn From Closed Tickets",
+   "default": "0",
+   "description": "Draft notes from closed tickets and post them to Raven for approval. Only approved notes reach the bot."
+  },
+  {
+   "fieldname": "learn_raven_channel",
+   "fieldtype": "Data",
+   "label": "Raven Channel",
+   "description": "Raven Channel document name, e.g. erp-support-actions."
+  },
+  {
+   "fieldname": "learn_raven_user",
+   "fieldtype": "Link",
+   "label": "Raven User",
+   "options": "User",
+   "description": "User the polls are posted as (must be in the channel)."
   }
  ],
  "issingle": 1,
