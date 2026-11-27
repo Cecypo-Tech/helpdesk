@@ -247,6 +247,11 @@ def build(now: datetime) -> str:
 		sections.append("**Unhappy customers**\n" + "\n".join(
 			f"- {tlink(t.name, t.subject)}: {t.unhappy_reason}" for t in sad))
 
+	waiting = frappe.db.count("HD Learned Note", {"status": "Pending"})
+	if waiting:
+		sections.append(f"**Bot notes**\n[{waiting} note{'s' if waiting > 1 else ''} waiting for approval]"
+		                f"({base}/app/hd-learned-note?status=Pending)")
+
 	head = f"📋 Monday digest, week of {start:%d %b}"
 	return head + "\n\n" + ("\n\n".join(sections) if sections else "Quiet week — nothing to flag.")
 

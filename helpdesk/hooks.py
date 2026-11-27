@@ -60,6 +60,7 @@ scheduler_events = {
     # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.
     "hourly_long": [
         "helpdesk.integrations.payment_reminders.run",
+        "helpdesk.integrations.learn.run",
     ],
     "daily": [
         "helpdesk.helpdesk.doctype.hd_ticket.hd_ticket.close_tickets_after_n_days",
