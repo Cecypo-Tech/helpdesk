@@ -270,7 +270,8 @@ def refresh_customer(hd_customer: str, contacts: list, now: datetime, s) -> str 
 	if cycle.status == "Held" and cycle.hold_reason and cycle.hold_reason.startswith("Billing contact"):
 		return cycle.name  # a person decides; resolve or close the cycle by hand
 
-	if float(data.get("advances_total") or 0) > 0:
+	cycle.advance_amount = float(data.get("advances_total") or 0)
+	if cycle.advance_amount > 0:
 		_close_poll(cycle)
 		cycle.status, cycle.hold_reason = "Held", "Unallocated payment on ERPNext – check before chasing"
 		cycle.save(ignore_permissions=True)

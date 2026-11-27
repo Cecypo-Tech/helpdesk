@@ -17,6 +17,11 @@
   "status_category",
   "cb00",
   "ticket_type",
+  "charge",
+  "unhappy",
+  "unhappy_reason",
+  "work_type_guessed",
+  "closed_on",
   "agent_group",
   "summary",
   "sb_details",
@@ -503,6 +508,41 @@
    "fieldtype": "Check",
    "hidden": 1,
    "label": "Bot Active"
+  },
+  {
+   "fieldname": "charge",
+   "fieldtype": "Select",
+   "label": "Charge",
+   "options": "\nCharge\nWaive",
+   "depends_on": "eval:doc.ticket_type && !['Software','Unspecified'].includes(doc.ticket_type)"
+  },
+  {
+   "fieldname": "unhappy",
+   "fieldtype": "Check",
+   "label": "Unhappy",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "unhappy_reason",
+   "fieldtype": "Small Text",
+   "label": "Unhappy Reason",
+   "read_only": 1,
+   "depends_on": "unhappy"
+  },
+  {
+   "fieldname": "work_type_guessed",
+   "fieldtype": "Check",
+   "label": "Work Type Guessed",
+   "hidden": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Datetime",
+   "label": "Closed On",
+   "read_only": 1,
+   "hidden": 1
   }
  ],
  "grid_page_length": 50,

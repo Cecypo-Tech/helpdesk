@@ -202,7 +202,11 @@ class TestCycles(_CycleBase):
 		self.snapshot = snap_ok(advances=500)
 		pr.run(THURSDAY_10)
 		self.assertEqual(self.cycle().status, "Held")
+		self.assertEqual(self.cycle().advance_amount, 500)
 		self.assertEqual(self.polls, [])
+		self.snapshot = snap_ok()
+		pr.run(THURSDAY_10 + timedelta(hours=1))
+		self.assertEqual(self.cycle().advance_amount, 0)
 
 	def test_poll_then_send_on_approval(self):
 		pr.run(THURSDAY_10)

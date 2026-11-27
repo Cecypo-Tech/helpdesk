@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "creation": "2026-11-27 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "raven_channel",
+  "raven_user",
+  "open_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "description": "Send the digest every Monday at 08:00."
+  },
+  {
+   "fieldname": "raven_channel",
+   "fieldtype": "Data",
+   "label": "Raven Channel",
+   "description": "Raven Channel document name, e.g. erp-support-actions."
+  },
+  {
+   "fieldname": "raven_user",
+   "fieldtype": "Link",
+   "label": "Raven User",
+   "options": "User",
+   "description": "User the digest is posted as (must be in the channel)."
+  },
+  {
+   "fieldname": "open_days",
+   "fieldtype": "Int",
+   "label": "Open Longer Than (Days)",
+   "default": "3"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Helpdesk",
+ "name": "HD Weekly Digest Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Agent Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

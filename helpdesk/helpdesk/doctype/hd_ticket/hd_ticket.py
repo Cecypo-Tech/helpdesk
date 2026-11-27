@@ -19,7 +19,7 @@ from pypika.functions import Count
 from pypika.queries import Query
 from pypika.terms import Criterion
 
-from helpdesk.consts import DEFAULT_TICKET_PRIORITY, DEFAULT_TICKET_TYPE
+from helpdesk.consts import DEFAULT_TICKET_PRIORITY, DEFAULT_TICKET_TYPE, WORK_TYPES
 from helpdesk.helpdesk.doctype.hd_settings.helpers import (
     get_default_email_content,
     is_email_content_empty,
@@ -94,6 +94,30 @@ class HDTicket(Document):
 
     def validate(self):
         self.validate_feedback()
+        self.validate_work_type()
+
+    def validate_work_type(self):
+        """A person closing a ticket must say what kind of work it was, and whether to bill it.
+
+        Only interactive agent saves: background jobs, auto-close (ignore_validate), merges
+        and payment-reminder tickets are exempt.
+        """
+        if self.ticket_type in ("Software", DEFAULT_TICKET_TYPE):
+            self.charge = None  # covered or unknown work is never billable
+        if (
+            self.status_category != "Resolved"
+            or not self.has_value_changed("status_category")
+            or not getattr(frappe.local, "request", None)
+            or self.is_merged
+            or self.flags.skip_work_type
+            or not is_agent()
+            or frappe.db.exists("HD Payment Reminder", {"ticket": str(self.name)})
+        ):
+            return
+        if self.ticket_type not in WORK_TYPES:
+            frappe.throw(_("Pick a work type before closing"))
+        if self.ticket_type != "Software" and not self.charge:
+            frappe.throw(_("Pick Charge or Waive before closing"))
 
     def before_save(self):
         self.apply_sla()

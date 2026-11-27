@@ -44,6 +44,8 @@ scheduler_events = {
         # Recovers inbound messages whose ingestion job died — without this they
         # stay stored but ticketless, and nothing would ever notice.
         "*/15 * * * *": ["helpdesk.integrations.wa_ingest.sweep_unlinked_messages"],
+        # Monday 08:00 site time (Africa/Nairobi on support.cecypo.tech).
+        "0 8 * * 1": ["helpdesk.integrations.weekly_digest.send"],
     },
     "hourly": [
         "helpdesk.helpdesk.doctype.hd_task.hd_task.send_due_task_wpa_notifications",
@@ -52,6 +54,7 @@ scheduler_events = {
         # elapsed. A cron expression cannot read that setting out of a Single,
         # so the decision lives in the function.
         "helpdesk.integrations.erpnext_sync.run_scheduled_sync",
+        "helpdesk.integrations.weekly_digest.guess_work_types",
     ],
     # Long queue: one fresh ERP snapshot per billing customer can outlast the default timeout.
     # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.
