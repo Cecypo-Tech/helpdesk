@@ -15,12 +15,13 @@ def available() -> bool:
 	return bool(frappe.db.exists("DocType", "Raven Message"))
 
 
-def _as_raven_user(fn, **kwargs):
+def _as_raven_user(fn, user=None, **kwargs):
 	s = frappe.get_cached_doc(SETTINGS)
-	if not (available() and s.raven_channel):
+	channel = kwargs.get("channel_id", s.raven_channel)
+	if not (available() and channel):
 		raise RuntimeError("Raven is not installed or no Raven channel is set")
 	previous = frappe.session.user
-	frappe.set_user(s.raven_user or "Administrator")
+	frappe.set_user(user or s.raven_user or "Administrator")
 	try:
 		return frappe.call(fn, **kwargs)
 	finally:
@@ -57,6 +58,9 @@ def close_poll(poll_id: str) -> None:
 			raise
 
 
-def post(text: str) -> None:
+def post(text: str, channel: str | None = None, user: str | None = None) -> None:
+	"""Post to `channel` as `user`; both default to the payment reminder settings."""
 	s = frappe.get_cached_doc(SETTINGS)
-	_as_raven_user("raven.api.raven_message.send_message", channel_id=s.raven_channel, text=text)
+	_as_raven_user(
+		"raven.api.raven_message.send_message", user=user, channel_id=channel or s.raven_channel, text=text
+	)
