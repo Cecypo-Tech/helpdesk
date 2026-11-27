@@ -84,6 +84,8 @@ def draft(now: datetime) -> int:
 			continue
 		if note is None:
 			continue  # bad output: retry next hour
+		if frappe.db.exists(NOTE, {"ticket": name}):
+			continue  # another run got here first
 		frappe.get_doc({
 			"doctype": NOTE,
 			"ticket": name,
@@ -114,10 +116,29 @@ def post_polls() -> int:
 		except Exception:
 			frappe.log_error(title="Learned note poll failed")
 			break  # Raven down: try again next hour
+		if not message_id:  # can't read votes without it: drop this poll, retry next hour
+			frappe.log_error(title="Learned note poll has no message id")
+			close_poll(poll_id)
+			continue
 		frappe.db.set_value(NOTE, n.name, {"poll_id": poll_id, "poll_message": message_id})
 		frappe.db.commit()  # nosemgrep: a posted poll must not be posted twice
 		posted += 1
 	return posted
+
+
+def unlearn(ticket: str) -> None:
+	if frappe.db.exists("HD Ticket Embedding", {"ticket": ticket}):
+		frappe.db.delete("HD Ticket Embedding", {"ticket": ticket})
+		from helpdesk.integrations.embeddings import invalidate_cache
+
+		invalidate_cache()
+
+
+def close_poll(poll_id: str) -> None:
+	try:
+		raven_bridge.close_poll(poll_id, user=_settings().learn_raven_user)
+	except Exception:
+		frappe.log_error(title="Learned note close poll failed")
 
 
 def approve(note_name: str) -> None:
@@ -155,10 +176,7 @@ def check_votes() -> int:
 			frappe.log_error(title="Learned note approve failed")
 			continue
 		frappe.db.set_value(NOTE, n.name, {"status": status, "decided_by": voters[0]})
-		try:
-			raven_bridge.close_poll(n.poll_id, user=s.learn_raven_user)
-		except Exception:
-			frappe.log_error(title="Learned note close poll failed")
+		close_poll(n.poll_id)
 		frappe.db.commit()  # nosemgrep
 		decided += 1
 	return decided
@@ -166,7 +184,7 @@ def check_votes() -> int:
 
 def run(now: datetime | None = None) -> None:
 	s = _settings()
-	if not (s.learn_from_tickets and s.learn_raven_channel):
+	if not (s.learn_from_tickets and s.learn_raven_channel and s.is_enabled):
 		return
 	now = now or now_datetime()
 	from helpdesk.integrations.weekly_digest import stamp_closed_on

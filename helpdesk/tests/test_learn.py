@@ -29,6 +29,7 @@ class _Base(unittest.TestCase):
 		frappe.db.delete("HD Payment Reminder")
 		s = frappe.get_doc("Helpdesk Bot Settings")
 		s.learn_from_tickets, s.learn_raven_channel, s.learn_raven_user = 1, "erp-support-actions", "Administrator"
+		s.is_enabled = 1
 		s.flags.ignore_mandatory = True
 		s.save(ignore_permissions=True)
 		self.polls, self.closed, self.vote = [], [], {}
@@ -201,3 +202,66 @@ class TestOthers(_Base):
 			text = wd.build(NOW)
 		self.assertIn("1 note waiting for approval", text)
 		self.assertIn("/app/hd-learned-note?status=Pending", text)
+
+
+class TestReviewFixes(TestVotes):
+	def approved(self):
+		t = self.pending()
+		self.vote = {"Approve": ["a@example.com"]}
+		learn.run(NOW)
+		return t
+
+	def test_undo_survives_daily_embed(self):
+		from helpdesk.integrations import embeddings
+
+		t = self.approved()
+		n = self.note(t)
+		n.status = "Skipped"
+		n.save(ignore_permissions=True)
+		frappe.db.set_value("HD Ticket", t, {"status": "Resolved", "resolution_details": "agent text"})
+		with patch.object(embeddings, "_settings", return_value=frappe._dict(is_enabled=1)), \
+				patch.object(embeddings, "embed", return_value=[0.1]):
+			embeddings.embed_resolved_tickets()
+		self.assertFalse(frappe.db.exists("HD Ticket Embedding", {"ticket": t}))
+
+	def test_approved_to_not_useful_unlearns(self):
+		t = self.approved()
+		n = self.note(t)
+		n.status = "Not useful"
+		n.save(ignore_permissions=True)
+		self.assertFalse(frappe.db.exists("HD Ticket Embedding", {"ticket": t}))
+
+	def test_edit_of_approved_note_reembeds(self):
+		t = self.approved()
+		n = self.note(t)
+		n.fix = "Use the new driver from the vendor site"
+		n.save(ignore_permissions=True)
+		self.assertIn("new driver", frappe.db.get_value("HD Ticket Embedding", {"ticket": t}, "resolution_details"))
+
+	def test_form_decision_closes_poll(self):
+		t = self.pending()
+		n = self.note(t)
+		n.status = "Skipped"
+		n.save(ignore_permissions=True)
+		self.assertEqual(self.closed, ["POLL1"])
+
+	def test_missing_message_id_not_stuck(self):
+		self.closed_ticket()
+		with patch.object(learn, "_llm", return_value=GOOD), \
+				patch.object(learn.raven_bridge, "create_poll", return_value=("POLLX", None)):
+			learn.run(NOW)
+		self.assertFalse(frappe.db.get_value("HD Learned Note", {"status": "Pending"}, "poll_id"))
+
+
+class TestPatch(unittest.TestCase):
+	def test_patch_removes_html_empty_rows(self):
+		from helpdesk.patches import remove_subject_only_embeddings
+
+		frappe.db.delete("HD Ticket Embedding")
+		a, b = make_ticket(subject="A").name, make_ticket(subject="B").name
+		for t, rd in ((a, "<p><br></p>"), (b, "Problem: x\nFix: y")):
+			frappe.get_doc({"doctype": "HD Ticket Embedding", "ticket": t, "subject": "s", "resolution_details": rd,
+			                "embedding": "[1]"}).insert(ignore_permissions=True)
+		remove_subject_only_embeddings.execute()
+		self.assertEqual(frappe.get_all("HD Ticket Embedding", pluck="ticket"), [str(b)])
+		frappe.db.rollback()

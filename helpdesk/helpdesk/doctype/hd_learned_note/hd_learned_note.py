@@ -4,10 +4,19 @@ from frappe.model.document import Document
 
 class HDLearnedNote(Document):
 	def on_update(self):
-		# Undo: an approved note set back to Skipped stops feeding the bot.
-		if self.status == "Skipped" and self.has_value_changed("status"):
-			if frappe.db.exists("HD Ticket Embedding", {"ticket": self.ticket}):
-				frappe.db.delete("HD Ticket Embedding", {"ticket": self.ticket})
-				from helpdesk.integrations.embeddings import invalidate_cache
+		"""Saving on the form is a person's decision, the same as a vote.
 
-				invalidate_cache()
+		Hourly vote handling writes with db.set_value, so it never comes through here.
+		"""
+		before = self.get_doc_before_save()
+		was = before.status if before else None
+		from helpdesk.integrations import learn
+
+		if was == "Approved" and self.status != "Approved":
+			learn.unlearn(self.ticket)
+		elif self.status == "Approved" and (
+			was != "Approved" or before.problem != self.problem or before.fix != self.fix
+		):
+			learn.approve(self.name)
+		if was == "Pending" and self.status != "Pending" and self.poll_id:
+			learn.close_poll(self.poll_id)

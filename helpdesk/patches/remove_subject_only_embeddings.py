@@ -8,7 +8,8 @@ import frappe
 
 
 def execute():
-	frappe.db.sql(
-		"""delete from `tabHD Ticket Embedding`
-		where resolution_details is null or trim(resolution_details) = ''"""
-	)
+	from helpdesk.integrations.embeddings import _strip_html
+
+	for r in frappe.get_all("HD Ticket Embedding", fields=["name", "resolution_details"]):
+		if not _strip_html(r.resolution_details or ""):
+			frappe.db.delete("HD Ticket Embedding", r.name)
