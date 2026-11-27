@@ -110,3 +110,10 @@ class TestCloseRule(_Base):
 		).insert(ignore_permissions=True)
 		frappe.set_user(AGENT)
 		self.assertEqual(self.close().status, "Resolved")
+
+	def test_type_change_to_software_clears_charge(self):
+		t = frappe.get_doc("HD Ticket", self.ticket.name)
+		t.update({"ticket_type": "Network", "charge": "Charge"})
+		t.save(ignore_permissions=True)
+		t = self.close(ticket_type="Software")
+		self.assertFalse(t.charge)

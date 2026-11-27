@@ -21,6 +21,7 @@
   "unhappy",
   "unhappy_reason",
   "work_type_guessed",
+  "closed_on",
   "agent_group",
   "summary",
   "sb_details",
@@ -535,6 +536,13 @@
    "label": "Work Type Guessed",
    "hidden": 1,
    "default": "0"
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Datetime",
+   "label": "Closed On",
+   "read_only": 1,
+   "hidden": 1
   }
  ],
  "grid_page_length": 50,

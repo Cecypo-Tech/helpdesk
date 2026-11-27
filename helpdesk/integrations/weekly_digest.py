@@ -20,6 +20,8 @@ from helpdesk.integrations import erpnext_remote, raven_bridge
 SETTINGS = "HD Weekly Digest Settings"
 REMINDER = "HD Payment Reminder"
 GUESS_BATCH = 20
+UNHAPPY_CAP = 200
+STALE_CAP = 30
 
 GUESS_PROMPT = (
 	"You sort IT support tickets for a software company into one work type.\n"
@@ -95,8 +97,20 @@ def parse_unhappy(text: str) -> tuple[bool, str]:
 	return False, ""
 
 
+def stamp_closed_on() -> None:
+	"""Record when each ticket closed, so later edits don't move it into another week.
+
+	Hourly, not a hook: WhatsApp closes and reopens go through db.set_value.
+	"""
+	frappe.db.sql("""update `tabHD Ticket` set closed_on = coalesce(resolution_date, modified)
+		where status_category = 'Resolved' and closed_on is null""")
+	frappe.db.sql("""update `tabHD Ticket` set closed_on = null
+		where status_category != 'Resolved' and closed_on is not null""")
+
+
 def guess_work_types(now: datetime | None = None) -> int:
 	now = now or now_datetime()
+	stamp_closed_on()
 	skip = _reminder_tickets()
 	names = frappe.get_all(
 		"HD Ticket",
@@ -120,6 +134,7 @@ def guess_work_types(now: datetime | None = None) -> int:
 			]))
 		except Exception:
 			frappe.log_error(title="Work type guess failed")
+			continue  # retry next hour
 		values = {"work_type_guessed": 1}
 		if guess:
 			values["ticket_type"] = guess
@@ -132,8 +147,7 @@ def guess_work_types(now: datetime | None = None) -> int:
 def _closed_between(start: datetime, end: datetime) -> list[str]:
 	return [str(n) for n in frappe.db.sql_list(
 		"""select name from `tabHD Ticket`
-		where status_category = 'Resolved'
-		and coalesce(resolution_date, modified) >= %s and coalesce(resolution_date, modified) < %s""",
+		where status_category = 'Resolved' and closed_on >= %s and closed_on < %s""",
 		(start, end),
 	)]
 
@@ -141,9 +155,7 @@ def _closed_between(start: datetime, end: datetime) -> list[str]:
 def check_unhappy(start: datetime, end: datetime) -> list[str]:
 	skip = _reminder_tickets()
 	flagged = []
-	for name in _closed_between(start, end):
-		if name in skip:
-			continue
+	for name in [n for n in _closed_between(start, end) if n not in skip][:UNHAPPY_CAP]:
 		try:
 			unhappy, reason = parse_unhappy(_llm([
 				{"role": "system", "content": UNHAPPY_PROMPT},
@@ -154,6 +166,7 @@ def check_unhappy(start: datetime, end: datetime) -> list[str]:
 			continue
 		frappe.db.set_value("HD Ticket", name, {"unhappy": int(unhappy), "unhappy_reason": reason},
 		                    update_modified=False)
+		frappe.db.commit()  # nosemgrep: keep progress if the job dies mid-week
 		if unhappy:
 			flagged.append(name)
 	return flagged
@@ -164,12 +177,12 @@ def overdue_total() -> float | None:
 		"doctype": "Sales Invoice",
 		"filters": json.dumps([["docstatus", "=", 1], ["outstanding_amount", ">", 0],
 		                       ["due_date", "<", str(getdate())]]),
-		"fields": json.dumps(["outstanding_amount"]),
+		"fields": json.dumps(["base_outstanding_amount"]),
 		"limit_page_length": 0,
 	})
 	if not res.get("ok") or not isinstance(res.get("data"), list):
 		return None
-	return sum(float(r.get("outstanding_amount") or 0) for r in res["data"])
+	return sum(float(r.get("base_outstanding_amount") or 0) for r in res["data"])
 
 
 def _kes(v) -> str:
@@ -210,7 +223,8 @@ def build(now: datetime) -> str:
 			f"- {rlink(h.name, h.hd_customer)}: {_kes(h.advance_amount)}" for h in held))
 
 	closed = _closed_between(start, end)
-	charged = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "charge": "Charge"},
+	charged = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "charge": "Charge",
+	                                  "ticket_type": ["!=", "Software"]},
 	                         fields=["name", "subject", "customer", "ticket_type"], order_by="name")
 	if charged:
 		sections.append("**Chargeable jobs last week**\n" + "\n".join(
@@ -222,8 +236,9 @@ def build(now: datetime) -> str:
 	                                   fields=["name", "subject", "opening_date"], order_by="opening_date")
 	         if str(t.name) not in skip]
 	if stale:
+		more = f"\n…and {len(stale) - STALE_CAP} more" if len(stale) > STALE_CAP else ""
 		sections.append(f"**Open more than {s.open_days or 3} days**\n" + "\n".join(
-			f"- {tlink(t.name, t.subject)} (since {t.opening_date:%d %b})" for t in stale))
+			f"- {tlink(t.name, t.subject)} (since {t.opening_date:%d %b})" for t in stale[:STALE_CAP]) + more)
 
 	sad = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "unhappy": 1},
 	                     fields=["name", "subject", "unhappy_reason"], order_by="name")
@@ -236,10 +251,16 @@ def build(now: datetime) -> str:
 	return head + "\n\n" + ("\n\n".join(sections) if sections else "Quiet week — nothing to flag.")
 
 
-def send(now: datetime | None = None) -> None:
+def send() -> None:
+	"""Cron entry: the unhappy check can take minutes, so run it on the long queue."""
+	frappe.enqueue("helpdesk.integrations.weekly_digest.send_now", queue="long", timeout=3600)
+
+
+def send_now(now: datetime | None = None) -> None:
 	s = frappe.get_cached_doc(SETTINGS)
 	if not (s.enabled and s.raven_channel):
 		return
 	now = now or now_datetime()
+	stamp_closed_on()
 	check_unhappy(*_week(now))
 	raven_bridge.post(build(now), channel=s.raven_channel, user=s.raven_user)

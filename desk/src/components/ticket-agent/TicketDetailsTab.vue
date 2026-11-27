@@ -153,7 +153,9 @@ const coreFields = computed(() => {
 const chargeField = computed(() => {
   const meta = getField("charge");
   if (!meta || !ticket.value?.doc) return null;
-  return getFieldInFormat(meta, parseField(meta, ticket.value.doc));
+  const f = getFieldInFormat(meta, parseField(meta, ticket.value.doc));
+  // No blank option: picking it would send the option object, not a value.
+  return { ...f, options: "Charge\nWaive" };
 });
 
 const customFields = computed(() => {

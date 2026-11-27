@@ -87,12 +87,41 @@ class TestGuess(_DB):
 		self.assertNotIn(frappe.db.get_value("HD Ticket", t, "ticket_type"), wd.WORK_TYPES)
 
 
+class TestReviewFixes(_DB):
+	def test_guess_llm_error_retries_later(self):
+		t = self.ticket(creation=datetime.now() - timedelta(hours=2))
+		with patch.object(wd, "_llm", side_effect=RuntimeError("provider down")):
+			wd.guess_work_types()
+		self.assertEqual(frappe.db.get_value("HD Ticket", t, "work_type_guessed"), 0)
+
+	def test_closed_on_window_ignores_later_edits(self):
+		old = self.ticket(status="Closed", modified=LAST_WED - timedelta(days=21))
+		wd.stamp_closed_on()
+		frappe.db.set_value("HD Ticket", old, "modified", LAST_WED, update_modified=False)  # touched this week
+		new = self.ticket(status="Resolved", modified=LAST_WED)
+		wd.stamp_closed_on()
+		self.assertEqual(wd._closed_between(MONDAY - timedelta(days=7), MONDAY), [str(new)])
+
+	def test_reopen_clears_closed_on(self):
+		t = self.ticket(status="Closed", modified=LAST_WED)
+		wd.stamp_closed_on()
+		frappe.db.set_value("HD Ticket", t, {"status": "Open", "status_category": "Open"})
+		wd.stamp_closed_on()
+		self.assertIsNone(frappe.db.get_value("HD Ticket", t, "closed_on"))
+
+	def test_send_runs_on_long_queue(self):
+		with patch.object(wd.frappe, "enqueue") as enq:
+			wd.send()
+		self.assertEqual(enq.call_args.kwargs["queue"], "long")
+
+
 class TestUnhappy(_DB):
 	def test_unhappy_flags_and_writes_reason(self):
 		t = self.ticket(status="Resolved", resolution_date=LAST_WED)
 		ok = self.ticket(subject="Template tweak", status="Resolved", resolution_date=LAST_WED)
 		replies = {t: '{"unhappy": true, "reason": "Third time this month"}', ok: '{"unhappy": false}'}
 		with patch.object(wd, "_llm", side_effect=lambda msgs: next(v for k, v in replies.items() if f"#{k}" in msgs[-1]["content"])):
+			wd.stamp_closed_on()
 			flagged = wd.check_unhappy(MONDAY - timedelta(days=7), MONDAY)
 		self.assertEqual(flagged, [str(t)])
 		self.assertEqual(frappe.db.get_value("HD Ticket", t, ["unhappy", "unhappy_reason"]), (1, "Third time this month"))
@@ -100,12 +129,14 @@ class TestUnhappy(_DB):
 
 	def test_unhappy_covers_db_set_value_close(self):
 		t = self.ticket(status="Closed", modified=LAST_WED)  # no resolution_date, like wa._set_ticket_status
+		wd.stamp_closed_on()
 		with patch.object(wd, "_llm", return_value='{"unhappy": true, "reason": "Angry"}'):
 			self.assertEqual(wd.check_unhappy(MONDAY - timedelta(days=7), MONDAY), [str(t)])
 
 
 class TestDigest(_DB):
 	def build(self, overdue=150000.0):
+		wd.stamp_closed_on()
 		with patch.object(wd, "overdue_total", return_value=overdue):
 			return wd.build(MONDAY)
 
@@ -149,7 +180,7 @@ class TestDigest(_DB):
 		self.assertNotIn("KES 0", self.build(overdue=None))
 
 	def test_overdue_sums_rows(self):
-		rows = [{"outstanding_amount": 100.5}, {"outstanding_amount": 200}]
+		rows = [{"base_outstanding_amount": 100.5}, {"base_outstanding_amount": 200}]
 		with patch.object(wd.erpnext_remote, "call", return_value={"ok": True, "data": rows, "error": None}) as c:
 			self.assertEqual(wd.overdue_total(), 300.5)
 		self.assertEqual(c.call_args[0][0], "frappe.client.get_list")
@@ -160,7 +191,7 @@ class TestDigest(_DB):
 	def test_send_disabled_does_nothing(self):
 		frappe.db.set_single_value("HD Weekly Digest Settings", {"enabled": 0, "raven_channel": "erp-support-actions"})
 		with patch.object(wd.raven_bridge, "post") as post:
-			wd.send(MONDAY)
+			wd.send_now(MONDAY)
 		post.assert_not_called()
 
 	def test_send_posts_to_digest_channel(self):
@@ -169,7 +200,7 @@ class TestDigest(_DB):
 		frappe.clear_document_cache("HD Weekly Digest Settings")
 		with patch.object(wd.raven_bridge, "post") as post, patch.object(wd, "overdue_total", return_value=0.0), \
 				patch.object(wd, "_llm", return_value='{"unhappy": false}'):
-			wd.send(MONDAY)
+			wd.send_now(MONDAY)
 		post.assert_called_once()
 		self.assertEqual(post.call_args.kwargs, {"channel": "erp-support-actions", "user": "Administrator"})
 

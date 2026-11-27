@@ -102,6 +102,8 @@ class HDTicket(Document):
         Only interactive agent saves: background jobs, auto-close (ignore_validate), merges
         and payment-reminder tickets are exempt.
         """
+        if self.ticket_type in ("Software", DEFAULT_TICKET_TYPE):
+            self.charge = None  # covered or unknown work is never billable
         if (
             self.status_category != "Resolved"
             or not self.has_value_changed("status_category")

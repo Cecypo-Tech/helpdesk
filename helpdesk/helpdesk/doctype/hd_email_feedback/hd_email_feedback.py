@@ -42,6 +42,7 @@ class HDEmailFeedback(Document):
         ticket_doc.feedback_rating = self.feedback_rating
         ticket_doc.feedback_extra = self.feedback_extra
         ticket_doc.status = "Closed"
+        ticket_doc.flags.skip_work_type = True  # the customer closes via feedback, not an agent
         ticket_doc.save(ignore_permissions=True)
 
         self.ticket = ticket_doc.name
