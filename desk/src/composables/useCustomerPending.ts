@@ -1,5 +1,5 @@
 import { createResource } from "frappe-ui";
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 // One request per ticket, shared by the Customer field, the (i) dialog and the
 // WhatsApp reply boxes, so they all turn red together and refresh together.
@@ -32,11 +32,13 @@ export function useCustomerPending(ticket: () => string | number | undefined) {
     (snapshot.value?.invoices || []).some((i: any) => i.days_overdue > 0)
   );
   const missingCustomer = computed(() => !!res.value?.data?.missing_customer);
+  const billingContact = computed(() => !!res.value?.data?.billing_contact);
   return {
     snapshot,
     erpUrl: computed(() => (res.value?.data?.erp_url || "").replace(/\/$/, "")),
     hasOverdue,
     missingCustomer,
+    billingContact,
     // Missing customer, or overdue invoices: either way the agent should notice.
     pending: computed(() => missingCustomer.value || hasOverdue.value),
     // A request already in flight started before the save and would be reused
@@ -48,4 +50,20 @@ export function useCustomerPending(ticket: () => string | number | undefined) {
       r.reload();
     },
   };
+}
+
+// The (i) dialog hands text to whichever WhatsApp reply box shows this ticket.
+const replyInsert = ref<{ ticket: string; text: string; at: number } | null>(null);
+
+export function sendToReply(ticket: string | number, text: string) {
+  replyInsert.value = { ticket: String(ticket), text, at: Date.now() };
+}
+
+export function onReplyInsert(
+  ticket: () => string | number | undefined,
+  apply: (text: string) => void
+) {
+  watch(replyInsert, (v) => {
+    if (v && v.ticket === String(ticket())) apply(v.text);
+  });
 }

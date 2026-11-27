@@ -21,7 +21,16 @@
         <div v-if="!snap.invoices?.length" class="text-ink-gray-5">
           No unpaid invoices.
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-if="snap.invoices?.length" class="flex items-center gap-3">
+          <Button variant="subtle" @click="toReply">
+            <template #prefix><LucideMessageSquare class="size-4" /></template>
+            Copy to WhatsApp reply
+          </Button>
+          <span v-if="!billingContact" class="text-sm text-ink-amber-3">
+            Not a billing contact — check before sending amounts.
+          </span>
+        </div>
+        <div v-if="snap.invoices?.length" class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="text-ink-gray-5 text-left">
               <tr>
@@ -72,10 +81,12 @@
 </template>
 
 <script setup lang="ts">
-import { Dialog } from "frappe-ui";
+import { Button, Dialog, toast } from "frappe-ui";
 import { computed, ref } from "vue";
 import LucideInfo from "~icons/lucide/info";
-import { useCustomerPending } from "@/composables/useCustomerPending";
+import LucideMessageSquare from "~icons/lucide/message-square";
+import { invoiceMessage } from "@/utils/invoiceMessage";
+import { sendToReply, useCustomerPending } from "@/composables/useCustomerPending";
 
 // Agent-only figures from ERPNext (powerpack's customer snapshot). Hidden when
 // ERPNext can't answer or the ticket has no linked ERPNext customer.
@@ -83,9 +94,22 @@ const props = defineProps<{ ticket?: string | number; customer?: string }>();
 const show = ref(false);
 
 // Reloaded by TicketDetailsTab once a customer change is saved.
-const { snapshot: snap, erpUrl, hasOverdue } = useCustomerPending(
+const { snapshot: snap, erpUrl, hasOverdue, billingContact } = useCustomerPending(
   () => props.ticket
 );
+
+// Into the reply box (when the WhatsApp tab is open) and the clipboard (when it isn't).
+async function toReply() {
+  const text = invoiceMessage(snap.value, title.value);
+  if (props.ticket) sendToReply(props.ticket, text);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // clipboard needs https or localhost; the reply box still has it
+  }
+  show.value = false;
+  toast.success("Added to the WhatsApp reply (also copied)");
+}
 const title = computed(() => snap.value?.customer_name || props.customer);
 
 function money(v: number | null | undefined) {
