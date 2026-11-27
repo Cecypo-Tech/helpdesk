@@ -177,12 +177,12 @@ def overdue_total() -> float | None:
 		"doctype": "Sales Invoice",
 		"filters": json.dumps([["docstatus", "=", 1], ["outstanding_amount", ">", 0],
 		                       ["due_date", "<", str(getdate())]]),
-		"fields": json.dumps(["base_outstanding_amount"]),
+		"fields": json.dumps(["outstanding_amount"]),  # company currency already
 		"limit_page_length": 0,
 	})
 	if not res.get("ok") or not isinstance(res.get("data"), list):
 		return None
-	return sum(float(r.get("base_outstanding_amount") or 0) for r in res["data"])
+	return sum(float(r.get("outstanding_amount") or 0) for r in res["data"])
 
 
 def _kes(v) -> str:

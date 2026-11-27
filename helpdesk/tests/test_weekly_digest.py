@@ -183,10 +183,12 @@ class TestDigest(_DB):
 		self.assertNotIn("KES 0", self.build(overdue=None))
 
 	def test_overdue_sums_rows(self):
-		rows = [{"base_outstanding_amount": 100.5}, {"base_outstanding_amount": 200}]
+		rows = [{"outstanding_amount": 100.5}, {"outstanding_amount": 200}]
 		with patch.object(wd.erpnext_remote, "call", return_value={"ok": True, "data": rows, "error": None}) as c:
 			self.assertEqual(wd.overdue_total(), 300.5)
 		self.assertEqual(c.call_args[0][0], "frappe.client.get_list")
+		# Sales Invoice has no base_outstanding_amount; outstanding_amount is already company currency.
+		self.assertEqual(c.call_args[0][1]["fields"], '["outstanding_amount"]')
 
 	def test_quiet_week_line(self):
 		self.assertIn("Quiet week", self.build(overdue=0.0))
