@@ -281,3 +281,48 @@ class TestPatch(unittest.TestCase):
 		remove_subject_only_embeddings.execute()
 		self.assertEqual(frappe.get_all("HD Ticket Embedding", pluck="ticket"), [str(b)])
 		frappe.db.rollback()
+
+
+class TestProductScope(TestVotes):
+	def test_note_takes_ticket_product_and_shows_it(self):
+		if not frappe.db.exists("HD Product", "Raminian QA"):
+			frappe.get_doc({"doctype": "HD Product", "product_name": "Raminian QA"}).insert(ignore_permissions=True)
+		t = self.closed_ticket(hd_product="Raminian QA")
+		with patch.object(learn, "_llm", return_value=GOOD), patch.object(learn.raven_bridge, "post") as post:
+			learn.run(NOW)
+		self.assertEqual(self.note(t).product, "Raminian QA")
+		self.assertIn("Raminian QA", post.call_args.args[0])
+		self.vote = {"Approve": ["a@example.com"]}
+		learn.run(NOW)
+		self.assertEqual(frappe.db.get_value("HD Ticket Embedding", {"ticket": t}, "product"), "Raminian QA")
+
+	def test_product_edit_on_approved_note_reembeds(self):
+		for p in ("Raminian QA", "Imara QA"):
+			if not frappe.db.exists("HD Product", p):
+				frappe.get_doc({"doctype": "HD Product", "product_name": p}).insert(ignore_permissions=True)
+		t = self.closed_ticket(hd_product="Raminian QA")
+		with patch.object(learn, "_llm", return_value=GOOD):
+			learn.run(NOW)
+		self.vote = {"Approve": ["a@example.com"]}
+		learn.run(NOW)
+		n = self.note(t)
+		n.product = "Imara QA"
+		n.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("HD Ticket Embedding", {"ticket": t}, "product"), "Imara QA")
+
+
+class TestSearchScope(unittest.TestCase):
+	def test_search_returns_only_same_product(self):
+		from helpdesk.integrations import embeddings
+
+		rows = [
+			{"subject": "R", "resolution_details": "raminian fix", "embedding": [1.0, 0.0], "product": "Raminian"},
+			{"subject": "E", "resolution_details": "erpnext fix", "embedding": [1.0, 0.0], "product": "ERPNext Support"},
+			{"subject": "N", "resolution_details": "generic fix", "embedding": [1.0, 0.0], "product": None},
+		]
+		with patch.object(embeddings, "embed", return_value=[1.0, 0.0]), \
+				patch.object(embeddings, "_load_embeddings", return_value=rows):
+			got = [r["resolution_details"] for r in embeddings.search_resolved_tickets("q", top_k=5, product="Raminian")]
+			self.assertEqual(got, ["raminian fix"])
+			got = [r["resolution_details"] for r in embeddings.search_resolved_tickets("q", top_k=5)]
+			self.assertEqual(got, ["generic fix"])

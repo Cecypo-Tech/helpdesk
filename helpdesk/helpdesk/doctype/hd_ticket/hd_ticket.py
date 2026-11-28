@@ -118,6 +118,8 @@ class HDTicket(Document):
             frappe.throw(_("Pick a work type before closing"))
         if self.ticket_type != "Software" and not self.charge:
             frappe.throw(_("Pick Charge or Waive before closing"))
+        if not self.get("hd_product"):
+            frappe.throw(_("Pick a product before closing"))
 
     def before_save(self):
         self.apply_sla()

@@ -7,6 +7,7 @@
  "field_order": [
   "ticket",
   "subject",
+  "product",
   "status",
   "problem",
   "fix",
@@ -31,6 +32,14 @@
    "label": "Subject",
    "in_list_view": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "options": "HD Product",
+   "label": "Product",
+   "in_list_view": 1,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "status",
@@ -73,7 +82,7 @@
   }
  ],
  "links": [],
- "modified": "2026-11-27 00:00:00.000000",
+ "modified": "2026-11-28 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "HD Learned Note",

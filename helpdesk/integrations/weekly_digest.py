@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import frappe
 from frappe.utils import add_to_date, escape_html, get_url, getdate, now_datetime
 
+from helpdesk import entitlement
 from helpdesk.consts import WORK_TYPES
 from helpdesk.integrations import erpnext_remote, raven_bridge
 
@@ -142,6 +143,43 @@ def guess_work_types(now: datetime | None = None) -> int:
 		frappe.db.set_value("HD Ticket", name, values, update_modified=False)
 		frappe.db.commit()  # nosemgrep: one ticket per LLM call, keep progress if the job dies
 	return typed
+
+
+def guess_products(now: datetime | None = None) -> int:
+	"""Fill in the product on open tickets: the customer's only product, else ask the LLM."""
+	now = now or now_datetime()
+	products = frappe.get_all("HD Product", filters={"disabled": 0}, pluck="name")
+	if not products:
+		return 0
+	skip = _reminder_tickets()
+	names = frappe.get_all(
+		"HD Ticket",
+		filters={"status_category": "Open", "hd_product": ["is", "not set"], "product_guessed": 0,
+		         "creation": ["<", add_to_date(now, hours=-1)]},
+		pluck="name", order_by="creation desc", limit=GUESS_BATCH + len(skip),
+	)
+	by_lower = {p.lower(): p for p in products}
+	prompt = ("Which of our products is this IT support ticket about? Products:\n"
+	          + "\n".join(f"- {p}" for p in products)
+	          + "\nAnswer with the product name only, or None if it is not clear.")
+	found = 0
+	for name in [n for n in names if str(n) not in skip][:GUESS_BATCH]:
+		guess = entitlement.resolve_product_for_ticket(name)  # the customer's only product
+		if guess not in products:
+			try:
+				answer = _llm([{"role": "system", "content": prompt},
+				               {"role": "user", "content": _transcript(name)}])
+			except Exception:
+				frappe.log_error(title="Product guess failed")
+				continue  # retry next hour
+			guess = by_lower.get((answer or "").strip().strip(".").lower())
+		values = {"product_guessed": 1}
+		if guess:
+			values["hd_product"] = guess
+			found += 1
+		frappe.db.set_value("HD Ticket", name, values, update_modified=False)
+		frappe.db.commit()  # nosemgrep: one ticket per LLM call
+	return found
 
 
 def _closed_between(start: datetime, end: datetime) -> list[str]:

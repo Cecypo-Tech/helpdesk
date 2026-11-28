@@ -67,7 +67,7 @@ def _load_embeddings() -> list[dict]:
 
 	rows = frappe.db.sql(
 		"""
-		SELECT ticket, subject, resolution_details, embedding
+		SELECT ticket, subject, resolution_details, embedding, product
 		FROM `tabHD Ticket Embedding`
 		WHERE embedding IS NOT NULL AND embedding != ''
 		ORDER BY creation DESC
@@ -83,6 +83,7 @@ def _load_embeddings() -> list[dict]:
 				"subject": row.subject or "",
 				"resolution_details": row.resolution_details or "",
 				"embedding": json.loads(row.embedding),
+				"product": row.product or None,
 			})
 		except Exception:
 			continue
@@ -91,8 +92,11 @@ def _load_embeddings() -> list[dict]:
 	return result
 
 
-def search_resolved_tickets(query: str, top_k: int = 3) -> list[dict]:
+def search_resolved_tickets(query: str, top_k: int = 3, product: str | None = None) -> list[dict]:
 	"""Return up to top_k resolved tickets semantically similar to query.
+
+	Only notes for the same product: a Raminian fix must never answer an ERPNext
+	question. With no product known, only notes that have none.
 
 	Each result has keys: subject, resolution_details.
 	Returns empty list on any failure so the caller always gets a safe value.
@@ -109,6 +113,8 @@ def search_resolved_tickets(query: str, top_k: int = 3) -> list[dict]:
 
 	scored = []
 	for item in embeddings:
+		if (item.get("product") or None) != (product or None):
+			continue
 		sim = cosine_similarity(query_vec, item["embedding"])
 		if sim >= _MIN_SIMILARITY:
 			scored.append({
