@@ -37,6 +37,7 @@ class _Base(unittest.TestCase):
 			patch.object(learn.raven_bridge, "create_poll", side_effect=self._poll),
 			patch.object(learn.raven_bridge, "votes", side_effect=lambda m, **k: self.vote),
 			patch.object(learn.raven_bridge, "close_poll", side_effect=lambda p, **k: self.closed.append(p)),
+			patch.object(learn.raven_bridge, "post"),
 			patch.object(learn, "_embed", return_value=[0.1, 0.2]),
 			patch.object(frappe.db, "commit"),  # keep test rows inside the rolled-back transaction
 		]
@@ -105,13 +106,28 @@ class TestDraft(_Base):
 
 	def test_poll_question_has_links(self):
 		t = self.closed_ticket()
-		with patch.object(learn, "_llm", return_value=GOOD):
+		with patch.object(learn, "_llm", return_value=GOOD), \
+				patch.object(learn.raven_bridge, "post") as post:
 			learn.run(NOW)
-		q, k = self.polls[0]
-		self.assertIn(f"/app/hd-learned-note/{self.note(t).name}", q)
-		self.assertIn(f"/helpdesk/tickets/{t}", q)
-		self.assertIn("Receipt printer prints blank", q)
-		self.assertEqual(k, {"channel": "erp-support-actions", "user": "Administrator", "options": ("Approve", "Skip")})
+		html, k = post.call_args.args[0], post.call_args.kwargs
+		name = self.note(t).name
+		self.assertIn(f'<a href="http://', html)
+		self.assertIn(f'/app/hd-learned-note/{name}">Edit</a>', html)
+		self.assertIn(f'/helpdesk/tickets/{t}">Ticket #{t}</a>', html)
+		self.assertIn("Receipt printer prints blank", html)
+		self.assertEqual(k, {"channel": "erp-support-actions", "user": "Administrator"})
+		q, pk = self.polls[0]
+		self.assertNotIn("http", q)  # the poll is just the question; links live in the message above
+		self.assertEqual(pk, {"channel": "erp-support-actions", "user": "Administrator", "options": ("Approve", "Skip")})
+
+	def test_note_text_is_escaped(self):
+		t = self.closed_ticket()
+		evil = json.dumps({"useful": True, "problem": "<script>x</script>", "fix": "a & b"})
+		with patch.object(learn, "_llm", return_value=evil), \
+				patch.object(learn.raven_bridge, "post") as post:
+			learn.run(NOW)
+		self.assertNotIn("<script>", post.call_args.args[0])
+		self.assertIn("a &amp; b", post.call_args.args[0])
 
 	def test_disabled_does_nothing(self):
 		frappe.db.set_single_value("Helpdesk Bot Settings", "learn_from_tickets", 0)

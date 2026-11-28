@@ -158,7 +158,7 @@ class TestDigest(_DB):
 		self.assertIn("150,000", text)
 		for name in (charged, old, sad):
 			self.assertIn(f"/helpdesk/tickets/{name}", text)
-		self.assertNotIn(f"/helpdesk/tickets/{waived})", text)
+		self.assertNotIn(f'/helpdesk/tickets/{waived}"', text)
 		self.assertIn(f"/app/hd-payment-reminder/{promised}", text)
 		self.assertIn("8,000", text)
 		self.assertIn(f"/app/hd-payment-reminder/{held}", text)
@@ -173,8 +173,8 @@ class TestDigest(_DB):
 		rem = self.ticket(subject="Payment reminder", opening_date=long_ago)
 		self.reminder(status="Sent", ticket=rem)
 		text = self.build()
-		self.assertNotIn(f"/helpdesk/tickets/{paused})", text)
-		self.assertNotIn(f"/helpdesk/tickets/{rem})", text)
+		self.assertNotIn(f'/helpdesk/tickets/{paused}"', text)
+		self.assertNotIn(f'/helpdesk/tickets/{rem}"', text)
 
 	def test_overdue_unreachable_says_so(self):
 		with patch.object(wd.erpnext_remote, "call", return_value={"ok": False, "data": None, "error": "down"}):
@@ -198,6 +198,15 @@ class TestDigest(_DB):
 		self.assertEqual(text.count("/helpdesk/tickets/"), 5)  # only the 5 newest listed
 		self.assertIn("Stale 0", text)
 		self.assertNotIn("Stale 11", text)
+
+	def test_digest_is_html_for_raven(self):
+		t = self.ticket(subject="Old <b>thing</b>", opening_date=MONDAY.date() - timedelta(days=5))
+		text = self.build()
+		self.assertIn(f'<a href="', text)
+		self.assertIn(f'/helpdesk/tickets/{t}">#{t}</a>', text)
+		self.assertIn("<strong>Overdue</strong>", text)
+		self.assertNotIn("**", text)
+		self.assertNotIn("<b>thing</b>", text)  # ticket subjects are escaped
 
 	def test_quiet_week_line(self):
 		self.assertIn("Quiet week", self.build(overdue=0.0))

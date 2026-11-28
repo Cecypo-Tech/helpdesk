@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timedelta
 
 import frappe
-from frappe.utils import get_url, now_datetime
+from frappe.utils import escape_html, get_url, now_datetime
 
 from helpdesk.integrations import raven_bridge
 from helpdesk.integrations.weekly_digest import _reminder_tickets, _transcript
@@ -105,14 +105,20 @@ def post_polls() -> int:
 	posted = 0
 	for n in frappe.get_all(NOTE, filters={"status": "Pending", "poll_id": ["is", "not set"]},
 	                        fields=["name", "ticket", "problem", "fix"], order_by="creation", limit=POLL_BATCH):
-		question = (
-			f"📘 Teach the bot this? (ticket #{n.ticket})\n"
-			f"Problem: {n.problem}\nFix: {n.fix}\n"
-			f"Edit: {base}/app/hd-learned-note/{n.name} · Ticket: {base}/helpdesk/tickets/{n.ticket}"
+		# Raven renders message HTML but not poll text: the note and its links go in a
+		# message, the poll underneath just asks.
+		note_html = (
+			f"<p>📘 <strong>Teach the bot this?</strong> "
+			f'<a href="{base}/helpdesk/tickets/{n.ticket}">Ticket #{n.ticket}</a> · '
+			f'<a href="{base}/app/hd-learned-note/{n.name}">Edit</a><br>'
+			f"<strong>Problem:</strong> {escape_html(n.problem or '')}<br>"
+			f"<strong>Fix:</strong> {escape_html(n.fix or '')}</p>"
 		)
 		try:
+			raven_bridge.post(note_html, channel=s.learn_raven_channel, user=s.learn_raven_user)
 			poll_id, message_id = raven_bridge.create_poll(
-				question, channel=s.learn_raven_channel, user=s.learn_raven_user, options=("Approve", "Skip"))
+				f"📘 Teach the bot the note above? (ticket #{n.ticket})",
+				channel=s.learn_raven_channel, user=s.learn_raven_user, options=("Approve", "Skip"))
 		except Exception:
 			frappe.log_error(title="Learned note poll failed")
 			break  # Raven down: try again next hour

@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timedelta
 
 import frappe
-from frappe.utils import add_to_date, get_url, getdate, now_datetime
+from frappe.utils import add_to_date, escape_html, get_url, getdate, now_datetime
 
 from helpdesk.consts import WORK_TYPES
 from helpdesk.integrations import erpnext_remote, raven_bridge
@@ -195,40 +195,50 @@ def _week(now: datetime) -> tuple[datetime, datetime]:
 	return this_monday - timedelta(days=7), this_monday
 
 
+def _a(url: str, label: str) -> str:
+	return f'<a href="{url}">{escape_html(str(label))}</a>'
+
+
+def _section(title: str, lines: list[str]) -> str:
+	return f"<p><strong>{title}</strong><br>" + "<br>".join(lines) + "</p>"
+
+
 def build(now: datetime) -> str:
+	"""Raven renders HTML, not markdown: links must be <a> tags, text escaped."""
 	base = get_url()
-	tlink = lambda n, s: f"[#{n}]({base}/helpdesk/tickets/{n}) {s or ''}".rstrip()  # noqa: E731
-	rlink = lambda n, c: f"[{c}]({base}/app/hd-payment-reminder/{n})"  # noqa: E731
+	tlink = lambda n, s: f"{_a(f'{base}/helpdesk/tickets/{n}', f'#{n}')} {escape_html(s or '')}".rstrip()  # noqa: E731
+	rlink = lambda n, c: _a(f"{base}/app/hd-payment-reminder/{n}", c)  # noqa: E731
 	start, end = _week(now)
 	skip = _reminder_tickets()
 	sections = []
 
 	total = overdue_total()
 	if total is None:
-		sections.append("**Overdue**\nCouldn't read ERPNext.")
+		sections.append(_section("Overdue", ["Couldn't read ERPNext."]))
 	elif total > 0:
-		sections.append(f"**Overdue**\n{_kes(total)} past due.")
+		sections.append(_section("Overdue", [f"{_kes(total)} past due."]))
 
 	week_end = getdate(end) + timedelta(days=6)
 	promises = frappe.get_all(REMINDER, filters={"status": "Promised", "promise_date": ["between", [getdate(end), week_end]]},
 	                          fields=["name", "hd_customer", "total", "promise_date"], order_by="promise_date")
 	if promises:
-		sections.append("**Promises due this week**\n" + "\n".join(
-			f"- {rlink(p.name, p.hd_customer)}: {_kes(p.total)} on {p.promise_date:%a %d %b}" for p in promises))
+		sections.append(_section("Promises due this week", [
+			f"• {rlink(p.name, p.hd_customer)}: {_kes(p.total)} on {p.promise_date:%a %d %b}" for p in promises]))
 
 	held = frappe.get_all(REMINDER, filters={"status": "Held", "hold_reason": ["like", "Unallocated payment%"]},
 	                      fields=["name", "hd_customer", "advance_amount"])
 	if held:
-		sections.append("**Unallocated money**\n" + "\n".join(
-			f"- {rlink(h.name, h.hd_customer)}: {_kes(h.advance_amount)}" for h in held))
+		sections.append(_section("Unallocated money", [
+			f"• {rlink(h.name, h.hd_customer)}: {_kes(h.advance_amount)}" for h in held]))
 
 	closed = _closed_between(start, end)
 	charged = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "charge": "Charge",
 	                                  "ticket_type": ["!=", "Software"]},
 	                         fields=["name", "subject", "customer", "ticket_type"], order_by="name")
 	if charged:
-		sections.append("**Chargeable jobs last week**\n" + "\n".join(
-			f"- {tlink(t.name, t.subject)} · {t.customer or 'no customer'} · {t.ticket_type}" for t in charged))
+		sections.append(_section("Chargeable jobs last week", [
+			f"• {tlink(t.name, t.subject)} · {escape_html(t.customer or 'no customer')} · {t.ticket_type}"
+			for t in charged]))
 
 	s = frappe.get_cached_doc(SETTINGS)
 	cutoff = getdate(now) - timedelta(days=s.open_days or 3)
@@ -237,24 +247,24 @@ def build(now: datetime) -> str:
 	         if str(t.name) not in skip]
 	if stale:
 		days = s.open_days or 3
-		sections.append(f"**Open**\n[{len(stale)} tickets open more than {days} days]({base}/helpdesk/tickets)"
-		                ", newest:\n" + "\n".join(
-			f"- {tlink(t.name, (t.subject or '')[:60])} (since {t.opening_date:%d %b})" for t in stale[:STALE_CAP]))
+		sections.append(_section("Open", [
+			_a(f"{base}/helpdesk/tickets", f"{len(stale)} tickets open more than {days} days") + ", newest:",
+			*[f"• {tlink(t.name, (t.subject or '')[:60])} (since {t.opening_date:%d %b})" for t in stale[:STALE_CAP]]]))
 
 	sad = frappe.get_all("HD Ticket", filters={"name": ["in", closed or [""]], "unhappy": 1},
 	                     fields=["name", "subject", "unhappy_reason"], order_by="name")
 	sad = [t for t in sad if str(t.name) not in skip]
 	if sad:
-		sections.append("**Unhappy customers**\n" + "\n".join(
-			f"- {tlink(t.name, t.subject)}: {t.unhappy_reason}" for t in sad))
+		sections.append(_section("Unhappy customers", [
+			f"• {tlink(t.name, t.subject)}: {escape_html(t.unhappy_reason or '')}" for t in sad]))
 
 	waiting = frappe.db.count("HD Learned Note", {"status": "Pending"})
 	if waiting:
-		sections.append(f"**Bot notes**\n[{waiting} note{'s' if waiting > 1 else ''} waiting for approval]"
-		                f"({base}/app/hd-learned-note?status=Pending)")
+		sections.append(_section("Bot notes", [_a(f"{base}/app/hd-learned-note?status=Pending",
+		                                          f"{waiting} note{'s' if waiting > 1 else ''} waiting for approval")]))
 
-	head = f"📋 Monday digest, week of {start:%d %b}"
-	return head + "\n\n" + ("\n\n".join(sections) if sections else "Quiet week — nothing to flag.")
+	head = f"<p>📋 Monday digest, week of {start:%d %b}</p>"
+	return head + ("".join(sections) if sections else "<p>Quiet week — nothing to flag.</p>")
 
 
 def send() -> None:
