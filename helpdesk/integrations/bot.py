@@ -584,7 +584,8 @@ def process_message(msg_name: str, channel: str) -> None:
 	resolved_context = ""
 	try:
 		from helpdesk.integrations.embeddings import search_resolved_tickets
-		similar = search_resolved_tickets(text, top_k=2)
+		similar = search_resolved_tickets(
+			text, top_k=2, product=entitlement.resolve_product_for_ticket(ticket_name))
 		if similar:
 			parts = []
 			for r in similar:
@@ -706,7 +707,8 @@ def suggest_agent_reply(ticket: str, channel: str = "wa_line") -> str:
 	try:
 		from helpdesk.integrations.embeddings import search_resolved_tickets
 
-		similar = search_resolved_tickets(last_customer_msg, top_k=2)
+		similar = search_resolved_tickets(
+			last_customer_msg, top_k=2, product=entitlement.resolve_product_for_ticket(ticket))
 		if similar:
 			parts = [
 				f"Past ticket: {r['subject']}\nResolution: {r['resolution_details'][:500]}"

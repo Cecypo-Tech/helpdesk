@@ -55,6 +55,7 @@ scheduler_events = {
         # so the decision lives in the function.
         "helpdesk.integrations.erpnext_sync.run_scheduled_sync",
         "helpdesk.integrations.weekly_digest.guess_work_types",
+        "helpdesk.integrations.weekly_digest.guess_products",
     ],
     # Long queue: one fresh ERP snapshot per billing customer can outlast the default timeout.
     # Off until HD Payment Reminder Settings.enabled; sends only Mon–Sat 08–18.

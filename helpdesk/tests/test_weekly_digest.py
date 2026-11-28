@@ -90,6 +90,51 @@ class TestGuess(_DB):
 		self.assertNotIn(frappe.db.get_value("HD Ticket", t, "ticket_type"), wd.WORK_TYPES)
 
 
+class TestGuessProduct(_DB):
+	def product(self, name):
+		if not frappe.db.exists("HD Product", name):
+			frappe.get_doc({"doctype": "HD Product", "product_name": name}).insert(ignore_permissions=True)
+		return name
+
+	def test_llm_picks_an_enabled_product_once(self):
+		self.product("Raminian QA")
+		t = self.ticket(creation=datetime.now() - timedelta(hours=2))
+		with patch.object(wd, "_llm", return_value="raminian qa") as llm:
+			self.assertEqual(wd.guess_products(), 1)
+			wd.guess_products()
+		self.assertEqual(llm.call_count, 1)
+		self.assertEqual(frappe.db.get_value("HD Ticket", t, ["hd_product", "product_guessed"]), ("Raminian QA", 1))
+
+	def test_sole_entitlement_wins_without_llm(self):
+		t = self.ticket(creation=datetime.now() - timedelta(hours=2))
+		with patch.object(wd.entitlement, "resolve_product_for_ticket", return_value="Imara QA"), \
+				patch.object(wd, "_llm") as llm:
+			self.product("Imara QA")
+			wd.guess_products()
+		llm.assert_not_called()
+		self.assertEqual(frappe.db.get_value("HD Ticket", t, "hd_product"), "Imara QA")
+
+	def test_unknown_answer_leaves_blank_and_llm_error_retries(self):
+		self.product("Raminian QA")
+		t = self.ticket(creation=datetime.now() - timedelta(hours=2))
+		with patch.object(wd, "_llm", side_effect=RuntimeError("down")):
+			wd.guess_products()
+		self.assertEqual(frappe.db.get_value("HD Ticket", t, "product_guessed"), 0)
+		with patch.object(wd, "_llm", return_value="None"):
+			wd.guess_products()
+		self.assertEqual(frappe.db.get_value("HD Ticket", t, ["hd_product", "product_guessed"]), (None, 1))
+
+	def test_skips_tickets_with_product_and_reminders(self):
+		self.product("Raminian QA")
+		old = datetime.now() - timedelta(hours=2)
+		self.ticket(creation=old, hd_product="Raminian QA")
+		rem = self.ticket(creation=old)
+		self.reminder(status="Sent", ticket=rem)
+		with patch.object(wd, "_llm", return_value="Raminian QA") as llm:
+			self.assertEqual(wd.guess_products(), 0)
+		llm.assert_not_called()
+
+
 class TestReviewFixes(_DB):
 	def test_guess_llm_error_retries_later(self):
 		t = self.ticket(creation=datetime.now() - timedelta(hours=2))

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import frappe
 from frappe.utils import escape_html, get_url, now_datetime
 
+from helpdesk import entitlement
 from helpdesk.integrations import raven_bridge
 from helpdesk.integrations.weekly_digest import _reminder_tickets, _transcript
 
@@ -90,6 +91,7 @@ def draft(now: datetime) -> int:
 			"doctype": NOTE,
 			"ticket": name,
 			"subject": frappe.db.get_value("HD Ticket", name, "subject"),
+			"product": entitlement.resolve_product_for_ticket(name),
 			"status": "Pending" if note["useful"] else "Not useful",
 			"problem": note["problem"],
 			"fix": note["fix"],
@@ -104,11 +106,12 @@ def post_polls() -> int:
 	base = get_url()
 	posted = 0
 	for n in frappe.get_all(NOTE, filters={"status": "Pending", "poll_id": ["is", "not set"]},
-	                        fields=["name", "ticket", "problem", "fix"], order_by="creation", limit=POLL_BATCH):
+	                        fields=["name", "ticket", "product", "problem", "fix"], order_by="creation", limit=POLL_BATCH):
 		# Raven renders message HTML but not poll text: the note and its links go in a
 		# message, the poll underneath just asks.
 		note_html = (
 			f"<p>📘 <strong>Teach the bot this?</strong> "
+			f"<strong>{escape_html(n.product or 'No product')}</strong> · "
 			f'<a href="{base}/helpdesk/tickets/{n.ticket}">Ticket #{n.ticket}</a> · '
 			f'<a href="{base}/app/hd-learned-note/{n.name}">Edit</a><br>'
 			f"<strong>Problem:</strong> {escape_html(n.problem or '')}<br>"
@@ -157,6 +160,7 @@ def approve(note_name: str) -> None:
 		"ticket": n.ticket,
 		"subject": n.subject,
 		"resolution_details": text,
+		"product": n.product or frappe.db.get_value("HD Ticket", n.ticket, "hd_product"),
 		"embedding": json.dumps(vec),
 	}).insert(ignore_permissions=True)  # after_insert invalidates the bot's cache
 

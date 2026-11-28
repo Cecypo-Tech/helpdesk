@@ -22,10 +22,17 @@ def _agent():
 		)
 
 
+def _product(name="Raminian QA"):
+	if not frappe.db.exists("HD Product", name):
+		frappe.get_doc({"doctype": "HD Product", "product_name": name}).insert(ignore_permissions=True)
+	return name
+
+
 class _Base(unittest.TestCase):
 	def setUp(self):
 		add_work_types.execute()
 		_agent()
+		_product()
 		self.ticket = make_ticket(subject="Printer offline")
 		frappe.set_user(AGENT)
 		frappe.local.request = frappe._dict(path="/api/method/frappe.client.set_value", method="POST", headers={})  # an interactive request
@@ -37,6 +44,7 @@ class _Base(unittest.TestCase):
 
 	def close(self, ticket=None, **fields):
 		t = frappe.get_doc("HD Ticket", (ticket or self.ticket).name)
+		fields.setdefault("hd_product", "Raminian QA")
 		t.update(fields)
 		t.status = "Resolved"
 		t.save(ignore_permissions=True)
@@ -73,6 +81,11 @@ class TestCloseRule(_Base):
 		with self.assertRaisesRegex(frappe.ValidationError, "Pick Charge or Waive before closing"):
 			self.close(ticket_type="Network")
 		self.assertEqual(self.close(ticket_type="Network", charge="Charge").status, "Resolved")
+
+	def test_agent_close_needs_product(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "Pick a product before closing"):
+			self.close(ticket_type="Software", hd_product=None)
+		self.assertEqual(self.close(ticket_type="Software").status, "Resolved")
 
 	def test_software_close_needs_no_charge(self):
 		self.assertEqual(self.close(ticket_type="Software").status, "Resolved")

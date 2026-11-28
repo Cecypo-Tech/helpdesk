@@ -16,6 +16,7 @@ class HDLearnedNote(Document):
 			learn.unlearn(self.ticket)
 		elif self.status == "Approved" and (
 			was != "Approved" or before.problem != self.problem or before.fix != self.fix
+			or before.product != self.product
 		):
 			learn.approve(self.name)
 		if was == "Pending" and self.status != "Pending" and self.poll_id:

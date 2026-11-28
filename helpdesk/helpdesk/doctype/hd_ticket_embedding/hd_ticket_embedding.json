@@ -7,6 +7,7 @@
  "field_order": [
   "ticket",
   "subject",
+  "product",
   "resolution_details",
   "embedding"
  ],
@@ -26,6 +27,12 @@
    "label": "Subject"
   },
   {
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "options": "HD Product",
+   "label": "Product"
+  },
+  {
    "fieldname": "resolution_details",
    "fieldtype": "Long Text",
    "label": "Resolution Details"
@@ -37,7 +44,7 @@
   }
  ],
  "links": [],
- "modified": "2026-06-06 00:00:00.000000",
+ "modified": "2026-11-28 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Helpdesk",
  "name": "HD Ticket Embedding",
